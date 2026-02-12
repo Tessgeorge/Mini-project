@@ -1,9 +1,33 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import SignIn from './pages/SignIn'
 import StudentDashboard from './pages/StudentDashboard'
 import MentorDashboard from './pages/MentorDashboard'
 import AdminDashboard from './pages/AdminDashboard'
 import ProtectedRoute from './components/ProtectedRoute'
+import StudentLayout from './components/StudentLayout'
+import supabase from './config/supabaseClient'
+
+function StudentRouteWrapper() {
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+      navigate('/signin');
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
+
+  return (
+    <ProtectedRoute allowedRoles={['student']}>
+      <StudentLayout onLogout={handleLogout}>
+        <StudentDashboard />
+      </StudentLayout>
+    </ProtectedRoute>
+  );
+}
 
 function App() {
   return (
@@ -13,11 +37,7 @@ function App() {
         <Route path="/signin" element={<SignIn />} />
         <Route
           path="/student"
-          element={
-            <ProtectedRoute allowedRoles={['student']}>
-              <StudentDashboard />
-            </ProtectedRoute>
-          }
+          element={<StudentRouteWrapper />}
         />
         <Route
           path="/mentor"
