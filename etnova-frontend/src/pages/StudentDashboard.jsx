@@ -141,6 +141,11 @@ export default function StudentDashboard() {
         .eq("project_id", proj.id)
         .order("role", { ascending: true });
 
+      console.log('🔍 Team members query for project:', proj.id);
+      console.log('👤 Current user role:', tm?.role);
+      console.log('📋 Team members fetched:', teamRows);
+      console.log('❌ Team error:', teamErr);
+
       if (teamErr) throw teamErr;
       setTeam(teamRows || []);
 

@@ -40,11 +40,22 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
                 throw projectsError;
             }
 
-            console.log('📋 Total projects fetched:', allProjects?.length || 0);
+            console.log('📋 Total projects fetched (with duplicates):', allProjects?.length || 0);
             console.log('Projects data:', allProjects);
 
+            // Deduplicate projects (Supabase returns one row per team member)
+            const uniqueProjectsMap = new Map();
+            (allProjects || []).forEach(project => {
+                if (!uniqueProjectsMap.has(project.id)) {
+                    uniqueProjectsMap.set(project.id, project);
+                }
+            });
+            const uniqueProjects = Array.from(uniqueProjectsMap.values());
+
+            console.log('📋 Unique projects after deduplication:', uniqueProjects.length);
+
             // Filter projects: not full (< 4 members) and user not already in
-            const available = (allProjects || []).filter(p => {
+            const available = uniqueProjects.filter(p => {
                 const memberCount = p.team_members?.length || 0;
                 const isAlreadyMember = p.team_members?.some(tm => tm.student_id === user.id);
 
