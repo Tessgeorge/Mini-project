@@ -24,14 +24,10 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
 
             console.log('🔍 Fetching projects for user:', user.id);
 
-            // Get all projects
+            // Step 1: Get all projects with team members count
             const { data: allProjects, error: projectsError } = await supabase
                 .from('projects')
-                .select(`
-          *,
-          team_members(student_id),
-          profiles!projects_created_by_fkey(full_name)
-        `)
+                .select('*, team_members(student_id)')
                 .eq('status', 'pending')
                 .order('created_at', { ascending: false });
 
@@ -40,19 +36,40 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
                 throw projectsError;
             }
 
-            console.log('📋 Total projects fetched (with duplicates):', allProjects?.length || 0);
-            console.log('Projects data:', allProjects);
+            console.log('📋 Total projects fetched:', allProjects?.length || 0);
 
-            // Deduplicate projects (Supabase returns one row per team member)
+            // Step 2: Get unique projects and fetch creator profiles
             const uniqueProjectsMap = new Map();
+            const creatorIds = new Set();
+
             (allProjects || []).forEach(project => {
                 if (!uniqueProjectsMap.has(project.id)) {
                     uniqueProjectsMap.set(project.id, project);
+                    if (project.created_by) {
+                        creatorIds.add(project.created_by);
+                    }
                 }
             });
-            const uniqueProjects = Array.from(uniqueProjectsMap.values());
 
-            console.log('📋 Unique projects after deduplication:', uniqueProjects.length);
+            // Step 3: Fetch all creator profiles in one query
+            const { data: creators } = await supabase
+                .from('profiles')
+                .select('id, full_name')
+                .in('id', Array.from(creatorIds));
+
+            // Create a map of creator ID to name
+            const creatorMap = new Map();
+            (creators || []).forEach(creator => {
+                creatorMap.set(creator.id, creator.full_name);
+            });
+
+            // Step 4: Attach creator names to projects
+            const uniqueProjects = Array.from(uniqueProjectsMap.values()).map(project => ({
+                ...project,
+                creator_name: creatorMap.get(project.created_by) || 'Unknown'
+            }));
+
+            console.log('📋 Unique projects with creators:', uniqueProjects);
 
             // Filter projects: not full (< 4 members) and user not already in
             const available = uniqueProjects.filter(p => {
@@ -60,6 +77,7 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
                 const isAlreadyMember = p.team_members?.some(tm => tm.student_id === user.id);
 
                 console.log(`Project "${p.title}":`, {
+                    creator: p.creator_name,
                     memberCount,
                     isAlreadyMember,
                     isFull: memberCount >= 4,
@@ -146,7 +164,7 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
                                         <div className="flex items-center gap-4 text-xs text-slate-500">
                                             <span className="flex items-center gap-1">
                                                 <span className="material-symbols-outlined text-sm">person</span>
-                                                Created by {project.profiles?.full_name || 'Unknown'}
+                                                Created by {project.creator_name}
                                             </span>
                                             <span className="flex items-center gap-1">
                                                 <span className="material-symbols-outlined text-sm">group</span>

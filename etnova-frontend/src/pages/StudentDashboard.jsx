@@ -528,13 +528,16 @@ export default function StudentDashboard() {
               {DOC_TYPES.map((t) => {
                 const d = latestDocByType[t];
                 return (
-                  <div key={t} className="rounded-xl border border-slate-200 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-black text-slate-900 capitalize">
-                          {t.replaceAll("_", " ")}
-                        </p>
-                        <p className="text-xs text-slate-500 mt-1">
+                  <div key={t} className="rounded-xl border border-slate-200 p-4 hover:border-slate-300 transition-all">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <p className="text-sm font-black text-slate-900 capitalize">
+                            {t.replaceAll("_", " ")}
+                          </p>
+                          <DocStatus status={d?.status || "missing"} />
+                        </div>
+                        <p className="text-xs text-slate-500 truncate">
                           {d ? d.file_name : "No file uploaded yet"}
                         </p>
                         {d?.uploaded_at && (
@@ -544,29 +547,37 @@ export default function StudentDashboard() {
                         )}
                       </div>
 
-                      <DocStatus status={d?.status || "missing"} />
-                    </div>
+                      <div className="flex items-center gap-2">
+                        {d?.file_url && (
+                          <a
+                            href={d.file_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="size-8 rounded-lg border border-slate-200 flex items-center justify-center hover:border-teal-500 hover:bg-teal-50 transition-all group"
+                            title="View file"
+                          >
+                            <span className="material-symbols-outlined text-lg text-slate-600 group-hover:text-teal-600">
+                              visibility
+                            </span>
+                          </a>
+                        )}
 
-                    <div className="mt-3 flex items-center justify-between">
-                      {d?.file_url ? (
-                        <a
-                          href={d.file_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-xs font-black hover:underline"
-                          style={{ color: '#00D2C4' }}
+                        <button
+                          className="size-8 rounded-lg flex items-center justify-center transition-all"
+                          style={{
+                            backgroundColor: d?.file_url ? '#f1f5f9' : '#00D2C4',
+                            border: d?.file_url ? '1px solid #e2e8f0' : 'none'
+                          }}
+                          title={d?.file_url ? 'Re-upload file' : 'Upload file'}
                         >
-                          Open
-                        </a>
-                      ) : (
-                        <span className="text-xs text-slate-400">—</span>
-                      )}
-
-                      <button
-                        className="text-xs font-black text-slate-900 hover:underline"
-                      >
-                        Upload / Re-upload
-                      </button>
+                          <span
+                            className="material-symbols-outlined text-lg"
+                            style={{ color: d?.file_url ? '#475569' : '#000' }}
+                          >
+                            {d?.file_url ? 'sync' : 'upload'}
+                          </span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
