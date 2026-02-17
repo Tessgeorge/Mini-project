@@ -1,6 +1,13 @@
 import React from "react";
 
-export default function TopBar({ title, subtitle = "Home", profile, onProfileClick, notificationCount = 0, onNotificationClick }) {
+export default function TopBar({
+  title,
+  subtitle = "Home",
+  profile,
+  onProfileClick,
+  notificationCount = 0,
+  onNotificationClick
+}) {
   return (
     <header className="flex items-center justify-between px-8 py-4 border-b border-slate-200 bg-white/80 backdrop-blur-md sticky top-0 z-10 w-full">
       <div className="flex items-center gap-4">

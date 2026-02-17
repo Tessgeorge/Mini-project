@@ -4,6 +4,7 @@ import TopBar from "../components/TopBar";
 import ProfileMenu from "../components/ProfileMenu";
 import CreateProjectModal from "../components/CreateProjectModal";
 import JoinProjectModal from "../components/JoinProjectModal";
+import JoinRequestsModal from "../components/JoinRequestsModal";
 import ProjectTracker from "../components/ProjectTracker";
 import ProfileSettingsModal from "../components/ProfileSettingsModal";
 import NotificationPanel from "../components/NotificationPanel";
@@ -78,6 +79,7 @@ export default function StudentDashboard() {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
+  const [showJoinRequests, setShowJoinRequests] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState([]);
@@ -196,54 +198,115 @@ export default function StudentDashboard() {
     loadData(); // Refresh to get updated profile
   };
 
-  // Generate notifications from documents and evaluations
+  const handleJoinRequestHandled = () => {
+    loadData(); // Refresh to update team members
+  };
+
+  // Generate notifications from documents, evaluations, and join requests
   useEffect(() => {
-    const newNotifications = [];
+    const loadNotifications = async () => {
+      const newNotifications = [];
 
-    // Document status notifications
-    documents.forEach((doc) => {
-      if (doc.status === 'approved') {
-        newNotifications.push({
-          id: `doc-${doc.id}`,
-          type: 'document_approved',
-          title: 'Document Approved',
-          message: `Your ${doc.document_type.replace('_', ' ')} has been approved by your mentor.`,
-          created_at: doc.updated_at || doc.uploaded_at,
-          read: false,
-        });
-      } else if (doc.status === 'needs_revision') {
-        newNotifications.push({
-          id: `doc-${doc.id}`,
-          type: 'document_rejected',
-          title: 'Revision Required',
-          message: `Your ${doc.document_type.replace('_', ' ')} needs revision. ${doc.feedback || ''}`,
-          created_at: doc.updated_at || doc.uploaded_at,
-          read: false,
-        });
-      }
-    });
-
-    // Evaluation notifications
-    evaluations.forEach((evaluation) => {
-      newNotifications.push({
-        id: `eval-${evaluation.id}`,
-        type: 'evaluation',
-        title: 'New Evaluation',
-        message: `You received ${evaluation.obtained_marks}/${evaluation.max_marks} marks for ${evaluation.evaluation_type}.`,
-        created_at: evaluation.created_at,
-        read: false,
+      // Document status notifications
+      documents.forEach((doc) => {
+        if (doc.status === 'approved') {
+          newNotifications.push({
+            id: `doc-${doc.id}`,
+            type: 'document_approved',
+            title: 'Document Approved',
+            message: `Your ${doc.document_type.replace('_', ' ')} has been approved by your mentor.`,
+            created_at: doc.updated_at || doc.uploaded_at,
+            read: false,
+          });
+        } else if (doc.status === 'needs_revision') {
+          newNotifications.push({
+            id: `doc-${doc.id}`,
+            type: 'document_rejected',
+            title: 'Revision Required',
+            message: `Your ${doc.document_type.replace('_', ' ')} needs revision. ${doc.feedback || ''}`,
+            created_at: doc.updated_at || doc.uploaded_at,
+            read: false,
+          });
+        }
       });
-    });
 
-    // Sort by date (newest first)
-    newNotifications.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    setNotifications(newNotifications);
-  }, [documents, evaluations]);
+      // Evaluation notifications
+      evaluations.forEach((evaluation) => {
+        newNotifications.push({
+          id: `eval-${evaluation.id}`,
+          type: 'evaluation',
+          title: 'New Evaluation',
+          message: `You received ${evaluation.obtained_marks}/${evaluation.max_marks} marks for ${evaluation.evaluation_type}.`,
+          created_at: evaluation.created_at,
+          read: false,
+        });
+      });
+
+      // Join request notifications (for leaders only)
+      if (myRole === 'leader') {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            // Get projects where user is leader
+            const { data: leaderProjects } = await supabase
+              .from('team_members')
+              .select('project_id')
+              .eq('student_id', user.id)
+              .eq('role', 'leader');
+
+            if (leaderProjects && leaderProjects.length > 0) {
+              const projectIds = leaderProjects.map(p => p.project_id);
+
+              // Get pending join requests
+              const { data: requests } = await supabase
+                .from('join_requests')
+                .select(`
+                  *,
+                  project:projects(title),
+                  student:profiles!student_id(full_name)
+                `)
+                .in('project_id', projectIds)
+                .eq('status', 'pending');
+
+              requests?.forEach((req) => {
+                newNotifications.push({
+                  id: `join-req-${req.id}`,
+                  type: 'join_request',
+                  title: 'New Join Request',
+                  message: `${req.student?.full_name || 'A student'} wants to join "${req.project?.title || 'your project'}"`,
+                  created_at: req.created_at,
+                  read: false,
+                  metadata: { requestId: req.id },
+                });
+              });
+            }
+          }
+        } catch (err) {
+          console.error('Failed to load join request notifications:', err);
+        }
+      }
+
+      // Sort by date (newest first)
+      newNotifications.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      setNotifications(newNotifications);
+    };
+
+    loadNotifications();
+  }, [documents, evaluations, myRole]);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
   const handleMarkAllAsRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  };
+
+  const handleNotificationClick = (notification) => {
+    // Open JoinRequestsModal for join request notifications
+    if (notification.type === 'join_request') {
+      setShowJoinRequests(true);
+      setShowNotifications(false);
+    }
+    // Add more handlers for other notification types as needed
   };
 
   // Latest doc per type
@@ -303,6 +366,7 @@ export default function StudentDashboard() {
               onClose={() => setShowNotifications(false)}
               notifications={notifications}
               onMarkAsRead={handleMarkAllAsRead}
+              onNotificationClick={handleNotificationClick}
             />
           </div>
         )}
@@ -336,6 +400,12 @@ export default function StudentDashboard() {
           isOpen={showJoinModal}
           onClose={() => setShowJoinModal(false)}
           onSuccess={handleProjectJoined}
+        />
+
+        <JoinRequestsModal
+          isOpen={showJoinRequests}
+          onClose={() => setShowJoinRequests(false)}
+          onRequestHandled={handleJoinRequestHandled}
         />
 
         <div className="px-6 md:px-8 py-6">
@@ -422,6 +492,7 @@ export default function StudentDashboard() {
             onClose={() => setShowNotifications(false)}
             notifications={notifications}
             onMarkAsRead={handleMarkAllAsRead}
+            onNotificationClick={handleNotificationClick}
           />
         </div>
       )}
@@ -443,6 +514,12 @@ export default function StudentDashboard() {
         onClose={() => setShowSettingsModal(false)}
         profile={profile}
         onSuccess={handleProfileUpdated}
+      />
+
+      <JoinRequestsModal
+        isOpen={showJoinRequests}
+        onClose={() => setShowJoinRequests(false)}
+        onRequestHandled={handleJoinRequestHandled}
       />
 
       <div className="px-6 md:px-8 py-6">

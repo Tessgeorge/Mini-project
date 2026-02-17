@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-export default function NotificationPanel({ isOpen, onClose, notifications, onMarkAsRead }) {
+export default function NotificationPanel({ isOpen, onClose, notifications, onMarkAsRead, onNotificationClick }) {
     const panelRef = useRef(null);
 
     // Close on click outside
@@ -32,6 +32,8 @@ export default function NotificationPanel({ isOpen, onClose, notifications, onMa
                 return 'star';
             case 'team_member':
                 return 'group_add';
+            case 'join_request':
+                return 'person_add';
             default:
                 return 'notifications';
         }
@@ -47,6 +49,8 @@ export default function NotificationPanel({ isOpen, onClose, notifications, onMa
                 return '#f59e0b'; // amber
             case 'team_member':
                 return '#3b82f6'; // blue
+            case 'join_request':
+                return '#00D2C4'; // teal
             default:
                 return '#64748b'; // slate
         }
@@ -88,6 +92,7 @@ export default function NotificationPanel({ isOpen, onClose, notifications, onMa
                                 key={notification.id}
                                 className={`px-5 py-4 hover:bg-slate-50 transition-colors cursor-pointer ${!notification.read ? 'bg-teal-50/30' : ''
                                     }`}
+                                onClick={() => onNotificationClick?.(notification)}
                             >
                                 <div className="flex gap-3">
                                     <div

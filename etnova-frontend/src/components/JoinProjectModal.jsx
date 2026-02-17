@@ -105,26 +105,43 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) throw new Error('Not authenticated');
 
-            const { error: joinError } = await supabase
-                .from('team_members')
+            // Check if user already has a pending request for this project
+            const { data: existingRequest } = await supabase
+                .from('join_requests')
+                .select('*')
+                .eq('project_id', projectId)
+                .eq('student_id', user.id)
+                .eq('status', 'pending')
+                .single();
+
+            if (existingRequest) {
+                throw new Error('You already have a pending request for this project');
+            }
+
+            // Send join request instead of directly joining
+            const { error: requestError } = await supabase
+                .from('join_requests')
                 .insert({
                     project_id: projectId,
                     student_id: user.id,
-                    role: 'member',
+                    status: 'pending',
                 });
 
-            if (joinError) {
-                if (joinError.code === '23505') {
-                    throw new Error('You are already a member of this project');
+            if (requestError) {
+                if (requestError.code === '23505') {
+                    throw new Error('You already have a pending request for this project');
                 }
-                throw joinError;
+                throw requestError;
             }
+
+            // Show success message
+            alert('Join request sent! The team leader will review your request.');
 
             onSuccess?.();
             onClose();
         } catch (err) {
-            console.error('Join project error:', err);
-            setError(err.message || 'Failed to join project');
+            console.error('Join request error:', err);
+            setError(err.message || 'Failed to send join request');
         } finally {
             setJoining(null);
         }
@@ -178,7 +195,7 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
                                         className="px-4 py-2 rounded-lg text-black font-bold text-sm hover:opacity-90 transition-all whitespace-nowrap"
                                         style={{ backgroundColor: '#00D2C4' }}
                                     >
-                                        {joining === project.id ? 'Joining...' : 'Join Team'}
+                                        {joining === project.id ? 'Sending...' : 'Request to Join'}
                                     </button>
                                 </div>
                             </div>
