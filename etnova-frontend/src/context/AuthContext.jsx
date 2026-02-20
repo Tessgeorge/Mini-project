@@ -30,6 +30,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let isMounted = true
+    let isInitialized = false
 
     const handleSession = async (nextSession) => {
       setSession(nextSession)
@@ -41,7 +42,11 @@ export function AuthProvider({ children }) {
         return
       }
 
-      setLoading(true)
+      // Only show loading spinner on first load, not on token refresh
+      if (!isInitialized) {
+        setLoading(true)
+      }
+
       try {
         const nextRole = await fetchUserRole(nextSession.user.id)
         if (isMounted) {
@@ -55,6 +60,7 @@ export function AuthProvider({ children }) {
       } finally {
         if (isMounted) {
           setLoading(false)
+          isInitialized = true
         }
       }
     }

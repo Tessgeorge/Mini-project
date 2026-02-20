@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import supabase from '../config/supabaseClient';
 
 export default function MyProject() {
-    const navigate = useNavigate();
     const [loading, setLoading] = useState(true);
     const [project, setProject] = useState(null);
     const [error, setError] = useState('');
@@ -67,14 +65,7 @@ export default function MyProject() {
                 <div className="text-center max-w-md">
                     <span className="material-symbols-outlined text-6xl text-slate-300 mb-4">folder_off</span>
                     <h2 className="text-xl font-black text-slate-900 mb-2">No Project Found</h2>
-                    <p className="text-slate-600 mb-6">You haven't joined or created a project yet.</p>
-                    <button
-                        onClick={() => navigate('/student')}
-                        className="px-6 py-3 rounded-xl font-bold text-sm hover:opacity-90 transition-all"
-                        style={{ backgroundColor: '#00D2C4', color: '#000' }}
-                    >
-                        Go to Dashboard
-                    </button>
+                    <p className="text-slate-600">You haven't joined or created a project yet.</p>
                 </div>
             </div>
         );
@@ -84,19 +75,11 @@ export default function MyProject() {
         <div className="min-h-screen bg-slate-50">
             {/* Header */}
             <header className="bg-white border-b border-slate-200 px-6 py-4">
-                <div className="max-w-7xl mx-auto flex items-center justify-between">
-                    <div>
-                        <h1 className="text-2xl font-black text-slate-900">{project.title}</h1>
-                        <p className="text-sm text-slate-500 mt-1">
-                            Status: <span className="font-medium capitalize">{project.status}</span>
-                        </p>
-                    </div>
-                    <button
-                        onClick={() => navigate('/student')}
-                        className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 font-bold text-sm hover:bg-slate-200 transition-all"
-                    >
-                        ← Back to Dashboard
-                    </button>
+                <div className="max-w-7xl mx-auto">
+                    <h1 className="text-2xl font-black text-slate-900">{project.title}</h1>
+                    <p className="text-sm text-slate-500 mt-1">
+                        Status: <span className="font-medium capitalize">{project.status}</span>
+                    </p>
                 </div>
             </header>
 

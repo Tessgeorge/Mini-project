@@ -12,6 +12,7 @@ function StudentRouteWrapper() {
 
   const handleLogout = async () => {
     try {
+      localStorage.removeItem('studentView'); // Reset to dashboard on next login
       await supabase.auth.signOut();
       navigate('/signin');
     } catch (error) {

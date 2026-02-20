@@ -60,6 +60,8 @@ export default function SignIn() {
         throw new Error('Your role is not assigned yet. Please contact support.')
       }
 
+      // Always start at dashboard on fresh login
+      localStorage.removeItem('studentView')
       navigate(destination, { replace: true })
     } catch (error) {
       setAuthError(error.message ?? 'Unable to sign in right now.')
@@ -74,8 +76,8 @@ export default function SignIn() {
       {/* Left Panel: Branding & Imagery */}
       <div className="relative hidden lg:flex lg:w-1/2 xl:w-7/12 bg-[#0F2322] items-center justify-center p-12 overflow-hidden">
         {/* Background Image with Overlay */}
-        <div 
-          className="absolute inset-0 z-0 opacity-25 bg-cover bg-center" 
+        <div
+          className="absolute inset-0 z-0 opacity-25 bg-cover bg-center"
           style={{ backgroundImage: "url('https://lh3.googleusercontent.com/aida-public/AB6AXuDerO4nzzt1v0pAMHtJiTrjuB8kBs2fMFMLbjrGkjdgCha8UJvgglW4emgfOA4GEP5sL4gZaZais8RqNq_C4UyYnmFLX-Jdbe5xN1YOu8bLl6_GTReGi3tIDgd4UmniIz9lUSiaVwwGbsggeE5SrDft1KkYTd_nm51aFDzDVplP_mLGQBEiZYg4ICQAM1hCpTvoGqevlNxLNuqgsMU7kIX3nAeJVcSNnMQnNUX8PDIoevLjEDPPPn6Vw-rj1ytRBTbbxDCz_VdwXqY')" }}
         ></div>
 
@@ -104,15 +106,15 @@ export default function SignIn() {
             </div>
             <h1 className="text-4xl font-extrabold tracking-tight">Etnova</h1>
           </div>
-          
+
           <h2 className="text-5xl font-black leading-tight mb-6">
             Empowering Academic <span style={{ color: ACCENT_COLOR }}>Excellence</span>
           </h2>
-          
+
           <p className="text-lg text-white/70 mb-8 leading-relaxed max-w-md">
             The next-generation project evaluation system designed for forward-thinking universities and ambitious students.
           </p>
-          
+
           <div className="flex flex-col gap-4">
             <div className="flex items-center gap-4 bg-white/8 border border-white/12 p-4 rounded-xl backdrop-blur-sm">
               <span className="material-symbols-outlined text-primary">verified_user</span>
@@ -124,7 +126,7 @@ export default function SignIn() {
             </div>
           </div>
         </div>
-        
+
         {/* Footer Branding */}
         <div className="absolute bottom-10 left-12 z-30">
           <p className="text-white/45 text-sm">©Etnova Project. All rights reserved.</p>

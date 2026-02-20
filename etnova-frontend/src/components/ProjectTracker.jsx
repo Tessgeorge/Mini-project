@@ -60,9 +60,9 @@ export default function ProjectTracker({ project, documents }) {
             <div className="flex items-center justify-between mb-6">
                 <div>
                     <h3 className="font-black text-slate-900">Project Progress</h3>
-                    <p className="text-sm text-slate-500 mt-0.5">
+                    {/*<p className="text-sm text-slate-500 mt-0.5">
                         Design and Implementation of AI-Driven Assessment Tools
-                    </p>
+                    </p>*/}
                 </div>
                 <div className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ backgroundColor: '#00D2C4', color: '#000' }}>
                     {currentIndex < milestones.length ? milestones[currentIndex].shortLabel : 'Completed'}
@@ -75,13 +75,13 @@ export default function ProjectTracker({ project, documents }) {
                 <div className="absolute top-6 left-0 right-0 flex items-center px-8">
                     {milestones.map((milestone, index) => {
                         if (index === milestones.length - 1) return null;
-                        const isNextCompleted = milestones[index + 1]?.completed;
+                        const isCurrentCompleted = milestone.completed;
                         return (
                             <div
                                 key={`line-${milestone.id}`}
                                 className="flex-1 h-1 mx-2 rounded-full transition-all duration-500"
                                 style={{
-                                    backgroundColor: isNextCompleted ? '#00D2C4' : '#e2e8f0',
+                                    backgroundColor: isCurrentCompleted ? '#00D2C4' : '#e2e8f0',
                                 }}
                             />
                         );

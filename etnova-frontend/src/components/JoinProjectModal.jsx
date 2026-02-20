@@ -4,9 +4,11 @@ import supabase from '../config/supabaseClient';
 
 export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
     const [projects, setProjects] = useState([]);
+    const [pendingProjectIds, setPendingProjectIds] = useState(new Set());
     const [loading, setLoading] = useState(false);
     const [joining, setJoining] = useState(null);
     const [error, setError] = useState('');
+    const [successMsg, setSuccessMsg] = useState('');
 
     useEffect(() => {
         if (isOpen) {
@@ -17,80 +19,66 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
     const loadAvailableProjects = async () => {
         setLoading(true);
         setError('');
+        setSuccessMsg('');
 
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) throw new Error('Not authenticated');
 
-            console.log('🔍 Fetching projects for user:', user.id);
+            // Fetch projects and user's existing pending requests in parallel
+            const [projectsRes, requestsRes] = await Promise.all([
+                supabase
+                    .from('projects')
+                    .select('*, team_members(student_id)')
+                    .eq('status', 'pending')
+                    .order('created_at', { ascending: false }),
+                supabase
+                    .from('join_requests')
+                    .select('project_id')
+                    .eq('student_id', user.id)
+                    .eq('status', 'pending'),
+            ]);
 
-            // Step 1: Get all projects with team members count
-            const { data: allProjects, error: projectsError } = await supabase
-                .from('projects')
-                .select('*, team_members(student_id)')
-                .eq('status', 'pending')
-                .order('created_at', { ascending: false });
+            if (projectsRes.error) throw projectsRes.error;
 
-            if (projectsError) {
-                console.error('❌ Error fetching projects:', projectsError);
-                throw projectsError;
-            }
+            // Build set of project IDs where user already has a pending request
+            const pendingIds = new Set(
+                (requestsRes.data || []).map(r => r.project_id)
+            );
+            setPendingProjectIds(pendingIds);
 
-            console.log('📋 Total projects fetched:', allProjects?.length || 0);
-
-            // Step 2: Get unique projects and fetch creator profiles
+            // Fetch creator profiles
             const uniqueProjectsMap = new Map();
             const creatorIds = new Set();
-
-            (allProjects || []).forEach(project => {
+            (projectsRes.data || []).forEach(project => {
                 if (!uniqueProjectsMap.has(project.id)) {
                     uniqueProjectsMap.set(project.id, project);
-                    if (project.created_by) {
-                        creatorIds.add(project.created_by);
-                    }
+                    if (project.created_by) creatorIds.add(project.created_by);
                 }
             });
 
-            // Step 3: Fetch all creator profiles in one query
             const { data: creators } = await supabase
                 .from('profiles')
                 .select('id, full_name')
                 .in('id', Array.from(creatorIds));
 
-            // Create a map of creator ID to name
             const creatorMap = new Map();
-            (creators || []).forEach(creator => {
-                creatorMap.set(creator.id, creator.full_name);
-            });
+            (creators || []).forEach(c => creatorMap.set(c.id, c.full_name));
 
-            // Step 4: Attach creator names to projects
-            const uniqueProjects = Array.from(uniqueProjectsMap.values()).map(project => ({
-                ...project,
-                creator_name: creatorMap.get(project.created_by) || 'Unknown'
+            const uniqueProjects = Array.from(uniqueProjectsMap.values()).map(p => ({
+                ...p,
+                creator_name: creatorMap.get(p.created_by) || 'Unknown',
             }));
 
-            console.log('📋 Unique projects with creators:', uniqueProjects);
-
-            // Filter projects: not full (< 4 members) and user not already in
+            // Filter: not full, not already a member
             const available = uniqueProjects.filter(p => {
                 const memberCount = p.team_members?.length || 0;
                 const isAlreadyMember = p.team_members?.some(tm => tm.student_id === user.id);
-
-                console.log(`Project "${p.title}":`, {
-                    creator: p.creator_name,
-                    memberCount,
-                    isAlreadyMember,
-                    isFull: memberCount >= 4,
-                    willShow: memberCount < 4 && !isAlreadyMember
-                });
-
                 return memberCount < 4 && !isAlreadyMember;
             });
 
-            console.log('✅ Available projects to join:', available.length);
             setProjects(available);
         } catch (err) {
-            console.error('Load projects error:', err);
             setError(err.message || 'Failed to load projects');
         } finally {
             setLoading(false);
@@ -98,6 +86,8 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
     };
 
     const handleJoin = async (projectId) => {
+        if (pendingProjectIds.has(projectId)) return; // already requested
+
         setJoining(projectId);
         setError('');
 
@@ -105,20 +95,6 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) throw new Error('Not authenticated');
 
-            // Check if user already has a pending request for this project
-            const { data: existingRequest } = await supabase
-                .from('join_requests')
-                .select('*')
-                .eq('project_id', projectId)
-                .eq('student_id', user.id)
-                .eq('status', 'pending')
-                .single();
-
-            if (existingRequest) {
-                throw new Error('You already have a pending request for this project');
-            }
-
-            // Send join request instead of directly joining
             const { error: requestError } = await supabase
                 .from('join_requests')
                 .insert({
@@ -129,18 +105,18 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
 
             if (requestError) {
                 if (requestError.code === '23505') {
-                    throw new Error('You already have a pending request for this project');
+                    // Already exists — just update UI state
+                    setPendingProjectIds(prev => new Set([...prev, projectId]));
+                    return;
                 }
                 throw requestError;
             }
 
-            // Show success message
-            alert('Join request sent! The team leader will review your request.');
-
+            // Mark as pending in UI
+            setPendingProjectIds(prev => new Set([...prev, projectId]));
+            setSuccessMsg('Join request sent! The team leader will review your request.');
             onSuccess?.();
-            onClose();
         } catch (err) {
-            console.error('Join request error:', err);
             setError(err.message || 'Failed to send join request');
         } finally {
             setJoining(null);
@@ -151,8 +127,15 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
         <Modal isOpen={isOpen} onClose={onClose} title="Join a Project" maxWidth="max-w-3xl">
             <div className="p-6">
                 {error && (
-                    <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center gap-2">
+                        <span className="material-symbols-outlined text-base">error</span>
                         {error}
+                    </div>
+                )}
+                {successMsg && (
+                    <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 flex items-center gap-2">
+                        <span className="material-symbols-outlined text-base">check_circle</span>
+                        {successMsg}
                     </div>
                 )}
 
@@ -169,37 +152,50 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
                     </div>
                 ) : (
                     <div className="space-y-3">
-                        {projects.map((project) => (
-                            <div
-                                key={project.id}
-                                className="border border-slate-200 rounded-xl p-4 hover:border-teal-300 hover:bg-teal-50/30 transition-all"
-                            >
-                                <div className="flex items-start justify-between gap-4">
-                                    <div className="flex-1">
-                                        <h3 className="font-black text-slate-900 mb-1">{project.title}</h3>
-                                        <p className="text-sm text-slate-600 mb-2 line-clamp-2">{project.description}</p>
-                                        <div className="flex items-center gap-4 text-xs text-slate-500">
-                                            <span className="flex items-center gap-1">
-                                                <span className="material-symbols-outlined text-sm">person</span>
-                                                Created by {project.creator_name}
-                                            </span>
-                                            <span className="flex items-center gap-1">
-                                                <span className="material-symbols-outlined text-sm">group</span>
-                                                {project.team_members?.length || 0}/4 members
-                                            </span>
+                        {projects.map((project) => {
+                            const isPending = pendingProjectIds.has(project.id);
+                            const isSending = joining === project.id;
+                            return (
+                                <div
+                                    key={project.id}
+                                    className="border border-slate-200 rounded-xl p-4 hover:border-teal-300 hover:bg-teal-50/30 transition-all"
+                                >
+                                    <div className="flex items-start justify-between gap-4">
+                                        <div className="flex-1">
+                                            <h3 className="font-black text-slate-900 mb-1">{project.title}</h3>
+                                            <p className="text-sm text-slate-600 mb-2 line-clamp-2">{project.description}</p>
+                                            <div className="flex items-center gap-4 text-xs text-slate-500">
+                                                <span className="flex items-center gap-1">
+                                                    <span className="material-symbols-outlined text-sm">person</span>
+                                                    Created by {project.creator_name}
+                                                </span>
+                                                <span className="flex items-center gap-1">
+                                                    <span className="material-symbols-outlined text-sm">group</span>
+                                                    {project.team_members?.length || 0}/4 members
+                                                </span>
+                                            </div>
                                         </div>
+
+                                        {isPending ? (
+                                            /* Already requested — show pending badge */
+                                            <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap">
+                                                <span className="material-symbols-outlined text-sm">hourglass_top</span>
+                                                Request Sent
+                                            </span>
+                                        ) : (
+                                            <button
+                                                onClick={() => handleJoin(project.id)}
+                                                disabled={isSending}
+                                                className="px-4 py-2 rounded-lg text-black font-bold text-sm hover:opacity-90 transition-all whitespace-nowrap disabled:opacity-60"
+                                                style={{ backgroundColor: '#00D2C4' }}
+                                            >
+                                                {isSending ? 'Sending...' : 'Request to Join'}
+                                            </button>
+                                        )}
                                     </div>
-                                    <button
-                                        onClick={() => handleJoin(project.id)}
-                                        disabled={joining === project.id}
-                                        className="px-4 py-2 rounded-lg text-black font-bold text-sm hover:opacity-90 transition-all whitespace-nowrap"
-                                        style={{ backgroundColor: '#00D2C4' }}
-                                    >
-                                        {joining === project.id ? 'Sending...' : 'Request to Join'}
-                                    </button>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
 

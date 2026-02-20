@@ -40,16 +40,8 @@ export default function CreateProjectModal({ isOpen, onClose, onSuccess }) {
 
             if (projectError) throw projectError;
 
-            // Auto-add creator as team leader
-            const { error: teamError } = await supabase
-                .from('team_members')
-                .insert({
-                    project_id: project.id,
-                    student_id: user.id,
-                    role: 'leader',
-                });
-
-            if (teamError) throw teamError;
+            // Note: DB trigger handle_new_project() auto-adds creator as team leader
+            // No need to manually insert into team_members here
 
             // Success!
             setFormData({ title: '', description: '', abstract: '' });
