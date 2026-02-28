@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import supabase from '../config/supabaseClient'
+import { apiRequest } from '../config/apiClient'
 
 const ACCENT_COLOR = '#00D2C4'
 
@@ -40,18 +41,7 @@ export default function SignIn() {
         throw new Error('Unable to determine user identity. Please try again.')
       }
 
-      const {
-        data: profile,
-        error: profileError,
-      } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', userId)
-        .single()
-
-      if (profileError) {
-        throw profileError
-      }
+      const profile = await apiRequest('/profile')
 
       const normalizedRole = profile?.role?.toLowerCase()
       const destination = ROLE_ROUTES[normalizedRole]

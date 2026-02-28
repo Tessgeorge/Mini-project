@@ -2,57 +2,81 @@ import { useState } from "react";
 import Sidebar from "./Sidebar";
 import StudentDashboard from "../pages/StudentDashboard";
 import MyProject from "../pages/MyProject";
+import MyTeam from "../pages/MyTeam";
 import Submissions from "../pages/Submissions";
+import Marks from "../pages/Marks";
+import Discussion from "../pages/Discussion";
+
+const ALLOWED_VIEWS = new Set([
+    "dashboard",
+    "team",
+    "submissions",
+    "marks",
+    "discussion",
+    "project",
+]);
 
 export default function StudentLayout({ onLogout }) {
-    const [currentView, setCurrentView] = useState(
-        () => localStorage.getItem('studentView') || 'dashboard'
-    );
+    const [currentView, setCurrentView] = useState(() => {
+        const saved = localStorage.getItem('studentView') || 'dashboard';
+        return ALLOWED_VIEWS.has(saved) ? saved : 'dashboard';
+    });
 
     const handleNavigate = (viewId) => {
-        localStorage.setItem('studentView', viewId);
-        setCurrentView(viewId);
+        const safeView = ALLOWED_VIEWS.has(viewId) ? viewId : 'dashboard';
+        localStorage.setItem('studentView', safeView);
+        setCurrentView(safeView);
     };
 
     const renderView = () => {
         switch (currentView) {
             case "dashboard":
-                return <StudentDashboard />;
+                return <StudentDashboard onNavigate={handleNavigate} />;
+            case "team":
+                return <MyTeam />;
             case "project":
-                return <MyProject />;
+                return <MyProject onNavigate={handleNavigate} />;
             case "submissions":
                 return <Submissions />;
-            case "analytics":
-                return (
-                    <div className="min-h-screen bg-background-light p-6 md:p-8">
-                        <div className="max-w-4xl mx-auto text-center py-20">
-                            <span className="material-symbols-outlined text-6xl text-slate-300 mb-4 block">analytics</span>
-                            <h2 className="text-2xl font-black text-slate-900 mb-2">Analytics</h2>
-                            <p className="text-slate-600">This page is coming soon...</p>
-                        </div>
-                    </div>
-                );
-            case "settings":
-                return (
-                    <div className="min-h-screen bg-background-light p-6 md:p-8">
-                        <div className="max-w-4xl mx-auto text-center py-20">
-                            <span className="material-symbols-outlined text-6xl text-slate-300 mb-4 block">settings</span>
-                            <h2 className="text-2xl font-black text-slate-900 mb-2">Settings</h2>
-                            <p className="text-slate-600">This page is coming soon...</p>
-                        </div>
-                    </div>
-                );
+            case "marks":
+                return <Marks />;
+            case "discussion":
+                return <Discussion />;
             default:
                 return <StudentDashboard />;
         }
     };
 
+    const navItems = [
+        { id: "dashboard", label: "Dashboard", icon: "dashboard" },
+        { id: "team", label: "Team", icon: "group" },
+        { id: "submissions", label: "Docs", icon: "upload_file" },
+        { id: "marks", label: "Marks", icon: "grading" },
+        { id: "discussion", label: "Chat", icon: "forum" },
+        { id: "project", label: "Project", icon: "folder_open" },
+    ];
+
     return (
-        <div className="flex min-h-screen bg-background-light">
+        <div className="flex min-h-screen etnova-bg">
             <Sidebar currentView={currentView} onNavigate={handleNavigate} onLogout={onLogout} />
-            <main className="flex-1 md:ml-64">
+            <main className={`flex-1 md:ml-64 ${currentView === 'discussion' ? 'h-screen overflow-hidden' : 'pb-20 md:pb-0'}`}>
                 {renderView()}
             </main>
+            <nav className="fixed md:hidden bottom-0 inset-x-0 border-t border-slate-200 bg-white z-30">
+                <div className="flex overflow-x-auto no-scrollbar">
+                    {navItems.map((item) => (
+                        <button
+                            key={item.id}
+                            onClick={() => handleNavigate(item.id)}
+                            className={`min-w-[84px] flex-1 py-2.5 flex flex-col items-center gap-1 text-xs font-semibold ${currentView === item.id ? "text-teal-600" : "text-slate-500"
+                                }`}
+                        >
+                            <span className="material-symbols-outlined text-lg">{item.icon}</span>
+                            <span>{item.label}</span>
+                        </button>
+                    ))}
+                </div>
+            </nav>
         </div>
     );
 }

@@ -1,5 +1,7 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import supabase from '../config/supabaseClient'
+import { apiRequest } from '../config/apiClient'
 
 const AuthContext = createContext({
   session: null,
@@ -8,17 +10,8 @@ const AuthContext = createContext({
   loading: true,
 })
 
-async function fetchUserRole(userId) {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', userId)
-    .maybeSingle()
-
-  if (error) {
-    throw error
-  }
-
+async function fetchUserRole() {
+  const data = await apiRequest('/profile')
   return data?.role?.toLowerCase() ?? null
 }
 
@@ -48,7 +41,7 @@ export function AuthProvider({ children }) {
       }
 
       try {
-        const nextRole = await fetchUserRole(nextSession.user.id)
+        const nextRole = await fetchUserRole()
         if (isMounted) {
           setRole(nextRole)
         }

@@ -90,7 +90,7 @@ export default function ProjectTracker({ project, documents }) {
 
                 {/* Milestones */}
                 <div className="relative flex justify-between">
-                    {milestones.map((milestone, index) => {
+                    {milestones.map((milestone) => {
                         const isCompleted = milestone.completed;
                         const isPending = !isCompleted;
 

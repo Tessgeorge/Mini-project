@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import Modal from './Modal';
-import supabase from '../config/supabaseClient';
+import { apiRequest } from '../config/apiClient';
 
 export default function CreateProjectModal({ isOpen, onClose, onSuccess }) {
     const [formData, setFormData] = useState({
@@ -21,27 +21,14 @@ export default function CreateProjectModal({ isOpen, onClose, onSuccess }) {
         setLoading(true);
 
         try {
-            // Get current user
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error('Not authenticated');
-
-            // Create project via API would be better, but for now use direct Supabase
-            const { data: project, error: projectError } = await supabase
-                .from('projects')
-                .insert({
+            await apiRequest('/projects', {
+                method: 'POST',
+                body: {
                     title: formData.title,
                     description: formData.description,
                     abstract: formData.abstract,
-                    created_by: user.id,
-                    status: 'pending',
-                })
-                .select()
-                .single();
-
-            if (projectError) throw projectError;
-
-            // Note: DB trigger handle_new_project() auto-adds creator as team leader
-            // No need to manually insert into team_members here
+                },
+            });
 
             // Success!
             setFormData({ title: '', description: '', abstract: '' });

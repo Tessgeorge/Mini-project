@@ -1,6 +1,14 @@
 import { useEffect, useRef } from 'react';
 
-export default function NotificationPanel({ isOpen, onClose, notifications, onMarkAsRead, onNotificationClick }) {
+export default function NotificationPanel({
+    isOpen,
+    onClose,
+    notifications,
+    onMarkAsRead,
+    onNotificationClick,
+    showAll = false,
+    onToggleViewAll,
+}) {
     const panelRef = useRef(null);
 
     // Close on click outside
@@ -21,6 +29,9 @@ export default function NotificationPanel({ isOpen, onClose, notifications, onMa
     }, [isOpen, onClose]);
 
     if (!isOpen) return null;
+    const list = notifications || [];
+    const unread = list.filter((n) => !n.read);
+    const visibleNotifications = showAll ? list : unread;
 
     const getNotificationIcon = (type) => {
         switch (type) {
@@ -34,6 +45,14 @@ export default function NotificationPanel({ isOpen, onClose, notifications, onMa
                 return 'group_add';
             case 'join_request':
                 return 'person_add';
+            case 'join_request_approved':
+                return 'task_alt';
+            case 'join_request_rejected':
+                return 'person_cancel';
+            case 'team_member_removed':
+                return 'person_remove';
+            case 'task_assigned':
+                return 'assignment_ind';
             default:
                 return 'notifications';
         }
@@ -51,6 +70,14 @@ export default function NotificationPanel({ isOpen, onClose, notifications, onMa
                 return '#3b82f6'; // blue
             case 'join_request':
                 return '#00D2C4'; // teal
+            case 'join_request_approved':
+                return '#10b981'; // green
+            case 'join_request_rejected':
+                return '#ef4444'; // red
+            case 'team_member_removed':
+                return '#f97316'; // orange
+            case 'task_assigned':
+                return '#0ea5e9'; // sky
             default:
                 return '#64748b'; // slate
         }
@@ -64,7 +91,7 @@ export default function NotificationPanel({ isOpen, onClose, notifications, onMa
             {/* Header */}
             <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
                 <h3 className="font-black text-slate-900">Notifications</h3>
-                {notifications?.length > 0 && (
+                {unread.length > 0 && (
                     <button
                         onClick={onMarkAsRead}
                         className="text-xs font-bold hover:underline"
@@ -77,17 +104,19 @@ export default function NotificationPanel({ isOpen, onClose, notifications, onMa
 
             {/* Notifications List */}
             <div className="max-h-96 overflow-y-auto">
-                {!notifications || notifications.length === 0 ? (
+                {visibleNotifications.length === 0 ? (
                     <div className="py-12 text-center">
                         <span className="material-symbols-outlined text-6xl text-slate-300 mb-3">
                             notifications_off
                         </span>
-                        <p className="text-slate-600 font-medium">No new notifications</p>
-                        <p className="text-sm text-slate-500 mt-1">You're all caught up!</p>
+                        <p className="text-slate-600 font-medium">{showAll ? "No notifications" : "No unread notifications"}</p>
+                        <p className="text-sm text-slate-500 mt-1">
+                            {showAll ? "You're all caught up!" : "Click below to view read notifications."}
+                        </p>
                     </div>
                 ) : (
                     <div className="divide-y divide-slate-100">
-                        {notifications.map((notification) => (
+                        {visibleNotifications.map((notification) => (
                             <div
                                 key={notification.id}
                                 className={`px-5 py-4 hover:bg-slate-50 transition-colors cursor-pointer ${!notification.read ? 'bg-teal-50/30' : ''
@@ -136,13 +165,14 @@ export default function NotificationPanel({ isOpen, onClose, notifications, onMa
             </div>
 
             {/* Footer */}
-            {notifications?.length > 0 && (
+            {list.length > 0 && (
                 <div className="px-5 py-3 border-t border-slate-200 bg-slate-50">
                     <button
+                        onClick={onToggleViewAll}
                         className="w-full text-center text-sm font-bold hover:underline"
                         style={{ color: '#00D2C4' }}
                     >
-                        View all notifications
+                        {showAll ? 'Show unread only' : 'View all notifications'}
                     </button>
                 </div>
             )}

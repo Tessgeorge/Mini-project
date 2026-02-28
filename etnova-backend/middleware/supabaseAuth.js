@@ -1,4 +1,4 @@
-import { supabase } from '../config/supabase.js';
+import { supabase, supabaseAdmin } from '../config/supabase.js';
 
 // Middleware to verify Supabase JWT token
 export const authenticateUser = async (req, res, next) => {
@@ -30,10 +30,17 @@ export const authenticateUser = async (req, res, next) => {
       // Continue with basic user info if profile fetch fails
       req.user = user;
       req.userRole = user.user_metadata?.role || 'student';
+      req.userProfile = null;
+      req.isCoordinator = false;
+      req.userBatch = null;
+      req.userDepartment = null;
     } else {
       req.user = user;
       req.userProfile = profile;
       req.userRole = profile.role;
+      req.isCoordinator = Boolean(profile.is_coordinator);
+      req.userBatch = profile.batch || profile.class_section || null;
+      req.userDepartment = profile.department || null;
     }
 
     next();
@@ -54,8 +61,8 @@ export const requireRole = (allowedRoles) => {
       const userRole = req.userRole;
 
       if (!allowedRoles.includes(userRole)) {
-        return res.status(403).json({ 
-          message: `Access denied. Required roles: ${allowedRoles.join(', ')}. Your role: ${userRole}` 
+        return res.status(403).json({
+          message: `Access denied. Required roles: ${allowedRoles.join(', ')}. Your role: ${userRole}`
         });
       }
 
@@ -70,23 +77,63 @@ export const requireRole = (allowedRoles) => {
 // Backwards compatibility
 export const requireAdmin = requireRole(['admin']);
 
+export const requireCoordinator = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Authentication required' });
+  }
+  if (req.userRole !== 'mentor' || !req.isCoordinator) {
+    return res.status(403).json({ message: 'Coordinator access required' });
+  }
+  next();
+};
+
+const isProjectInCoordinatorScope = async (projectId, req) => {
+  if (!req.isCoordinator || !req.userBatch) return false;
+
+  const { data: members, error } = await supabaseAdmin
+    .from('team_members')
+    .select(`
+      role,
+      profiles!team_members_student_id_fkey(batch, class_section, department)
+    `)
+    .eq('project_id', projectId);
+
+  if (error || !members?.length) return false;
+
+  const leader = members.find((m) => m.role === 'leader');
+  const anchor = leader?.profiles || members[0]?.profiles;
+  if (!anchor) return false;
+
+  const projectBatch = anchor.batch || anchor.class_section || null;
+  if (!projectBatch || projectBatch !== req.userBatch) return false;
+
+  if (!req.userDepartment) return true;
+  if (!anchor.department) return true;
+
+  return anchor.department === req.userDepartment;
+};
+
 // Check if user can access specific project (student must be team member, mentor must be assigned)
-export const canAccessProject = async (req, res, next) => {
+export const canAccessProject = (options = {}) => async (req, res, next) => {
   try {
     const projectId = req.params.id;
     const userId = req.user.id;
     const userRole = req.userRole;
+    const {
+      allowCoordinatorBatchScope = true,
+      studentMustBeLeader = false,
+    } = options;
 
     if (userRole === 'admin') {
       // Admins can access all projects
       return next();
     }
 
-    const { data: project, error } = await supabase
+    const { data: project, error } = await supabaseAdmin
       .from('projects')
       .select(`
         *,
-        team_members(student_id)
+        team_members(student_id, role)
       `)
       .eq('id', projectId)
       .single();
@@ -100,10 +147,17 @@ export const canAccessProject = async (req, res, next) => {
 
     if (userRole === 'student') {
       // Students can access if they are team members
-      hasAccess = project.team_members?.some(member => member.student_id === userId);
+      const myTeamRow = project.team_members?.find((member) => member.student_id === userId);
+      hasAccess = Boolean(myTeamRow);
+      if (hasAccess && studentMustBeLeader) {
+        hasAccess = myTeamRow.role === 'leader' || project.created_by === userId;
+      }
     } else if (userRole === 'mentor') {
       // Mentors can access if they are assigned as mentor or coordinator
       hasAccess = project.mentor_id === userId || project.coordinator_id === userId;
+      if (!hasAccess && allowCoordinatorBatchScope) {
+        hasAccess = await isProjectInCoordinatorScope(projectId, req);
+      }
     }
 
     if (!hasAccess) {

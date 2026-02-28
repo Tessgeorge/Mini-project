@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Modal from './Modal';
-import supabase from '../config/supabaseClient';
+import { apiRequest } from '../config/apiClient';
 
-export default function ProfileSettingsModal({ isOpen, onClose, profile, onSuccess }) {
+export default function ProfileSettingsModal({ isOpen, onClose, profile, onSuccess, requireCompletion = false }) {
     const [formData, setFormData] = useState({
         full_name: profile?.full_name || '',
         roll_number: profile?.roll_number || '',
@@ -14,6 +14,18 @@ export default function ProfileSettingsModal({ isOpen, onClose, profile, onSucce
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
+
+    useEffect(() => {
+        if (!isOpen) return;
+        setFormData({
+            full_name: profile?.full_name || '',
+            roll_number: profile?.roll_number || '',
+            department: profile?.department || '',
+            semester: profile?.semester || '',
+            class_section: profile?.class_section || '',
+            phone: profile?.phone || '',
+        });
+    }, [isOpen, profile]);
 
     const handleChange = (e) => {
         const value = e.target.name === 'semester' ? parseInt(e.target.value) || '' : e.target.value;
@@ -27,12 +39,9 @@ export default function ProfileSettingsModal({ isOpen, onClose, profile, onSucce
         setLoading(true);
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error('Not authenticated');
-
-            const { error: updateError } = await supabase
-                .from('profiles')
-                .update({
+            await apiRequest('/profile', {
+                method: 'PUT',
+                body: {
                     full_name: formData.full_name,
                     roll_number: formData.roll_number,
                     department: formData.department,
@@ -40,10 +49,8 @@ export default function ProfileSettingsModal({ isOpen, onClose, profile, onSucce
                     class_section: formData.class_section,
                     phone: formData.phone,
                     updated_at: new Date().toISOString(),
-                })
-                .eq('id', user.id);
-
-            if (updateError) throw updateError;
+                },
+            });
 
             setSuccess('Profile updated successfully!');
             setTimeout(() => {
@@ -59,7 +66,13 @@ export default function ProfileSettingsModal({ isOpen, onClose, profile, onSucce
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Profile Settings" maxWidth="max-w-2xl">
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Profile Settings"
+            maxWidth="max-w-2xl"
+            disableClose={requireCompletion}
+        >
             <form onSubmit={handleSubmit} className="p-6 space-y-5">
                 {error && (
                     <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -195,17 +208,19 @@ export default function ProfileSettingsModal({ isOpen, onClose, profile, onSucce
 
                 {/* Buttons */}
                 <div className="flex gap-3 pt-4">
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        className="flex-1 px-4 py-3 rounded-xl bg-slate-100 text-slate-700 font-bold text-sm hover:bg-slate-200 transition-all"
-                        disabled={loading}
-                    >
-                        Cancel
-                    </button>
+                    {!requireCompletion && (
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="flex-1 px-4 py-3 rounded-xl bg-slate-100 text-slate-700 font-bold text-sm hover:bg-slate-200 transition-all"
+                            disabled={loading}
+                        >
+                            Cancel
+                        </button>
+                    )}
                     <button
                         type="submit"
-                        className="flex-1 px-4 py-3 rounded-xl text-black font-bold text-sm hover:opacity-90 transition-all shadow-md"
+                        className={`${requireCompletion ? 'w-full' : 'flex-1'} px-4 py-3 rounded-xl text-black font-bold text-sm hover:opacity-90 transition-all shadow-md`}
                         style={{ backgroundColor: '#00D2C4' }}
                         disabled={loading}
                     >

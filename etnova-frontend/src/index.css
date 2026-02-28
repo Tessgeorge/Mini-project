@@ -1,77 +1,290 @@
 @import "tailwindcss";
 
-/* Global Styles */
+/* ═══════════════════════════════════════════════════════════════════════
+   ETNOVA · Design System
+   Primary  : #00C4B4  (teal)   Secondary: #6366F1 (indigo)
+   Surface  : rgba(255,255,255,0.75) over layered gradient bg
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Base ──────────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 body {
-  font-family: 'Manrope', sans-serif;
+  font-family: 'Lexend', 'Manrope', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  color: #0f172a;
 }
 
 .material-symbols-outlined {
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 }
 
-/* Custom scrollbar styles */
+/* ── App Background ─────────────────────────────────────────────────────
+   A rich layered gradient that actually shows through the glass cards.
+   Uses a warm slate base so glass reads as bright panels above it.
+   ─────────────────────────────────────────────────────────────────────── */
+.etnova-bg {
+  min-height: 100vh;
+  background-color: #eef2f7;
+  background-image:
+    /* teal top-left bloom */
+    radial-gradient(ellipse 90% 70% at -5% -10%, rgba(0, 196, 180, 0.18) 0%, transparent 55%),
+    /* indigo top-right bloom */
+    radial-gradient(ellipse 70% 60% at 105% -5%, rgba(99, 102, 241, 0.14) 0%, transparent 55%),
+    /* faint teal bottom-right */
+    radial-gradient(ellipse 80% 60% at 105% 110%, rgba(0, 196, 180, 0.10) 0%, transparent 50%),
+    /* soft indigo bottom-left */
+    radial-gradient(ellipse 70% 55% at -5% 110%, rgba(99, 102, 241, 0.09) 0%, transparent 50%),
+    /* Centre subtle warm tint */
+    radial-gradient(ellipse 60% 60% at 50% 50%, rgba(248, 250, 252, 0.50) 0%, transparent 80%);
+}
+
+/* ── Glass Card ─────────────────────────────────────────────────────────
+   Floats over the gradient. White at ~80 % opacity + blur + white border.
+   ─────────────────────────────────────────────────────────────────────── */
+.glass-card {
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.90);
+  box-shadow:
+    0 2px 16px rgba(15, 23, 42, 0.06),
+    0 1px 3px rgba(15, 23, 42, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.90);
+  border-radius: 1rem;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.glass-card:hover {
+  box-shadow:
+    0 8px 32px rgba(15, 23, 42, 0.09),
+    0 2px 8px rgba(15, 23, 42, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.90);
+  transform: translateY(-1px);
+}
+
+/* Stronger variant for larger section panels */
+.glass-card-strong {
+  background: rgba(255, 255, 255, 0.84);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  border: 1px solid rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 4px 32px rgba(15, 23, 42, 0.07),
+    0 1px 6px rgba(15, 23, 42, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  border-radius: 1.25rem;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.glass-card-strong:hover {
+  box-shadow:
+    0 12px 48px rgba(15, 23, 42, 0.10),
+    0 2px 10px rgba(15, 23, 42, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  transform: translateY(-1px);
+}
+
+/* Accent pill — teal tab inside a glass card */
+.glass-accent-bar {
+  height: 3px;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #00C4B4 0%, #6366F1 100%);
+}
+
+/* ── Glass TopBar ───────────────────────────────────────────────────────── */
+.glass-topbar {
+  background: rgba(255, 255, 255, 0.84);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.65);
+  box-shadow: 0 1px 16px rgba(15, 23, 42, 0.05);
+}
+
+/* ── Glass Sidebar ──────────────────────────────────────────────────────── */
+.glass-sidebar {
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border-right: 1px solid rgba(226, 232, 240, 0.60);
+  box-shadow: 2px 0 20px rgba(15, 23, 42, 0.04);
+}
+
+/* ── Active Nav Item ────────────────────────────────────────────────────── */
+.glass-nav-active {
+  background: linear-gradient(135deg,
+      rgba(0, 196, 180, 0.14) 0%,
+      rgba(99, 102, 241, 0.08) 100%);
+  color: #00897B;
+  border: 1px solid rgba(0, 196, 180, 0.25);
+  box-shadow: 0 2px 12px rgba(0, 196, 180, 0.10);
+}
+
+/* ── Glass Alert ────────────────────────────────────────────────────────── */
+.glass-alert {
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 1rem;
+}
+
+/* ── Input inside glass card ───────────────────────────────────────────── */
+.glass-input {
+  background: rgba(255, 255, 255, 0.60);
+  border: 1px solid rgba(203, 213, 225, 0.70);
+  border-radius: 0.75rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.glass-input:focus {
+  outline: none;
+  border-color: rgba(0, 196, 180, 0.60);
+  box-shadow: 0 0 0 3px rgba(0, 196, 180, 0.12);
+}
+
+/* ── Divider inside glass cards ─────────────────────────────────────────── */
+.glass-divider {
+  border-color: rgba(226, 232, 240, 0.55);
+}
+
+/* ── Primary Button ─────────────────────────────────────────────────────── */
+.btn-primary {
+  background: linear-gradient(135deg, #00C4B4 0%, #00897B 100%);
+  color: #fff;
+  font-weight: 800;
+  border-radius: 0.75rem;
+  padding: 0.625rem 1.25rem;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 196, 180, 0.30);
+  transition: opacity 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+.btn-primary:hover {
+  opacity: 0.92;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(0, 196, 180, 0.35);
+}
+
+.btn-primary:active {
+  opacity: 1.00;
+  transform: translateY(0);
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
-  background-color: #f1f5f9;
-}
-
-.dark ::-webkit-scrollbar-track {
-  background-color: #1e293b;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: #cbd5e1;
+  background: rgba(148, 163, 184, 0.45);
   border-radius: 9999px;
 }
 
-.dark ::-webkit-scrollbar-thumb {
-  background-color: #475569;
-}
-
 ::-webkit-scrollbar-thumb:hover {
-  background-color: #94a3b8;
+  background: rgba(100, 116, 139, 0.60);
 }
 
-.dark ::-webkit-scrollbar-thumb:hover {
-  background-color: #64748b;
-}
-
-/* Hide default Edge password reveal icon so only the custom toggle shows */
+/* ── Edge password icon ─────────────────────────────────────────────────── */
 input::-ms-reveal,
 input::-ms-clear {
   display: none;
 }
 
-/* Modal animations */
+/* ── Animations ─────────────────────────────────────────────────────────── */
 @keyframes fadeIn {
   from {
-    opacity: 0;
+    opacity: 0
   }
+
+  to {
+    opacity: 1
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px)
+  }
+
   to {
     opacity: 1;
+    transform: translateY(0)
   }
 }
 
 @keyframes scaleIn {
   from {
     opacity: 0;
-    transform: scale(0.95);
+    transform: scale(0.95)
   }
+
   to {
     opacity: 1;
-    transform: scale(1);
+    transform: scale(1)
+  }
+}
+
+@keyframes spinAng {
+  to {
+    transform: rotate(360deg)
   }
 }
 
 .animate-fadeIn {
-  animation: fadeIn 0.2s ease-out;
+  animation: fadeIn 0.20s ease-out;
+}
+
+.animate-slideUp {
+  animation: slideUp 0.22s ease-out;
 }
 
 .animate-scaleIn {
-  animation: scaleIn 0.2s ease-out;
+  animation: scaleIn 0.18s ease-out;
 }
 
+.animate-spin {
+  animation: spinAng 0.8s linear infinite;
+}
+
+/* ── Info/status badge tones ─────────────────────────────────────────────── */
+.badge-teal {
+  background: rgba(0, 196, 180, 0.12);
+  color: #00897B;
+  border: 1px solid rgba(0, 196, 180, 0.25);
+}
+
+.badge-indigo {
+  background: rgba(99, 102, 241, 0.11);
+  color: #4338ca;
+  border: 1px solid rgba(99, 102, 241, 0.25);
+}
+
+.badge-amber {
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.badge-rose {
+  background: rgba(244, 63, 94, 0.11);
+  color: #be123c;
+  border: 1px solid rgba(244, 63, 94, 0.25);
+}
+
+.badge-slate {
+  background: rgba(100, 116, 139, 0.10);
+  color: #475569;
+  border: 1px solid rgba(100, 116, 139, 0.20);
+}

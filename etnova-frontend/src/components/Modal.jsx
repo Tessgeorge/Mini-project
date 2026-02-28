@@ -1,9 +1,10 @@
 import { useEffect } from 'react';
 
-export default function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-2xl' }) {
+export default function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-2xl', disableClose = false }) {
     // Close on ESC key
     useEffect(() => {
         const handleEsc = (e) => {
+            if (disableClose) return;
             if (e.key === 'Escape') onClose();
         };
         if (isOpen) {
@@ -14,7 +15,7 @@ export default function Modal({ isOpen, onClose, title, children, maxWidth = 'ma
             document.removeEventListener('keydown', handleEsc);
             document.body.style.overflow = 'unset';
         };
-    }, [isOpen, onClose]);
+    }, [isOpen, onClose, disableClose]);
 
     if (!isOpen) return null;
 
@@ -23,7 +24,7 @@ export default function Modal({ isOpen, onClose, title, children, maxWidth = 'ma
             {/* Backdrop */}
             <div
                 className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-                onClick={onClose}
+                onClick={disableClose ? undefined : onClose}
             />
 
             {/* Modal */}
@@ -39,7 +40,8 @@ export default function Modal({ isOpen, onClose, title, children, maxWidth = 'ma
                     >
                         <h2 className="text-xl font-black text-slate-900">{title}</h2>
                         <button
-                            onClick={onClose}
+                            onClick={disableClose ? undefined : onClose}
+                            disabled={disableClose}
                             className="size-8 rounded-lg hover:bg-slate-100 transition-colors flex items-center justify-center text-slate-400 hover:text-slate-600"
                         >
                             <span className="material-symbols-outlined">close</span>

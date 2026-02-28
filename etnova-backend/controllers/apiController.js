@@ -1,4 +1,23 @@
-import { supabase, supabaseAdmin } from '../config/supabase.js';
+import { supabaseAdmin } from '../config/supabase.js';
+
+const supabase = supabaseAdmin;
+
+const safeProfileName = (profile, fallback = 'Student') => {
+  return profile?.full_name || profile?.email || fallback;
+};
+
+const LOCKED_PROJECT_STATUSES = new Set(['approved', 'completed']);
+const isProjectLocked = (status) => LOCKED_PROJECT_STATUSES.has((status || '').toLowerCase());
+
+const createNotifications = async (rows) => {
+  if (!rows?.length) return;
+  const validRows = rows.filter((r) => r?.user_id && r?.title && r?.message && r?.type);
+  if (!validRows.length) return;
+  const { error } = await supabase.from('notifications').insert(validRows);
+  if (error) {
+    console.error('Notification insert skipped:', error.message);
+  }
+};
 
 // ====== USER PROFILE FUNCTIONS ======
 
@@ -44,7 +63,7 @@ export const updateUserProfile = async (req, res) => {
 export const createProject = async (req, res) => {
   try {
     const { title, description, abstract } = req.body;
-    
+
     const { data, error } = await supabase
       .from('projects')
       .insert({
@@ -59,14 +78,15 @@ export const createProject = async (req, res) => {
 
     if (error) throw error;
 
-    // Automatically add creator as team leader
-    await supabase
+    // Ensure creator exists as team leader (safe even if DB trigger already inserted row).
+    const { error: teamError } = await supabase
       .from('team_members')
       .insert({
         project_id: data.id,
         student_id: req.user.id,
         role: 'leader'
       });
+    if (teamError && teamError.code !== '23505') throw teamError;
 
     res.status(201).json(data);
   } catch (error) {
@@ -80,28 +100,113 @@ export const getProjects = async (req, res) => {
 
     // Filter based on user role
     if (req.userRole === 'student') {
-      // Students see only their projects
-      query = query
+      // Students see projects where they are a member.
+      // Fetch ids first so nested team_members can include the entire team (not only self row).
+      const { data: memberships, error: membershipError } = await supabase
+        .from('team_members')
+        .select('project_id')
+        .eq('student_id', req.user.id);
+
+      if (membershipError) throw membershipError;
+
+      const projectIds = [...new Set((memberships || []).map((m) => m.project_id).filter(Boolean))];
+      if (projectIds.length === 0) {
+        return res.json([]);
+      }
+
+      const { data, error } = await supabase
+        .from('projects')
         .select(`
           *,
-          team_members!inner(student_id, role),
-          documents(id, document_type, status, uploaded_at),
-          evaluations(evaluation_type, obtained_marks, max_marks, feedback)
-        `)
-        .eq('team_members.student_id', req.user.id);
-    } else if (req.userRole === 'mentor') {
-      // Mentors see assigned projects
-      query = query
-        .select(`
-          *,
+          mentor:profiles!projects_mentor_id_fkey(id, full_name, email, department),
+          coordinator:profiles!projects_coordinator_id_fkey(id, full_name, email, department),
           team_members(
-            id, student_id, role,
-            profiles!team_members_student_id_fkey(full_name, email, roll_number)
+            id,
+            student_id,
+            role,
+            joined_at,
+            profiles!team_members_student_id_fkey(
+              id,
+              full_name,
+              email,
+              roll_number,
+              department,
+              batch,
+              class_section
+            )
           ),
-          documents(id, document_type, status, uploaded_at, file_name),
-          evaluations(evaluation_type, obtained_marks, max_marks, feedback)
+          documents(id, document_type, status, uploaded_at, file_name, file_url, version, feedback),
+          evaluations(id, evaluation_type, obtained_marks, max_marks, feedback, created_at)
         `)
+        .in('id', projectIds)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return res.json(data || []);
+    } else if (req.userRole === 'mentor') {
+      const mentorProjectsSelect = `
+        *,
+        team_members(
+          id, student_id, role,
+          profiles!team_members_student_id_fkey(full_name, email, roll_number)
+        ),
+        documents(id, document_type, status, uploaded_at, file_name),
+        evaluations(evaluation_type, obtained_marks, max_marks, feedback)
+      `;
+
+      const { data: assignedProjects, error: assignedError } = await supabase
+        .from('projects')
+        .select(mentorProjectsSelect)
         .or(`mentor_id.eq.${req.user.id},coordinator_id.eq.${req.user.id}`);
+
+      if (assignedError) throw assignedError;
+
+      // Coordinators additionally get projects from their batch scope.
+      if (!req.isCoordinator || !req.userBatch) {
+        return res.json(assignedProjects || []);
+      }
+
+      const { data: teamRows, error: teamRowsError } = await supabase
+        .from('team_members')
+        .select(`
+          project_id,
+          role,
+          profiles!team_members_student_id_fkey(batch, class_section, department)
+        `);
+
+      if (teamRowsError) throw teamRowsError;
+
+      const batchProjectIds = new Set();
+      const grouped = {};
+      (teamRows || []).forEach((row) => {
+        if (!grouped[row.project_id]) grouped[row.project_id] = [];
+        grouped[row.project_id].push(row);
+      });
+
+      Object.entries(grouped).forEach(([projectId, rows]) => {
+        const leader = rows.find((r) => r.role === 'leader');
+        const anchor = leader?.profiles || rows[0]?.profiles;
+        if (!anchor) return;
+        const projectBatch = anchor.batch || anchor.class_section || null;
+        if (!projectBatch || projectBatch !== req.userBatch) return;
+        if (req.userDepartment && anchor.department && anchor.department !== req.userDepartment) return;
+        batchProjectIds.add(projectId);
+      });
+
+      const assignedIds = new Set((assignedProjects || []).map((p) => p.id));
+      const extraIds = [...batchProjectIds].filter((id) => !assignedIds.has(id));
+      if (extraIds.length === 0) {
+        return res.json(assignedProjects || []);
+      }
+
+      const { data: extraProjects, error: extraError } = await supabase
+        .from('projects')
+        .select(mentorProjectsSelect)
+        .in('id', extraIds);
+
+      if (extraError) throw extraError;
+
+      return res.json([...(assignedProjects || []), ...(extraProjects || [])]);
     } else if (req.userRole === 'admin') {
       // Admins see all projects
       query = query
@@ -114,7 +219,7 @@ export const getProjects = async (req, res) => {
     }
 
     const { data, error } = await query;
-    
+
     if (error) throw error;
     res.json(data || []);
   } catch (error) {
@@ -128,11 +233,13 @@ export const getProjectById = async (req, res) => {
       .from('projects')
       .select(`
         *,
+        mentor:profiles!projects_mentor_id_fkey(id, full_name, email, department),
+        coordinator:profiles!projects_coordinator_id_fkey(id, full_name, email, department),
         team_members(
           id, student_id, role, joined_at,
-          profiles!team_members_student_id_fkey(id, full_name, email, roll_number)
+          profiles!team_members_student_id_fkey(id, full_name, email, roll_number, department)
         ),
-        documents(id, document_type, status, uploaded_at, file_name, file_url),
+        documents(id, document_type, status, uploaded_at, file_name, file_url, version, feedback),
         evaluations(id, evaluation_type, obtained_marks, max_marks, feedback, created_at),
         individual_marks(
           id, student_id, category, obtained_marks, max_marks, feedback,
@@ -182,10 +289,10 @@ export const deleteProject = async (req, res) => {
 export const approveProject = async (req, res) => {
   try {
     const { status, feedback } = req.body; // status: 'approved' or 'rejected'
-    
+
     const { data, error } = await supabase
       .from('projects')
-      .update({ 
+      .update({
         status,
         updated_at: new Date().toISOString()
       })
@@ -242,10 +349,41 @@ export const joinProject = async (req, res) => {
 
 export const leaveProject = async (req, res) => {
   try {
+    const projectId = req.params.id;
+
+    const { data: membership, error: membershipError } = await supabase
+      .from('team_members')
+      .select('id, role')
+      .eq('project_id', projectId)
+      .eq('student_id', req.user.id)
+      .single();
+
+    if (membershipError || !membership) {
+      return res.status(404).json({ message: 'You are not a member of this project' });
+    }
+
+    if (membership.role === 'leader') {
+      return res.status(400).json({ message: 'Leader cannot leave team. Transfer leadership or delete project.' });
+    }
+
+    const { data: projectRow, error: projectError } = await supabase
+      .from('projects')
+      .select('id, status')
+      .eq('id', projectId)
+      .single();
+
+    if (projectError || !projectRow) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    if (isProjectLocked(projectRow.status)) {
+      return res.status(400).json({ message: `Team is locked because project is ${projectRow.status}` });
+    }
+
     const { error } = await supabase
       .from('team_members')
       .delete()
-      .eq('project_id', req.params.id)
+      .eq('project_id', projectId)
       .eq('student_id', req.user.id);
 
     if (error) throw error;
@@ -279,7 +417,7 @@ export const getTeamMembers = async (req, res) => {
 export const uploadDocument = async (req, res) => {
   try {
     const { document_type, file_name, file_url, file_size } = req.body;
-    
+
     const { data, error } = await supabase
       .from('documents')
       .insert({
@@ -296,6 +434,160 @@ export const uploadDocument = async (req, res) => {
 
     if (error) throw error;
     res.status(201).json(data);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const removeTeamMember = async (req, res) => {
+  try {
+    const projectId = req.params.id;
+    const targetStudentId = req.params.studentId;
+
+    const { data: projectRow, error: projectError } = await supabase
+      .from('projects')
+      .select('id, title, status')
+      .eq('id', projectId)
+      .single();
+
+    if (projectError || !projectRow) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    if (isProjectLocked(projectRow.status)) {
+      return res.status(400).json({ message: `Team is locked because project is ${projectRow.status}` });
+    }
+
+    const { data: target, error: targetError } = await supabase
+      .from('team_members')
+      .select('id, role')
+      .eq('project_id', projectId)
+      .eq('student_id', targetStudentId)
+      .single();
+
+    if (targetError || !target) {
+      return res.status(404).json({ message: 'Team member not found' });
+    }
+
+    if (req.userRole !== 'admin') {
+      const { data: requester } = await supabase
+        .from('team_members')
+        .select('role')
+        .eq('project_id', projectId)
+        .eq('student_id', req.user.id)
+        .single();
+
+      if (!requester || requester.role !== 'leader') {
+        return res.status(403).json({ message: 'Only leader can remove team members' });
+      }
+
+      if (target.role === 'leader') {
+        return res.status(400).json({ message: 'Leader cannot remove themselves from this action' });
+      }
+    }
+
+    const { error } = await supabase
+      .from('team_members')
+      .delete()
+      .eq('project_id', projectId)
+      .eq('student_id', targetStudentId);
+
+    if (error) throw error;
+
+    const actorName = req.userRole === 'admin'
+      ? 'Administrator'
+      : safeProfileName(req.userProfile, 'Team Leader');
+    const projectTitle = projectRow.title || 'your team';
+    await createNotifications([
+      {
+        user_id: targetStudentId,
+        type: 'team_member_removed',
+        title: 'Removed from Team',
+        message: `${actorName} removed you from ${projectTitle}.`,
+      },
+    ]);
+
+    res.json({ message: 'Team member removed successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const updateDocument = async (req, res) => {
+  try {
+    const updates = {};
+    const allowedFields = ['document_type', 'file_name', 'file_url', 'file_size', 'version', 'status', 'feedback'];
+    allowedFields.forEach((field) => {
+      if (req.body[field] !== undefined) updates[field] = req.body[field];
+    });
+    updates.uploaded_by = req.user.id;
+    updates.uploaded_at = new Date().toISOString();
+
+    const { data: current, error: currentError } = await supabase
+      .from('documents')
+      .select('id, project_id')
+      .eq('id', req.params.id)
+      .single();
+
+    if (currentError || !current) {
+      return res.status(404).json({ message: 'Document not found' });
+    }
+
+    const { data: membership } = await supabase
+      .from('team_members')
+      .select('id')
+      .eq('project_id', current.project_id)
+      .eq('student_id', req.user.id)
+      .single();
+
+    if (!membership) {
+      return res.status(403).json({ message: 'You do not have access to this document' });
+    }
+
+    const { data, error } = await supabase
+      .from('documents')
+      .update(updates)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const deleteDocument = async (req, res) => {
+  try {
+    const { data: current, error: currentError } = await supabase
+      .from('documents')
+      .select('id, project_id')
+      .eq('id', req.params.id)
+      .single();
+
+    if (currentError || !current) {
+      return res.status(404).json({ message: 'Document not found' });
+    }
+
+    const { data: membership } = await supabase
+      .from('team_members')
+      .select('id')
+      .eq('project_id', current.project_id)
+      .eq('student_id', req.user.id)
+      .single();
+
+    if (!membership) {
+      return res.status(403).json({ message: 'You do not have access to this document' });
+    }
+
+    const { error } = await supabase
+      .from('documents')
+      .delete()
+      .eq('id', req.params.id);
+
+    if (error) throw error;
+    res.json({ message: 'Document deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -322,7 +614,7 @@ export const getDocuments = async (req, res) => {
 export const approveDocument = async (req, res) => {
   try {
     const { status, feedback } = req.body; // status: 'approved' or 'needs_revision'
-    
+
     const { data, error } = await supabase
       .from('documents')
       .update({ status })
@@ -342,7 +634,7 @@ export const approveDocument = async (req, res) => {
 export const createEvaluation = async (req, res) => {
   try {
     const { evaluation_type, max_marks, obtained_marks, feedback } = req.body;
-    
+
     const { data, error } = await supabase
       .from('evaluations')
       .insert({
@@ -419,7 +711,7 @@ export const getIndividualMarks = async (req, res) => {
 export const updateIndividualMarks = async (req, res) => {
   try {
     const { marks } = req.body; // Array of individual mark objects
-    
+
     const results = [];
     for (const mark of marks) {
       const { data, error } = await supabase
@@ -469,7 +761,7 @@ export const getSystemSettings = async (req, res) => {
       .select('*');
 
     if (error) throw error;
-    
+
     // Convert to key-value object
     const settings = {};
     data?.forEach(setting => {
@@ -512,11 +804,11 @@ export const updateSystemSettings = async (req, res) => {
 export const assignMentor = async (req, res) => {
   try {
     const { project_id, mentor_id, coordinator_id } = req.body;
-    
+
     const { data, error } = await supabase
       .from('projects')
-      .update({ 
-        mentor_id, 
+      .update({
+        mentor_id,
         coordinator_id,
         updated_at: new Date().toISOString()
       })
@@ -526,6 +818,311 @@ export const assignMentor = async (req, res) => {
 
     if (error) throw error;
     res.json(data);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const getPendingProjects = async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('projects')
+      .select(`
+        id,
+        title,
+        description,
+        status,
+        created_at,
+        created_by,
+        team_members(student_id),
+        creator:profiles!projects_created_by_fkey(id, full_name)
+      `)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const createJoinRequest = async (req, res) => {
+  try {
+    const { message } = req.body || {};
+    const projectId = req.params.id;
+
+    const { data: membership } = await supabase
+      .from('team_members')
+      .select('id')
+      .eq('project_id', projectId)
+      .eq('student_id', req.user.id)
+      .single();
+
+    if (membership) {
+      return res.status(400).json({ message: 'You are already in this project' });
+    }
+
+    const { data: existingRequest, error: existingRequestError } = await supabase
+      .from('join_requests')
+      .select('id, status')
+      .eq('project_id', projectId)
+      .eq('student_id', req.user.id)
+      .single();
+
+    if (existingRequestError && existingRequestError.code !== 'PGRST116') {
+      throw existingRequestError;
+    }
+
+    if (existingRequest?.status === 'pending') {
+      return res.status(400).json({ message: 'Join request already exists' });
+    }
+
+    let data;
+    let reused = false;
+    if (existingRequest?.id) {
+      reused = true;
+      const { data: updated, error: updateError } = await supabase
+        .from('join_requests')
+        .update({
+          status: 'pending',
+          message: message || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingRequest.id)
+        .select()
+        .single();
+
+      if (updateError) throw updateError;
+      data = updated;
+    } else {
+      const { data: inserted, error } = await supabase
+        .from('join_requests')
+        .insert({
+          project_id: projectId,
+          student_id: req.user.id,
+          status: 'pending',
+          message: message || null,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        if (error.code === '23505') {
+          return res.status(400).json({ message: 'Join request already exists' });
+        }
+        throw error;
+      }
+      data = inserted;
+    }
+
+    const { data: projectRow } = await supabase
+      .from('projects')
+      .select('id, title')
+      .eq('id', projectId)
+      .single();
+
+    const { data: leaders } = await supabase
+      .from('team_members')
+      .select('student_id')
+      .eq('project_id', projectId)
+      .eq('role', 'leader');
+
+    const requesterName = safeProfileName(req.userProfile, 'Student');
+    const projectTitle = projectRow?.title || 'your project';
+    const leaderNotifications = (leaders || []).map((leader) => ({
+      user_id: leader.student_id,
+      type: 'join_request',
+      title: 'New Join Request',
+      message: `${requesterName} requested to join ${projectTitle}.`,
+    }));
+    await createNotifications(leaderNotifications);
+
+    res.status(reused ? 200 : 201).json(data);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const getLeaderJoinRequests = async (req, res) => {
+  try {
+    const { data: leaderProjects, error: projectsError } = await supabase
+      .from('team_members')
+      .select('project_id')
+      .eq('student_id', req.user.id)
+      .eq('role', 'leader');
+
+    if (projectsError) throw projectsError;
+
+    const projectIds = (leaderProjects || []).map((row) => row.project_id);
+    if (projectIds.length === 0) return res.json([]);
+
+    const { data, error } = await supabase
+      .from('join_requests')
+      .select(`
+        *,
+        project:projects(id, title),
+        student:profiles!join_requests_student_id_fkey(id, full_name, email, roll_number, department, semester)
+      `)
+      .in('project_id', projectIds)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const getMyJoinRequests = async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('join_requests')
+      .select('*')
+      .eq('student_id', req.user.id)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const respondToJoinRequest = async (req, res) => {
+  try {
+    const { action } = req.body || {};
+    if (!['approve', 'reject'].includes(action)) {
+      return res.status(400).json({ message: 'action must be approve or reject' });
+    }
+
+    const { data: requestRow, error: requestError } = await supabase
+      .from('join_requests')
+      .select('id, project_id, student_id, status')
+      .eq('id', req.params.id)
+      .single();
+
+    if (requestError || !requestRow) {
+      return res.status(404).json({ message: 'Join request not found' });
+    }
+
+    const { data: leaderMembership } = await supabase
+      .from('team_members')
+      .select('id')
+      .eq('project_id', requestRow.project_id)
+      .eq('student_id', req.user.id)
+      .eq('role', 'leader')
+      .single();
+
+    if (!leaderMembership) {
+      return res.status(403).json({ message: 'Only team leaders can manage this request' });
+    }
+
+    if (action === 'approve') {
+      const { error: addError } = await supabase
+        .from('team_members')
+        .insert({
+          project_id: requestRow.project_id,
+          student_id: requestRow.student_id,
+          role: 'member',
+        });
+
+      if (addError && addError.code !== '23505') throw addError;
+    }
+
+    const finalStatus = action === 'approve' ? 'approved' : 'rejected';
+    const { data, error } = await supabase
+      .from('join_requests')
+      .update({
+        status: finalStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', requestRow.id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    const { data: projectRow } = await supabase
+      .from('projects')
+      .select('id, title')
+      .eq('id', requestRow.project_id)
+      .single();
+
+    const { data: leaderProfile } = await supabase
+      .from('profiles')
+      .select('full_name, email')
+      .eq('id', req.user.id)
+      .single();
+
+    const leaderName = safeProfileName(leaderProfile, 'Team Leader');
+    const projectTitle = projectRow?.title || 'your requested project';
+    const decisionText = finalStatus === 'approved' ? 'approved' : 'rejected';
+
+    await createNotifications([
+      {
+        user_id: requestRow.student_id,
+        type: finalStatus === 'approved' ? 'join_request_approved' : 'join_request_rejected',
+        title: `Join Request ${finalStatus === 'approved' ? 'Approved' : 'Rejected'}`,
+        message: `${leaderName} ${decisionText} your join request for ${projectTitle}.`,
+      },
+    ]);
+
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ====== NOTIFICATION FUNCTIONS ======
+
+export const getNotifications = async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('id, user_id, type, title, message, read, created_at')
+      .eq('user_id', req.user.id)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const markNotificationRead = async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('notifications')
+      .update({ read: true })
+      .eq('id', req.params.id)
+      .eq('user_id', req.user.id)
+      .select('id, user_id, type, title, message, read, created_at')
+      .single();
+
+    if (error) {
+      return res.status(404).json({ message: 'Notification not found' });
+    }
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const markAllNotificationsRead = async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from('notifications')
+      .update({ read: true })
+      .eq('user_id', req.user.id)
+      .eq('read', false);
+
+    if (error) throw error;
+    res.json({ message: 'All notifications marked as read' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Modal from './Modal';
-import supabase from '../config/supabaseClient';
+import { apiRequest } from '../config/apiClient';
 
 export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
     const [projects, setProjects] = useState([]);
@@ -22,60 +22,25 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
         setSuccessMsg('');
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error('Not authenticated');
-
-            // Fetch projects and user's existing pending requests in parallel
-            const [projectsRes, requestsRes] = await Promise.all([
-                supabase
-                    .from('projects')
-                    .select('*, team_members(student_id)')
-                    .eq('status', 'pending')
-                    .order('created_at', { ascending: false }),
-                supabase
-                    .from('join_requests')
-                    .select('project_id')
-                    .eq('student_id', user.id)
-                    .eq('status', 'pending'),
+            const [projectsData, myProjectsData, myRequests] = await Promise.all([
+                apiRequest('/projects/public/pending'),
+                apiRequest('/projects'),
+                apiRequest('/join-requests/my'),
             ]);
 
-            if (projectsRes.error) throw projectsRes.error;
-
-            // Build set of project IDs where user already has a pending request
-            const pendingIds = new Set(
-                (requestsRes.data || []).map(r => r.project_id)
-            );
+            const myProjectIds = new Set((myProjectsData || []).map((p) => p.id));
+            const pendingIds = new Set((myRequests || []).map((r) => r.project_id));
             setPendingProjectIds(pendingIds);
 
-            // Fetch creator profiles
-            const uniqueProjectsMap = new Map();
-            const creatorIds = new Set();
-            (projectsRes.data || []).forEach(project => {
-                if (!uniqueProjectsMap.has(project.id)) {
-                    uniqueProjectsMap.set(project.id, project);
-                    if (project.created_by) creatorIds.add(project.created_by);
-                }
-            });
-
-            const { data: creators } = await supabase
-                .from('profiles')
-                .select('id, full_name')
-                .in('id', Array.from(creatorIds));
-
-            const creatorMap = new Map();
-            (creators || []).forEach(c => creatorMap.set(c.id, c.full_name));
-
-            const uniqueProjects = Array.from(uniqueProjectsMap.values()).map(p => ({
-                ...p,
-                creator_name: creatorMap.get(p.created_by) || 'Unknown',
-            }));
-
-            // Filter: not full, not already a member
-            const available = uniqueProjects.filter(p => {
-                const memberCount = p.team_members?.length || 0;
-                const isAlreadyMember = p.team_members?.some(tm => tm.student_id === user.id);
-                return memberCount < 4 && !isAlreadyMember;
-            });
+            const available = (projectsData || [])
+                .map((p) => ({
+                    ...p,
+                    creator_name: p.creator?.full_name || 'Unknown',
+                }))
+                .filter((p) => {
+                    const memberCount = p.team_members?.length || 0;
+                    return memberCount < 4 && !myProjectIds.has(p.id);
+                });
 
             setProjects(available);
         } catch (err) {
@@ -86,34 +51,18 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
     };
 
     const handleJoin = async (projectId) => {
-        if (pendingProjectIds.has(projectId)) return; // already requested
+        if (pendingProjectIds.has(projectId)) return;
 
         setJoining(projectId);
         setError('');
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error('Not authenticated');
+            await apiRequest(`/projects/${projectId}/join-requests`, {
+                method: 'POST',
+                body: {},
+            });
 
-            const { error: requestError } = await supabase
-                .from('join_requests')
-                .insert({
-                    project_id: projectId,
-                    student_id: user.id,
-                    status: 'pending',
-                });
-
-            if (requestError) {
-                if (requestError.code === '23505') {
-                    // Already exists — just update UI state
-                    setPendingProjectIds(prev => new Set([...prev, projectId]));
-                    return;
-                }
-                throw requestError;
-            }
-
-            // Mark as pending in UI
-            setPendingProjectIds(prev => new Set([...prev, projectId]));
+            setPendingProjectIds((prev) => new Set([...prev, projectId]));
             setSuccessMsg('Join request sent! The team leader will review your request.');
             onSuccess?.();
         } catch (err) {
@@ -148,7 +97,7 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
                     <div className="text-center py-12">
                         <span className="material-symbols-outlined text-6xl text-slate-300 mb-3">folder_off</span>
                         <p className="text-slate-600 font-medium">No projects available to join</p>
-                        <p className="text-sm text-slate-500 mt-1">All projects are either full or you're already a member</p>
+                        <p className="text-sm text-slate-500 mt-1">All projects are either full or you are already a member</p>
                     </div>
                 ) : (
                     <div className="space-y-3">
@@ -177,7 +126,6 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
                                         </div>
 
                                         {isPending ? (
-                                            /* Already requested — show pending badge */
                                             <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap">
                                                 <span className="material-symbols-outlined text-sm">hourglass_top</span>
                                                 Request Sent

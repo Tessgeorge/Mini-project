@@ -8,58 +8,53 @@ export default function TopBar({
   notificationCount = 0,
   onNotificationClick
 }) {
+  const initial = profile?.full_name?.charAt(0).toUpperCase() || "U";
+
   return (
-    <header className="flex items-center justify-between px-8 py-4 border-b border-slate-200 bg-white/80 backdrop-blur-md sticky top-0 z-10 w-full">
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2 text-slate-400 text-sm font-medium">
-          <span
-            className="transition-colors cursor-pointer"
-            onMouseEnter={(e) => e.currentTarget.style.color = '#00D2C4'}
-            onMouseLeave={(e) => e.currentTarget.style.color = '#cbd5e1'}
-          >
-            {subtitle}
-          </span>
-          <span className="material-symbols-outlined text-xs">chevron_right</span>
-          <span className="text-slate-900 font-bold">{title}</span>
-        </div>
+    <header className="glass-topbar flex items-center justify-between px-8 py-3.5 sticky top-0 z-10 w-full">
+      {/* Left: Breadcrumb */}
+      <div className="flex items-center gap-2 text-sm">
+        <span className="text-slate-400 font-medium">{subtitle}</span>
+        <span className="material-symbols-outlined text-xs text-slate-300">chevron_right</span>
+        <span className="font-bold text-slate-800">{title}</span>
       </div>
 
-      <div className="flex items-center gap-6">
-        <div className="relative w-64 hidden sm:block">
-          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">
-            search
-          </span>
+      {/* Right: Controls */}
+      <div className="flex items-center gap-5">
+        {/* Search */}
+        <div className="relative w-56 hidden sm:block">
+          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-base">search</span>
           <input
-            className="w-full bg-slate-100 border-none rounded-lg pl-10 pr-4 py-2 text-sm focus:ring-2 focus:ring-teal-500/20 focus:outline-none transition-all placeholder:text-slate-400 text-slate-700"
-            placeholder="Search..."
+            className="glass-input w-full pl-9 pr-4 py-2 text-sm placeholder:text-slate-400 text-slate-700"
+            placeholder="Search…"
             type="text"
           />
         </div>
 
+        {/* Notification bell */}
         <button
-          className="relative text-slate-400 hover:text-slate-600 transition-colors"
+          className="relative p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-white/60 transition-all"
           onClick={onNotificationClick}
           title="Notifications"
         >
-          <span className="material-symbols-outlined">notifications</span>
+          <span className="material-symbols-outlined text-[22px]">notifications</span>
           {notificationCount > 0 && (
-            <span className="absolute -top-1 -right-1 size-5 bg-red-500 rounded-full border-2 border-white flex items-center justify-center text-[10px] font-bold text-white">
-              {notificationCount > 9 ? '9+' : notificationCount}
+            <span className="absolute top-1 right-1 size-4 flex items-center justify-center rounded-full text-[9px] font-black text-white"
+              style={{ backgroundColor: "#ef4444" }}>
+              {notificationCount > 9 ? "9+" : notificationCount}
             </span>
           )}
         </button>
 
-        <div
-          className="size-9 rounded-full flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-teal-500/30 transition-all font-black text-sm"
-          style={{
-            backgroundColor: '#00D2C4',
-            color: '#000'
-          }}
+        {/* Avatar */}
+        <button
           onClick={onProfileClick}
-          title={profile?.full_name || 'Profile'}
+          title={profile?.full_name || "Profile"}
+          className="size-9 rounded-full flex items-center justify-center text-sm font-black ring-2 ring-transparent hover:ring-teal-400/40 transition-all shadow-sm"
+          style={{ background: "linear-gradient(135deg,#00C4B4 0%,#00897B 100%)", color: "#fff" }}
         >
-          {profile?.full_name?.charAt(0).toUpperCase() || 'U'}
-        </div>
+          {initial}
+        </button>
       </div>
     </header>
   );

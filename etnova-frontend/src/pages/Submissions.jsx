@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import supabase from '../config/supabaseClient';
+import { apiRequest } from '../config/apiClient';
 
 const DOC_TYPES = [
     { value: 'abstract', label: 'Abstract' },
@@ -10,14 +11,6 @@ const DOC_TYPES = [
     { value: 'presentation', label: 'Presentation / PPT' },
 ];
 
-const DEADLINES = [
-    { type: 'Abstract', date: '2026-03-01', label: 'Mar 1' },
-    { type: 'Proposal', date: '2026-03-15', label: 'Mar 15' },
-    { type: 'Report', date: '2026-04-10', label: 'Apr 10' },
-    { type: 'Final Report', date: '2026-05-01', label: 'May 1' },
-    { type: 'Presentation', date: '2026-05-15', label: 'May 15' },
-];
-
 const GUIDELINES = [
     'Submit PDF format only for reports and abstracts.',
     'PPT files accepted as .pptx or .pdf.',
@@ -26,328 +19,287 @@ const GUIDELINES = [
     'Contact your mentor for feedback queries.',
 ];
 
+const DOC_TYPE_LABELS = DOC_TYPES.reduce((acc, item) => { acc[item.value] = item.label; return acc; }, {});
+
+/* ─── Status badge ──────────────────────────────────────────────────── */
 function StatusBadge({ status }) {
     const s = (status || 'submitted').toLowerCase();
-    if (s === 'approved') return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-            <span className="size-1.5 rounded-full bg-emerald-500 inline-block" />
-            Approved
-        </span>
-    );
-    if (s === 'needs_revision') return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
-            <span className="size-1.5 rounded-full bg-rose-500 inline-block" />
-            Needs Revision
-        </span>
-    );
-    if (s === 'submitted') return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
-            <span className="size-1.5 rounded-full bg-amber-400 inline-block" />
-            Pending
-        </span>
-    );
-    return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-50 text-slate-500 border border-slate-200">
-            <span className="size-1.5 rounded-full bg-slate-400 inline-block" />
-            {status || 'Unknown'}
-        </span>
-    );
+    if (s === 'approved') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"><span className="size-1.5 rounded-full bg-emerald-500 inline-block" /> Approved</span>;
+    if (s === 'needs_revision') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200"><span className="size-1.5 rounded-full bg-rose-500 inline-block" /> Needs Revision</span>;
+    if (s === 'submitted') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200"><span className="size-1.5 rounded-full bg-amber-400 inline-block" /> Pending</span>;
+    return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-50 text-slate-500 border border-slate-200"><span className="size-1.5 rounded-full bg-slate-400 inline-block" /> {status || 'Unknown'}</span>;
 }
 
+/* ─── Doc type label ────────────────────────────────────────────────── */
 function DocTypeLabel({ type }) {
-    const icons = {
-        abstract: 'description',
-        proposal: 'assignment',
-        report: 'article',
-        final_report: 'task_alt',
-        presentation: 'slideshow',
-        progress_update: 'trending_up',
-    };
-    const labels = {
-        abstract: 'Abstract',
-        proposal: 'Proposal',
-        report: 'Progress Report',
-        final_report: 'Final Report',
-        presentation: 'Presentation',
-        progress_update: 'Progress Update',
-    };
+    const icons = { abstract: 'description', proposal: 'assignment', report: 'article', final_report: 'task_alt', presentation: 'slideshow', srs: 'list_alt' };
+    const labels = { abstract: 'Abstract', proposal: 'Proposal', report: 'Progress Report', final_report: 'Final Report', presentation: 'Presentation', srs: 'SRS' };
     return (
-        <div className="flex items-center gap-2">
-            <div className="size-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'rgba(0,210,196,0.1)' }}>
-                <span className="material-symbols-outlined text-base" style={{ color: '#00D2C4' }}>
-                    {icons[type] || 'insert_drive_file'}
-                </span>
+        <div className="flex items-center gap-2.5">
+            <div className="size-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: 'rgba(0,196,180,0.10)' }}>
+                <span className="material-symbols-outlined text-[18px]" style={{ color: '#00C4B4' }}>{icons[type] || 'insert_drive_file'}</span>
             </div>
-            <span className="text-sm font-bold text-slate-800 capitalize">
-                {labels[type] || type?.replaceAll('_', ' ')}
-            </span>
+            <span className="text-sm font-semibold text-slate-800">{labels[type] || type?.replaceAll('_', ' ')}</span>
         </div>
     );
 }
 
+/* ─── Sidebar section header ────────────────────────────────────────── */
+function SectionHeader({ icon, iconColor = '#00C4B4', title, children }) {
+    return (
+        <div className="px-5 py-4 border-b border-white/70 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[18px]" style={{ color: iconColor }}>{icon}</span>
+                <h3 className="font-black text-slate-900 text-sm">{title}</h3>
+            </div>
+            {children}
+        </div>
+    );
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 export default function Submissions() {
     const fileInputRef = useRef(null);
+    const uploadFormRef = useRef(null);
+
     const [project, setProject] = useState(null);
     const [documents, setDocuments] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [error, setError] = useState('');
     const [successMsg, setSuccessMsg] = useState('');
-
-    // Upload form state
     const [docType, setDocType] = useState('');
     const [selectedFile, setSelectedFile] = useState(null);
     const [isDragging, setIsDragging] = useState(false);
 
-    // Feedback modal state
-    const [feedbackDoc, setFeedbackDoc] = useState(null);
+    useEffect(() => { loadData(); }, []);
 
-    useEffect(() => {
-        loadData();
-    }, []);
-
-    const loadData = async () => {
-        setLoading(true);
+    const loadData = async (isRefresh = false) => {
+        if (isRefresh) setRefreshing(true);
+        else setLoading(true);
         setError('');
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error('Not authenticated');
-
-            // Get user's project
-            const { data: tmRows } = await supabase
-                .from('team_members')
-                .select('project:project_id (id, title, status)')
-                .eq('student_id', user.id)
-                .limit(1);
-
-            const proj = tmRows?.[0]?.project;
-            if (!proj?.id) {
-                setLoading(false);
-                return;
-            }
+            const projects = await apiRequest('/projects');
+            const proj = projects?.[0];
+            if (!proj?.id) { setLoading(false); return; }
             setProject(proj);
-
-            // Get all documents for the project
-            const { data: docs, error: docsErr } = await supabase
-                .from('documents')
-                .select('id, document_type, file_name, file_url, status, version, uploaded_at')
-                .eq('project_id', proj.id)
-                .order('uploaded_at', { ascending: false });
-
-            if (docsErr) throw docsErr;
-            setDocuments(docs || []);
+            const docs = proj.documents || [];
+            setDocuments(docs.sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at)));
         } catch (e) {
             setError(e.message || 'Failed to load submissions');
         } finally {
             setLoading(false);
+            setRefreshing(false);
         }
     };
 
-    // Compute next version for a given doc type
     const getNextVersion = (type) => {
         const existing = documents.filter(d => d.document_type === type);
-        return existing.length + 1;
+        if (existing.length === 0) return 1;
+        return Math.max(...existing.map(d => d.version ?? 1)) + 1;
     };
 
-    const handleDrop = (e) => {
-        e.preventDefault();
-        setIsDragging(false);
-        const file = e.dataTransfer.files?.[0];
-        if (file) setSelectedFile(file);
+    const getLatestDoc = (type) => {
+        const existing = documents.filter(d => d.document_type === type);
+        if (existing.length === 0) return null;
+        return existing.reduce((a, b) => (a.version ?? 1) >= (b.version ?? 1) ? a : b);
     };
 
-    const handleDragOver = (e) => {
-        e.preventDefault();
-        setIsDragging(true);
+    const getNextDocType = (currentType) => {
+        const idx = DOC_TYPES.findIndex(d => d.value === currentType);
+        if (idx < 0 || idx >= DOC_TYPES.length - 1) return null;
+        return DOC_TYPES[idx + 1];
     };
 
+    const focusUploadForType = (type) => {
+        setDocType(type);
+        setSelectedFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        uploadFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    const latestByType = DOC_TYPES
+        .map(t => getLatestDoc(t.value))
+        .filter(Boolean)
+        .sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
+
+    const handleDelete = async (doc) => {
+        if (!window.confirm(`Delete "${doc.file_name}"? This cannot be undone.`)) return;
+        setDocuments(prev => prev.filter(d => d.id !== doc.id));
+        setError('');
+        try {
+            await apiRequest(`/documents/${doc.id}`, { method: 'DELETE' });
+            if (doc.file_url) {
+                try {
+                    const url = new URL(doc.file_url);
+                    const m = url.pathname.match(/\/object\/public\/documents\/(.*)/) || url.pathname.match(/\/object\/documents\/(.*)/);
+                    if (m?.[1]) await supabase.storage.from('documents').remove([decodeURIComponent(m[1])]);
+                } catch { /* ignore */ }
+            }
+        } catch (e) {
+            loadData();
+            setError(e.message || 'Delete failed. Please try again.');
+        }
+    };
+
+    const handleDrop = (e) => { e.preventDefault(); setIsDragging(false); const f = e.dataTransfer.files?.[0]; if (f) setSelectedFile(f); };
+    const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
     const handleDragLeave = () => setIsDragging(false);
-
-    const handleFileChange = (e) => {
-        const file = e.target.files?.[0];
-        if (file) setSelectedFile(file);
-    };
+    const handleFileChange = (e) => { const f = e.target.files?.[0]; if (f) setSelectedFile(f); };
 
     const handleUpload = async () => {
         if (!docType) return setError('Please select a document type.');
         if (!selectedFile) return setError('Please select a file to upload.');
         if (!project?.id) return setError('No project found.');
-
-        setUploading(true);
-        setError('');
-        setSuccessMsg('');
-
+        setUploading(true); setError(''); setSuccessMsg('');
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error('Not authenticated');
-
-            const version = getNextVersion(docType);
+            const existingDoc = getLatestDoc(docType);
+            const version = existingDoc ? (existingDoc.version ?? 1) + 1 : 1;
             const ext = selectedFile.name.split('.').pop();
             const filePath = `${project.id}/${docType}_v${version}_${Date.now()}.${ext}`;
+            let fileUrl = existingDoc?.file_url || null;
 
-            // Try to upload file to storage (optional — won't block if bucket missing)
-            let fileUrl = null;
-            const { data: storageData, error: storageErr } = await supabase.storage
-                .from('documents')
-                .upload(filePath, selectedFile);
-
+            const { error: storageErr } = await supabase.storage.from('documents').upload(filePath, selectedFile);
             if (storageErr) {
-                console.warn('Storage upload failed (bucket may not exist):', storageErr.message);
-                // Continue without file URL
+                console.warn('Storage upload failed:', storageErr.message);
             } else {
-                const { data: urlData } = supabase.storage
-                    .from('documents')
-                    .getPublicUrl(filePath);
-                fileUrl = urlData?.publicUrl || '';
+                const { data: urlData } = supabase.storage.from('documents').getPublicUrl(filePath);
+                fileUrl = urlData?.publicUrl || fileUrl;
             }
 
-            // Insert document record into table
-            const { error: insertErr } = await supabase
-                .from('documents')
-                .insert({
-                    project_id: project.id,
-                    document_type: docType,
-                    file_name: selectedFile.name,
-                    file_url: fileUrl,
-                    status: 'submitted',
-                    version,
-                    uploaded_by: user.id,
+            if (existingDoc) {
+                await apiRequest(`/documents/${existingDoc.id}`, {
+                    method: 'PUT',
+                    body: { file_name: selectedFile.name, file_url: fileUrl, status: 'submitted', version, uploaded_at: new Date().toISOString() },
                 });
-
-            if (insertErr) {
-                console.error('Insert error:', insertErr);
-                throw new Error(insertErr.message || 'Failed to save document record.');
+            } else {
+                await apiRequest(`/projects/${project.id}/documents`, {
+                    method: 'POST',
+                    body: { document_type: docType, file_name: selectedFile.name, file_url: fileUrl, status: 'submitted', version },
+                });
             }
 
-            setSuccessMsg(`✓ ${DOC_TYPES.find(d => d.value === docType)?.label} submitted successfully (v${version})${!fileUrl ? ' — file metadata saved (storage not configured)' : ''}`);
-            setDocType('');
-            setSelectedFile(null);
+            setSuccessMsg(`${DOC_TYPES.find(d => d.value === docType)?.label} ${existingDoc ? `updated to v${version}` : 'submitted (v1)'}${!fileUrl ? ' - no file attached' : ''}`);
+            setDocType(''); setSelectedFile(null);
             if (fileInputRef.current) fileInputRef.current.value = '';
             loadData();
         } catch (e) {
-            console.error('Upload error:', e);
             setError(e.message || 'Upload failed. Please try again.');
         } finally {
             setUploading(false);
         }
     };
 
-    // Upcoming deadline: find nearest
-    const nearestDeadline = DEADLINES.find(d => new Date(d.date) >= new Date());
-
-    if (loading) {
-        return (
-            <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-                <div className="text-center">
-                    <div className="inline-block size-12 border-4 border-slate-200 border-t-[#00D2C4] rounded-full animate-spin" />
-                    <p className="mt-4 text-slate-600 font-medium">Loading submissions...</p>
-                </div>
+    /* ── Loading states ── */
+    if (loading) return (
+        <div className="etnova-bg flex items-center justify-center py-24">
+            <div className="text-center">
+                <div className="inline-block size-12 border-4 border-slate-200 border-t-[#00C4B4] rounded-full animate-spin" />
+                <p className="mt-4 text-slate-600 font-medium">Loading submissions...</p>
             </div>
-        );
-    }
+        </div>
+    );
 
-    if (!project) {
-        return (
-            <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-                <div className="text-center max-w-md">
-                    <span className="material-symbols-outlined text-6xl text-slate-300 mb-4 block">upload_file</span>
-                    <h2 className="text-xl font-black text-slate-900 mb-2">No Project Found</h2>
-                    <p className="text-slate-600">Join or create a project to access submissions.</p>
-                </div>
+    if (!project) return (
+        <div className="etnova-bg flex items-center justify-center py-24">
+            <div className="text-center max-w-md">
+                <span className="material-symbols-outlined text-6xl text-slate-300 mb-4 block">upload_file</span>
+                <h2 className="text-xl font-black text-slate-900 mb-2">No Project Found</h2>
+                <p className="text-slate-600">Join or create a project to access submissions.</p>
             </div>
-        );
-    }
+        </div>
+    );
 
+    /* ══ Main render ══════════════════════════════════════════════════════ */
     return (
-        <div className="min-h-screen bg-slate-50">
-            {/* Page Header */}
-            <div className="bg-white border-b border-slate-200 px-6 py-5">
-                <div className="max-w-7xl mx-auto">
-                    <div className="flex items-center gap-3">
-                        <div className="size-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: '#00D2C4' }}>
-                            <span className="material-symbols-outlined text-black">upload_file</span>
-                        </div>
-                        <div>
-                            <h1 className="text-xl font-black text-slate-900">Project Submissions</h1>
-                            <p className="text-sm text-slate-500">{project.title}</p>
-                        </div>
+        <div className="etnova-bg pb-8">
+
+            {/* ── Page Header ── */}
+            <div className="glass-topbar px-6 py-4">
+                <div className="max-w-7xl mx-auto flex items-center gap-3">
+                    <div className="size-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                        style={{ background: 'linear-gradient(135deg,#00C4B4 0%,#00897B 100%)' }}>
+                        <span className="material-symbols-outlined text-white text-[18px]">upload_file</span>
+                    </div>
+                    <div>
+                        <h1 className="text-lg font-black text-slate-900 leading-none">Project Submissions</h1>
+                        <p className="text-xs text-slate-500 mt-0.5">{project.title}</p>
+                    </div>
+                    {/* Doc count pill */}
+                    <div className="ml-auto flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-500 bg-white/60 border border-slate-200 px-3 py-1.5 rounded-full">
+                            {documents.length} document{documents.length !== 1 ? 's' : ''}
+                        </span>
                     </div>
                 </div>
             </div>
 
-            <div className="max-w-7xl mx-auto px-6 py-8">
-                {/* Alerts */}
+            <div className="max-w-7xl mx-auto px-6 py-6">
+
+                {/* ── Alerts ── */}
                 {error && (
                     <div className="mb-5 flex items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                        <span className="material-symbols-outlined text-base">error</span>
-                        {error}
-                        <button onClick={() => setError('')} className="ml-auto">
-                            <span className="material-symbols-outlined text-base">close</span>
-                        </button>
+                        <span className="material-symbols-outlined text-base flex-shrink-0">error</span>
+                        <span className="flex-1">{error}</span>
+                        <button onClick={() => setError('')}><span className="material-symbols-outlined text-base text-rose-400">close</span></button>
                     </div>
                 )}
                 {successMsg && (
                     <div className="mb-5 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                        <span className="material-symbols-outlined text-base">check_circle</span>
-                        {successMsg}
-                        <button onClick={() => setSuccessMsg('')} className="ml-auto">
-                            <span className="material-symbols-outlined text-base">close</span>
-                        </button>
+                        <span className="material-symbols-outlined text-base flex-shrink-0">check_circle</span>
+                        <span className="flex-1">{successMsg}</span>
+                        <button onClick={() => setSuccessMsg('')}><span className="material-symbols-outlined text-base text-emerald-400">close</span></button>
                     </div>
                 )}
 
-                <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                    {/* LEFT: Main Content */}
-                    <div className="xl:col-span-2 space-y-6">
+                {/* ── Two-column grid ── */}
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
 
-                        {/* Upload Card */}
-                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
-                                <div>
-                                    <h2 className="font-black text-slate-900">Upload New Submission</h2>
-                                    <p className="text-xs text-slate-500 mt-0.5">Select document type and upload your file</p>
+                    {/* ─── LEFT: Main content ─── */}
+                    <div className="xl:col-span-2 space-y-5">
+
+                        {/* Upload card */}
+                        <div ref={uploadFormRef} className="glass-card-strong overflow-hidden">
+                            <div className="px-5 py-4 border-b border-white/70 flex items-center gap-3">
+                                <div className="size-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                                    style={{ backgroundColor: 'rgba(0,196,180,0.12)' }}>
+                                    <span className="material-symbols-outlined text-[17px]" style={{ color: '#00C4B4' }}>cloud_upload</span>
                                 </div>
-                                {nearestDeadline && (
-                                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200">
-                                        <span className="material-symbols-outlined text-sm text-amber-600">schedule</span>
-                                        <span className="text-xs font-bold text-amber-700">
-                                            {nearestDeadline.type}: {nearestDeadline.label}
-                                        </span>
-                                    </div>
-                                )}
+                                <div>
+                                    <h2 className="font-black text-slate-900 text-sm leading-none">Upload New Submission</h2>
+                                    <p className="text-[11px] text-slate-400 mt-0.5">Select document type and upload your file</p>
+                                </div>
                             </div>
 
-                            <form className="p-6 space-y-5">
-                                {/* Document Type Select */}
+                            <div className="p-5 space-y-4">
+                                {/* Document type select */}
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-2">
+                                    <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide">
                                         Document Type <span className="text-rose-500">*</span>
                                     </label>
                                     <div className="relative">
-                                        <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-base">description</span>
+                                        <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">description</span>
                                         <select
                                             value={docType}
                                             onChange={e => setDocType(e.target.value)}
-                                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:border-[#00D2C4] appearance-none cursor-pointer"
-                                            style={{ '--tw-ring-color': '#00D2C4' }}
+                                            className="glass-input w-full pl-9 pr-9 py-2.5 text-sm text-slate-800 font-medium focus:outline-none appearance-none cursor-pointer"
                                         >
                                             <option value="">Select document type...</option>
-                                            {DOC_TYPES.map(t => (
-                                                <option key={t.value} value={t.value}>{t.label}</option>
-                                            ))}
+                                            {DOC_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                                         </select>
-                                        <span className="material-symbols-outlined absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-base pointer-events-none">expand_more</span>
+                                        <span className="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px] pointer-events-none">expand_more</span>
                                     </div>
                                     {docType && (
-                                        <p className="mt-1.5 text-xs text-slate-500">
-                                            Auto version: <span className="font-bold text-slate-700">v{getNextVersion(docType)}</span>
+                                        <p className="mt-1.5 text-[11px] text-slate-400">
+                                            Will be uploaded as: <span className="font-bold text-slate-600">v{getNextVersion(docType)}</span>
                                         </p>
                                     )}
                                 </div>
 
-                                {/* Drag & Drop Upload Area */}
+                                {/* Drag & drop zone */}
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-2">
+                                    <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide">
                                         File <span className="text-rose-500">*</span>
                                     </label>
                                     <div
@@ -355,173 +307,140 @@ export default function Submissions() {
                                         onDragOver={handleDragOver}
                                         onDragLeave={handleDragLeave}
                                         onClick={() => fileInputRef.current?.click()}
-                                        className={`relative border-2 border-dashed rounded-xl cursor-pointer transition-all duration-200 p-8 text-center
-                      ${isDragging
-                                                ? 'border-[#00D2C4] bg-[rgba(0,210,196,0.05)]'
-                                                : selectedFile
-                                                    ? 'border-emerald-300 bg-emerald-50'
-                                                    : 'border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-slate-100'
+                                        className={`relative border-2 border-dashed rounded-xl cursor-pointer transition-all duration-200 py-8 px-6 text-center ${isDragging ? 'border-[#00C4B4] bg-[rgba(0,196,180,0.05)]'
+                                            : selectedFile ? 'border-emerald-300 bg-emerald-50/60'
+                                                : 'border-slate-200 bg-white/40 hover:border-[#00C4B4]/40 hover:bg-white/60'
                                             }`}
                                     >
-                                        <input
-                                            ref={fileInputRef}
-                                            type="file"
-                                            className="hidden"
-                                            accept=".pdf,.pptx,.docx,.doc"
-                                            onChange={handleFileChange}
-                                        />
+                                        <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,.pptx,.docx,.doc" onChange={handleFileChange} />
                                         {selectedFile ? (
                                             <div className="flex flex-col items-center gap-2">
-                                                <div className="size-12 rounded-xl bg-emerald-100 flex items-center justify-center">
+                                                <div className="size-11 rounded-xl bg-emerald-100 flex items-center justify-center">
                                                     <span className="material-symbols-outlined text-emerald-600">insert_drive_file</span>
                                                 </div>
                                                 <p className="text-sm font-bold text-emerald-700">{selectedFile.name}</p>
-                                                <p className="text-xs text-slate-500">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
-                                                <button
-                                                    type="button"
-                                                    onClick={(e) => { e.stopPropagation(); setSelectedFile(null); }}
-                                                    className="text-xs text-slate-500 hover:text-rose-600 font-medium flex items-center gap-1"
-                                                >
-                                                    <span className="material-symbols-outlined text-sm">close</span>
-                                                    Remove
+                                                <p className="text-xs text-slate-400">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                                                <button type="button" onClick={e => { e.stopPropagation(); setSelectedFile(null); }}
+                                                    className="text-xs text-slate-400 hover:text-rose-600 font-medium flex items-center gap-1 transition-colors mt-1">
+                                                    <span className="material-symbols-outlined text-sm">close</span> Remove
                                                 </button>
                                             </div>
                                         ) : (
-                                            <div className="flex flex-col items-center gap-3">
-                                                <div className="size-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center">
-                                                    <span className="material-symbols-outlined text-slate-400">cloud_upload</span>
+                                            <div className="flex flex-col items-center gap-2.5">
+                                                <div className="size-11 rounded-xl bg-white border border-slate-100 flex items-center justify-center shadow-sm">
+                                                    <span className="material-symbols-outlined text-slate-300">cloud_upload</span>
                                                 </div>
                                                 <div>
-                                                    <p className="text-sm font-bold text-slate-700">
-                                                        Drag & drop your file here
-                                                    </p>
-                                                    <p className="text-xs text-slate-500 mt-1">or <span className="text-[#00D2C4] font-bold">browse to upload</span></p>
-                                                    <p className="text-xs text-slate-400 mt-2">PDF, DOCX, PPTX • Max 20 MB</p>
+                                                    <p className="text-sm font-semibold text-slate-600">Drag & drop your file here</p>
+                                                    <p className="text-xs text-slate-400 mt-0.5">or <span style={{ color: '#00C4B4' }} className="font-bold">browse to upload</span></p>
+                                                    <p className="text-[11px] text-slate-300 mt-1.5">PDF, DOCX, PPTX · Max 20 MB</p>
                                                 </div>
                                             </div>
                                         )}
                                     </div>
                                 </div>
 
-                                {/* Submit */}
+                                {/* Submit button */}
                                 <button
                                     type="button"
                                     onClick={handleUpload}
                                     disabled={uploading}
-                                    className="w-full py-3 rounded-xl font-bold text-sm text-black flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                    style={{ backgroundColor: '#00D2C4' }}
+                                    className="btn-primary w-full py-2.5 text-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     {uploading ? (
-                                        <>
-                                            <div className="size-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />
-                                            Uploading...
-                                        </>
+                                        <><div className="size-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Uploading...</>
                                     ) : (
-                                        <>
-                                            <span className="material-symbols-outlined text-base">upload</span>
-                                            Submit Document
-                                        </>
+                                        <><span className="material-symbols-outlined text-base">upload</span> Submit Document</>
                                     )}
                                 </button>
-                            </form>
+                            </div>
                         </div>
 
-                        {/* Submission History */}
-                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
-                                <div>
-                                    <h2 className="font-black text-slate-900">Submission History</h2>
-                                    <p className="text-xs text-slate-500 mt-0.5">{documents.length} document{documents.length !== 1 ? 's' : ''} submitted</p>
+                        {/* Submission History card */}
+                        <div className="glass-card-strong overflow-hidden">
+                            <div className="px-5 py-4 border-b border-white/70 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                    <div className="size-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                                        style={{ backgroundColor: 'rgba(0,196,180,0.10)' }}>
+                                        <span className="material-symbols-outlined text-[17px]" style={{ color: '#00C4B4' }}>history</span>
+                                    </div>
+                                    <div>
+                                        <h2 className="font-black text-slate-900 text-sm leading-none">Submission History</h2>
+                                        <p className="text-[11px] text-slate-400 mt-0.5">{documents.length} document{documents.length !== 1 ? 's' : ''} submitted</p>
+                                    </div>
                                 </div>
                                 <button
-                                    onClick={loadData}
+                                    type="button"
+                                    onClick={() => loadData(true)}
                                     className="size-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 hover:text-slate-700 hover:border-slate-300 transition-all"
                                     title="Refresh"
                                 >
-                                    <span className="material-symbols-outlined text-base">refresh</span>
+                                    <span className={`material-symbols-outlined text-base ${refreshing ? 'animate-spin' : ''}`}>refresh</span>
                                 </button>
                             </div>
 
                             {documents.length === 0 ? (
-                                <div className="py-16 flex flex-col items-center gap-3 text-center px-6">
-                                    <div className="size-14 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-center">
+                                <div className="py-14 flex flex-col items-center gap-3 text-center px-6">
+                                    <div className="size-14 rounded-2xl bg-white/50 border border-slate-100 flex items-center justify-center">
                                         <span className="material-symbols-outlined text-2xl text-slate-300">folder_open</span>
                                     </div>
                                     <p className="text-sm font-bold text-slate-700">No submissions yet</p>
-                                    <p className="text-xs text-slate-500">Upload your first document using the form above.</p>
+                                    <p className="text-xs text-slate-400">Upload your first document using the form above.</p>
                                 </div>
                             ) : (
                                 <div className="overflow-x-auto">
                                     <table className="w-full text-sm">
                                         <thead>
-                                            <tr className="border-b border-slate-100">
-                                                <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Document</th>
-                                                <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Ver.</th>
-                                                <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
-                                                <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Uploaded</th>
-                                                <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Feedback</th>
-                                                <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Actions</th>
+                                            <tr className="border-b border-white/70 bg-white/20">
+                                                <th className="px-5 py-3 text-left text-[10px] font-black text-slate-400 uppercase tracking-wider">Document</th>
+                                                <th className="px-4 py-3 text-left text-[10px] font-black text-slate-400 uppercase tracking-wider">Ver.</th>
+                                                <th className="px-4 py-3 text-left text-[10px] font-black text-slate-400 uppercase tracking-wider">Status</th>
+                                                <th className="px-4 py-3 text-left text-[10px] font-black text-slate-400 uppercase tracking-wider">Uploaded</th>
+                                                <th className="px-4 py-3 text-left text-[10px] font-black text-slate-400 uppercase tracking-wider">Actions</th>
                                             </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-slate-50">
-                                            {documents.map((doc) => (
-                                                <tr key={doc.id} className="hover:bg-slate-50 transition-colors">
-                                                    <td className="px-6 py-4">
-                                                        <DocTypeLabel type={doc.document_type} />
-                                                    </td>
-                                                    <td className="px-4 py-4">
-                                                        <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded-md">
-                                                            v{doc.version ?? 1}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-4 py-4">
-                                                        <StatusBadge status={doc.status} />
-                                                    </td>
-                                                    <td className="px-4 py-4 text-xs text-slate-500">
-                                                        {doc.uploaded_at
-                                                            ? new Date(doc.uploaded_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })
-                                                            : '—'}
-                                                    </td>
-                                                    <td className="px-4 py-4">
-                                                        {doc.feedback ? (
-                                                            <button
-                                                                onClick={() => setFeedbackDoc(doc)}
-                                                                className="text-xs font-bold text-[#00D2C4] hover:underline flex items-center gap-1"
-                                                            >
-                                                                <span className="material-symbols-outlined text-sm">chat_bubble</span>
-                                                                View
-                                                            </button>
-                                                        ) : (
-                                                            <span className="text-xs text-slate-400">—</span>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-4 py-4">
-                                                        <div className="flex items-center gap-2">
-                                                            {doc.file_url && (
-                                                                <a
-                                                                    href={doc.file_url}
-                                                                    target="_blank"
-                                                                    rel="noreferrer"
-                                                                    className="size-7 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:text-[#00D2C4] hover:border-[#00D2C4] transition-all"
-                                                                    title="View file"
-                                                                >
-                                                                    <span className="material-symbols-outlined text-sm">visibility</span>
-                                                                </a>
-                                                            )}
-                                                            <button
-                                                                onClick={() => {
-                                                                    setDocType(doc.document_type);
-                                                                    fileInputRef.current?.scrollIntoView({ behavior: 'smooth' });
-                                                                }}
-                                                                className="size-7 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:text-[#00D2C4] hover:border-[#00D2C4] transition-all"
-                                                                title="Re-upload"
-                                                            >
-                                                                <span className="material-symbols-outlined text-sm">sync</span>
-                                                            </button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            ))}
+                                        <tbody className="divide-y divide-white/50">
+                                            {documents.map(doc => {
+                                                const latestDoc = getLatestDoc(doc.document_type);
+                                                const isLatest = doc.id === latestDoc?.id;
+                                                return (
+                                                    <tr key={doc.id} className={`transition-colors ${isLatest ? 'hover:bg-white/30' : 'opacity-40 hover:opacity-60'}`}>
+                                                        <td className="px-5 py-3.5">
+                                                            <div className="flex items-center gap-2">
+                                                                <DocTypeLabel type={doc.document_type} />
+                                                                {!isLatest && <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">old</span>}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-4 py-3.5">
+                                                            <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded-md">v{doc.version ?? 1}</span>
+                                                        </td>
+                                                        <td className="px-4 py-3.5"><StatusBadge status={doc.status} /></td>
+                                                        <td className="px-4 py-3.5 text-xs text-slate-500 whitespace-nowrap">
+                                                            {doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' }) : '-'}
+                                                        </td>
+                                                        <td className="px-4 py-3.5">
+                                                            <div className="flex items-center gap-1.5">
+                                                                {doc.file_url && (
+                                                                    <a href={doc.file_url} target="_blank" rel="noreferrer"
+                                                                        className="size-7 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 hover:text-[#00C4B4] hover:border-[#00C4B4] transition-all" title="View file">
+                                                                        <span className="material-symbols-outlined text-sm">visibility</span>
+                                                                    </a>
+                                                                )}
+                                                                <button
+                                                                    onClick={() => focusUploadForType(doc.document_type)}
+                                                                    className="size-7 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 hover:text-[#00C4B4] hover:border-[#00C4B4] transition-all" title="Re-upload new version">
+                                                                    <span className="material-symbols-outlined text-sm">sync</span>
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleDelete(doc)}
+                                                                    className="size-7 rounded-lg border border-rose-100 flex items-center justify-center text-rose-300 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-400 transition-all" title="Delete document">
+                                                                    <span className="material-symbols-outlined text-sm">delete</span>
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 </div>
@@ -529,101 +448,123 @@ export default function Submissions() {
                         </div>
                     </div>
 
-                    {/* RIGHT: Sidebar Panels */}
+                    {/* ─── RIGHT: Sidebar panels ─── */}
                     <div className="space-y-5">
 
-                        {/* Stats */}
+                        {/* Stats grid */}
                         <div className="grid grid-cols-2 gap-3">
                             {[
-                                { label: 'Submitted', value: documents.filter(d => d.status === 'submitted').length, color: 'bg-amber-50 text-amber-700 border-amber-200', icon: 'hourglass_top' },
-                                { label: 'Approved', value: documents.filter(d => d.status === 'approved').length, color: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: 'task_alt' },
-                                { label: 'Revision', value: documents.filter(d => d.status === 'needs_revision').length, color: 'bg-rose-50 text-rose-700 border-rose-200', icon: 'edit_note' },
-                                { label: 'Total', value: documents.length, color: 'bg-slate-50 text-slate-700 border-slate-200', icon: 'folder_open' },
+                                { label: 'Pending', value: documents.filter(d => d.status === 'submitted').length, style: 'bg-amber-50   text-amber-700   border-amber-100', icon: 'hourglass_top', iconColor: '#d97706' },
+                                { label: 'Approved', value: documents.filter(d => d.status === 'approved').length, style: 'bg-emerald-50 text-emerald-700 border-emerald-100', icon: 'task_alt', iconColor: '#059669' },
+                                { label: 'Revision', value: documents.filter(d => d.status === 'needs_revision').length, style: 'bg-rose-50    text-rose-700    border-rose-100', icon: 'edit_note', iconColor: '#e11d48' },
+                                { label: 'Total', value: documents.length, style: 'bg-slate-50   text-slate-700   border-slate-100', icon: 'folder_open', iconColor: '#64748b' },
                             ].map(stat => (
-                                <div key={stat.label} className={`rounded-xl border p-3 ${stat.color}`}>
-                                    <span className="material-symbols-outlined text-lg">{stat.icon}</span>
-                                    <p className="text-2xl font-black mt-1">{stat.value}</p>
-                                    <p className="text-xs font-bold mt-0.5">{stat.label}</p>
+                                <div key={stat.label} className={`glass-card-strong rounded-xl border p-4 ${stat.style}`}>
+                                    <span className="material-symbols-outlined text-xl" style={{ color: stat.iconColor }}>{stat.icon}</span>
+                                    <p className="text-2xl font-black mt-1.5 leading-none">{stat.value}</p>
+                                    <p className="text-xs font-semibold mt-1 opacity-80">{stat.label}</p>
                                 </div>
                             ))}
                         </div>
 
-                        {/* Upcoming Deadlines */}
-                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                            <div className="flex items-center gap-2 mb-4">
-                                <span className="material-symbols-outlined text-base text-amber-500">event</span>
-                                <h3 className="font-black text-slate-900 text-sm">Upcoming Deadlines</h3>
-                            </div>
-                            <div className="space-y-3">
-                                {DEADLINES.map((d, i) => {
-                                    const isPast = new Date(d.date) < new Date();
-                                    return (
-                                        <div key={i} className={`flex items-center justify-between py-2 border-b border-slate-50 last:border-0 ${isPast ? 'opacity-40' : ''}`}>
-                                            <div className="flex items-center gap-2">
-                                                <div className={`size-2 rounded-full ${isPast ? 'bg-slate-300' : 'bg-amber-400'}`} />
-                                                <span className="text-xs font-bold text-slate-700">{d.type}</span>
-                                            </div>
-                                            <span className={`text-xs font-bold px-2 py-0.5 rounded-md ${isPast ? 'bg-slate-100 text-slate-400' : 'bg-amber-50 text-amber-700'}`}>
-                                                {d.label}
-                                            </span>
-                                        </div>
-                                    );
-                                })}
+                        {/* Mentor Review card */}
+                        <div className="glass-card-strong overflow-hidden">
+                            <SectionHeader icon="rate_review" title="Mentor Review">
+                                {latestByType.length > 0 && (
+                                    <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                                        {latestByType.length}
+                                    </span>
+                                )}
+                            </SectionHeader>
+                            <div className="p-4">
+                                {latestByType.length === 0 ? (
+                                    <p className="text-xs text-slate-400 text-center py-4">Submit documents to receive mentor feedback.</p>
+                                ) : (
+                                    <div className="space-y-2.5 max-h-72 overflow-y-auto pr-0.5">
+                                        {latestByType.map(doc => {
+                                            const status = (doc.status || 'submitted').toLowerCase();
+                                            const nextStage = getNextDocType(doc.document_type);
+                                            const typeLabel = DOC_TYPE_LABELS[doc.document_type] || doc.document_type?.replaceAll('_', ' ');
+                                            const feedbackText = (doc.feedback || '').trim();
+                                            return (
+                                                <div key={`mentor-${doc.id}`}
+                                                    className="rounded-xl border border-white/80 bg-white/50 p-3.5 space-y-2">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <p className="text-xs font-black text-slate-800">{typeLabel}</p>
+                                                        <StatusBadge status={doc.status} />
+                                                    </div>
+                                                    <p className="text-xs text-slate-500 leading-relaxed">
+                                                        {status === 'needs_revision' && (feedbackText || 'Revision required. Re-upload with corrections.')}
+                                                        {status === 'approved' && (feedbackText || 'Approved. Proceed to the next stage.')}
+                                                        {status === 'submitted' && (feedbackText || 'Pending mentor review.')}
+                                                    </p>
+                                                    <p className="text-[10px] text-slate-300">
+                                                        {doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleString() : '-'}
+                                                    </p>
+                                                    {status === 'needs_revision' && (
+                                                        <button type="button" onClick={() => focusUploadForType(doc.document_type)}
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 text-xs font-bold hover:bg-rose-100 transition-all">
+                                                            <span className="material-symbols-outlined text-sm">upload</span> Re-upload
+                                                        </button>
+                                                    )}
+                                                    {status === 'approved' && nextStage && (
+                                                        <button type="button" onClick={() => focusUploadForType(nextStage.value)}
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-bold hover:bg-emerald-100 transition-all">
+                                                            <span className="material-symbols-outlined text-sm">arrow_forward</span> {nextStage.label}
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
                             </div>
                         </div>
 
-                        {/* Quick Guidelines */}
-                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                            <div className="flex items-center gap-2 mb-4">
-                                <span className="material-symbols-outlined text-base" style={{ color: '#00D2C4' }}>info</span>
-                                <h3 className="font-black text-slate-900 text-sm">Submission Guidelines</h3>
+                        {/* Version History card */}
+                        <div className="glass-card-strong overflow-hidden">
+                            <SectionHeader icon="timeline" iconColor="#64748b" title="Version History" />
+                            <div className="p-4">
+                                {documents.length === 0 ? (
+                                    <p className="text-xs text-slate-400 text-center py-4">No versions yet.</p>
+                                ) : (
+                                    <div className="space-y-3 max-h-52 overflow-y-auto pr-0.5">
+                                        {documents.slice(0, 10).map(d => (
+                                            <div key={d.id} className="flex items-start gap-2.5">
+                                                <div className="mt-1.5 size-2 rounded-full flex-shrink-0" style={{ backgroundColor: '#00C4B4' }} />
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="text-xs font-bold text-slate-800 capitalize leading-none">
+                                                        {d.document_type?.replaceAll('_', ' ')}
+                                                        <span className="ml-1.5 text-[10px] font-black text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md">v{d.version ?? 1}</span>
+                                                    </p>
+                                                    <p className="text-[11px] text-slate-500 truncate mt-0.5">{d.file_name}</p>
+                                                    <p className="text-[10px] text-slate-400">{d.uploaded_at ? new Date(d.uploaded_at).toLocaleString() : '-'}</p>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
-                            <ul className="space-y-2.5">
-                                {GUIDELINES.map((g, i) => (
-                                    <li key={i} className="flex items-start gap-2 text-xs text-slate-600">
-                                        <span className="size-4 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-black text-slate-500 shrink-0 mt-0.5">
-                                            {i + 1}
-                                        </span>
-                                        {g}
-                                    </li>
-                                ))}
-                            </ul>
                         </div>
+
+                        {/* Submission Guidelines card */}
+                        <div className="glass-card-strong overflow-hidden">
+                            <SectionHeader icon="info" title="Submission Guidelines" />
+                            <div className="p-4">
+                                <ul className="space-y-2.5">
+                                    {GUIDELINES.map((g, i) => (
+                                        <li key={i} className="flex items-start gap-2.5 text-xs text-slate-600">
+                                            <span className="size-4 rounded-full bg-white border border-slate-200 flex items-center justify-center text-[9px] font-black text-slate-500 shrink-0 mt-0.5 shadow-sm">{i + 1}</span>
+                                            {g}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        </div>
+
                     </div>
                 </div>
             </div>
-
-            {/* Feedback Modal */}
-            {feedbackDoc && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-                        <div className="flex items-center justify-between mb-4">
-                            <div>
-                                <h3 className="font-black text-slate-900">Mentor Feedback</h3>
-                                <p className="text-xs text-slate-500 mt-0.5 capitalize">
-                                    {feedbackDoc.document_type?.replaceAll('_', ' ')} · v{feedbackDoc.version ?? 1}
-                                </p>
-                            </div>
-                            <button onClick={() => setFeedbackDoc(null)} className="size-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 hover:text-slate-700">
-                                <span className="material-symbols-outlined text-base">close</span>
-                            </button>
-                        </div>
-                        <div className="bg-slate-50 rounded-xl border border-slate-200 p-4">
-                            <p className="text-sm text-slate-700 leading-relaxed">{feedbackDoc.feedback || 'No feedback provided yet.'}</p>
-                        </div>
-                        <div className="mt-4 flex items-center justify-between">
-                            <StatusBadge status={feedbackDoc.status} />
-                            <button
-                                onClick={() => setFeedbackDoc(null)}
-                                className="px-4 py-2 rounded-xl text-sm font-bold text-black transition-all"
-                                style={{ backgroundColor: '#00D2C4' }}
-                            >
-                                Close
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }

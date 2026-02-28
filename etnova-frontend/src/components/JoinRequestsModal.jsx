@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Modal from './Modal';
-import supabase from '../config/supabaseClient';
+import { apiRequest } from '../config/apiClient';
 
 export default function JoinRequestsModal({ isOpen, onClose, onRequestHandled }) {
     const [requests, setRequests] = useState([]);
@@ -19,121 +19,34 @@ export default function JoinRequestsModal({ isOpen, onClose, onRequestHandled })
         setError('');
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error('Not authenticated');
-
-            console.log('🔍 Loading join requests for user:', user.id);
-
-            // Get projects where user is the leader
-            const { data: leaderProjects } = await supabase
-                .from('team_members')
-                .select('project_id')
-                .eq('student_id', user.id)
-                .eq('role', 'leader');
-
-            if (!leaderProjects || leaderProjects.length === 0) {
-                console.log('User is not a leader of any projects');
-                setRequests([]);
-                setLoading(false);
-                return;
-            }
-
-            const projectIds = leaderProjects.map(p => p.project_id);
-
-            // Get pending join requests for those projects
-            const { data: joinRequests, error: requestsError } = await supabase
-                .from('join_requests')
-                .select(`
-                    *,
-                    project:projects(id, title),
-                    student:profiles!student_id(id, full_name, roll_number, department, semester)
-                `)
-                .in('project_id', projectIds)
-                .eq('status', 'pending')
-                .order('created_at', { ascending: false });
-
-            if (requestsError) {
-                console.error('❌ Error fetching join requests:', requestsError);
-                throw requestsError;
-            }
-
-            console.log('📋 Pending join requests:', joinRequests?.length || 0);
-            setRequests(joinRequests || []);
+            const data = await apiRequest('/join-requests/leader');
+            setRequests(data || []);
         } catch (err) {
-            console.error('Load join requests error:', err);
             setError(err.message || 'Failed to load join requests');
         } finally {
             setLoading(false);
         }
     };
 
-    const handleApprove = async (request) => {
+    const handleDecision = async (request, action) => {
         setProcessing(request.id);
         setError('');
 
         try {
-            // 1. Add student to team_members
-            const { error: addError } = await supabase
-                .from('team_members')
-                .insert({
-                    project_id: request.project_id,
-                    student_id: request.student_id,
-                    role: 'member',
-                });
+            await apiRequest(`/join-requests/${request.id}`, {
+                method: 'PUT',
+                body: { action },
+            });
 
-            if (addError) {
-                if (addError.code === '23505') {
-                    throw new Error('Student is already a member of this project');
-                }
-                throw addError;
-            }
-
-            // 2. Update request status to 'approved'
-            const { error: updateError } = await supabase
-                .from('join_requests')
-                .update({ status: 'approved' })
-                .eq('id', request.id);
-
-            if (updateError) throw updateError;
-
-            // Remove from local state
-            setRequests(prev => prev.filter(r => r.id !== request.id));
-
-            // Notify parent component
+            setRequests((prev) => prev.filter((r) => r.id !== request.id));
             onRequestHandled?.();
-
-            alert(`Request approved! ${request.student.full_name} has been added to the team.`);
+            alert(
+                action === 'approve'
+                    ? `Request approved! ${request.student?.full_name || 'Student'} has been added to the team.`
+                    : `Request rejected. ${request.student?.full_name || 'Student'} will need to send a new request.`
+            );
         } catch (err) {
-            console.error('Approve request error:', err);
-            setError(err.message || 'Failed to approve request');
-        } finally {
-            setProcessing(null);
-        }
-    };
-
-    const handleReject = async (request) => {
-        setProcessing(request.id);
-        setError('');
-
-        try {
-            // Update request status to 'rejected'
-            const { error: updateError } = await supabase
-                .from('join_requests')
-                .update({ status: 'rejected' })
-                .eq('id', request.id);
-
-            if (updateError) throw updateError;
-
-            // Remove from local state
-            setRequests(prev => prev.filter(r => r.id !== request.id));
-
-            // Notify parent component
-            onRequestHandled?.();
-
-            alert(`Request rejected. ${request.student.full_name} will need to send a new request.`);
-        } catch (err) {
-            console.error('Reject request error:', err);
-            setError(err.message || 'Failed to reject request');
+            setError(err.message || `Failed to ${action} request`);
         } finally {
             setProcessing(null);
         }
@@ -170,18 +83,18 @@ export default function JoinRequestsModal({ isOpen, onClose, onRequestHandled })
                                     <div className="flex-1">
                                         <div className="flex items-center gap-2 mb-2">
                                             <span className="material-symbols-outlined text-teal-600">person</span>
-                                            <h3 className="font-black text-slate-900">{request.student.full_name}</h3>
+                                            <h3 className="font-black text-slate-900">{request.student?.full_name || 'Unknown'}</h3>
                                         </div>
 
                                         <div className="grid grid-cols-2 gap-2 mb-2">
                                             <div className="text-xs text-slate-600">
-                                                <span className="font-medium">Roll:</span> {request.student.roll_number || 'N/A'}
+                                                <span className="font-medium">Roll:</span> {request.student?.roll_number || 'N/A'}
                                             </div>
                                             <div className="text-xs text-slate-600">
-                                                <span className="font-medium">Department:</span> {request.student.department || 'N/A'}
+                                                <span className="font-medium">Department:</span> {request.student?.department || 'N/A'}
                                             </div>
                                             <div className="text-xs text-slate-600">
-                                                <span className="font-medium">Semester:</span> {request.student.semester || 'N/A'}
+                                                <span className="font-medium">Semester:</span> {request.student?.semester || 'N/A'}
                                             </div>
                                             <div className="text-xs text-slate-600">
                                                 <span className="font-medium">Requested:</span> {new Date(request.created_at).toLocaleDateString()}
@@ -190,20 +103,20 @@ export default function JoinRequestsModal({ isOpen, onClose, onRequestHandled })
 
                                         <div className="text-xs text-slate-500">
                                             <span className="material-symbols-outlined text-xs align-middle mr-1">folder</span>
-                                            Project: <span className="font-medium">{request.project.title}</span>
+                                            Project: <span className="font-medium">{request.project?.title}</span>
                                         </div>
                                     </div>
 
                                     <div className="flex gap-2">
                                         <button
-                                            onClick={() => handleApprove(request)}
+                                            onClick={() => handleDecision(request, 'approve')}
                                             disabled={processing === request.id}
                                             className="px-4 py-2 rounded-lg bg-green-500 text-white font-bold text-sm hover:bg-green-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                             {processing === request.id ? 'Processing...' : 'Approve'}
                                         </button>
                                         <button
-                                            onClick={() => handleReject(request)}
+                                            onClick={() => handleDecision(request, 'reject')}
                                             disabled={processing === request.id}
                                             className="px-4 py-2 rounded-lg bg-red-500 text-white font-bold text-sm hover:bg-red-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
@@ -228,3 +141,4 @@ export default function JoinRequestsModal({ isOpen, onClose, onRequestHandled })
         </Modal>
     );
 }
+
