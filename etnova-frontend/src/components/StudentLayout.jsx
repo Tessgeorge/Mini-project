@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { Suspense, lazy, useState } from "react";
 import Sidebar from "./Sidebar";
-import StudentDashboard from "../pages/StudentDashboard";
-import MyProject from "../pages/MyProject";
-import MyTeam from "../pages/MyTeam";
-import Submissions from "../pages/Submissions";
-import Marks from "../pages/Marks";
-import Discussion from "../pages/Discussion";
+
+const StudentDashboard = lazy(() => import("../pages/StudentDashboard"));
+const MyProject = lazy(() => import("../pages/MyProject"));
+const MyTeam = lazy(() => import("../pages/MyTeam"));
+const Submissions = lazy(() => import("../pages/Submissions"));
+const Marks = lazy(() => import("../pages/Marks"));
+const Discussion = lazy(() => import("../pages/Discussion"));
 
 const ALLOWED_VIEWS = new Set([
     "dashboard",
@@ -60,7 +61,15 @@ export default function StudentLayout({ onLogout }) {
         <div className="flex min-h-screen etnova-bg">
             <Sidebar currentView={currentView} onNavigate={handleNavigate} onLogout={onLogout} />
             <main className={`flex-1 md:ml-64 ${currentView === 'discussion' ? 'h-screen overflow-hidden' : 'pb-20 md:pb-0'}`}>
-                {renderView()}
+                <Suspense
+                    fallback={
+                        <div className="min-h-full etnova-bg flex items-center justify-center text-slate-600">
+                            Loading...
+                        </div>
+                    }
+                >
+                    {renderView()}
+                </Suspense>
             </main>
             <nav className="fixed md:hidden bottom-0 inset-x-0 border-t border-slate-200 bg-white z-30">
                 <div className="flex overflow-x-auto no-scrollbar">

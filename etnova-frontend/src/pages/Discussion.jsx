@@ -216,6 +216,27 @@ export default function Discussion() {
     setOnlineUserIds(next);
   }, []);
 
+  const upsertRealtimeMessage = useCallback((nextMessage) => {
+    if (!nextMessage?.id) return;
+    setMessages((prev) => {
+      const idx = prev.findIndex((m) => m.id === nextMessage.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = { ...copy[idx], ...nextMessage };
+        return copy;
+      }
+      const copy = [...prev, nextMessage];
+      copy.sort((a, b) => toMs(a.created_at) - toMs(b.created_at));
+      return copy;
+    });
+  }, []);
+
+  const removeRealtimeMessage = useCallback((messageId) => {
+    if (!messageId) return;
+    setMessages((prev) => prev.filter((m) => m.id !== messageId));
+    setReplyTo((prev) => (prev?.id === messageId ? null : prev));
+  }, []);
+
   /* ── Load messages ── */
   const loadMessages = useCallback(async (projectId) => {
     const { data, error: e } = await supabase
@@ -248,8 +269,21 @@ export default function Discussion() {
           .channel(`discussion-${detail.id}`, {
             config: { presence: { key: p.id } },
           })
-          .on("postgres_changes", { event: "*", schema: "public", table: "discussion_messages", filter: `project_id=eq.${detail.id}` },
-            () => loadMessages(detail.id))
+          .on(
+            "postgres_changes",
+            { event: "INSERT", schema: "public", table: "discussion_messages", filter: `project_id=eq.${detail.id}` },
+            ({ new: nextRow }) => upsertRealtimeMessage(nextRow)
+          )
+          .on(
+            "postgres_changes",
+            { event: "UPDATE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${detail.id}` },
+            ({ new: nextRow }) => upsertRealtimeMessage(nextRow)
+          )
+          .on(
+            "postgres_changes",
+            { event: "DELETE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${detail.id}` },
+            ({ old }) => removeRealtimeMessage(old?.id)
+          )
           .on("presence", { event: "sync" }, () => syncOnlinePresence(channel))
           .on("broadcast", { event: "typing" }, ({ payload }) => {
             if (!payload || payload.userId === p.id) return;
@@ -287,7 +321,7 @@ export default function Discussion() {
       if (typingTimeout.current) clearTimeout(typingTimeout.current);
       setOnlineUserIds({});
     };
-  }, [loadMessages, loadReadState, syncOnlinePresence]);
+  }, [loadMessages, loadReadState, removeRealtimeMessage, syncOnlinePresence, upsertRealtimeMessage]);
 
   /* ── Auto-scroll ── */
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [visibleMessages]);

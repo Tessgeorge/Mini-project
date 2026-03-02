@@ -284,7 +284,7 @@ export default function StudentDashboard({ onNavigate }) {
 
   const loadNotifications = useCallback(async () => {
     try {
-      const data = await apiRequest("/notifications");
+      const data = await apiRequest("/notifications", { skipCache: true });
       setNotifications(data || []);
     } catch (e) {
       console.error("Failed to load notifications:", e);
@@ -297,13 +297,14 @@ export default function StudentDashboard({ onNavigate }) {
     try {
       const [p, list] = await Promise.all([apiRequest("/profile"), apiRequest("/projects")]);
       setProfile(p);
-      await loadNotifications();
       const proj = list?.[0];
       if (!proj?.id) { setProject(null); setDocuments([]); setEvaluations([]); return; }
       // /projects list already embeds documents & evaluations for students — no second fetch needed
       setProject(proj);
       setDocuments((proj.documents || []).sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at)));
       setEvaluations((proj.evaluations || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
+      // Do not block dashboard paint on notifications.
+      loadNotifications();
     } catch (e) {
       setError(e.message || "Failed to load dashboard.");
     } finally {
