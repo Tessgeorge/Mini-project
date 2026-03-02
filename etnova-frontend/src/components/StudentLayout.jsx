@@ -60,7 +60,7 @@ export default function StudentLayout({ onLogout }) {
     return (
         <div className="flex min-h-screen etnova-bg">
             <Sidebar currentView={currentView} onNavigate={handleNavigate} onLogout={onLogout} />
-            <main className={`flex-1 md:ml-64 ${currentView === 'discussion' ? 'h-screen overflow-hidden' : 'pb-20 md:pb-0'}`}>
+            <main className="flex-1 md:ml-64 pb-20 md:pb-0">
                 <Suspense
                     fallback={
                         <div className="min-h-full etnova-bg flex items-center justify-center text-slate-600">

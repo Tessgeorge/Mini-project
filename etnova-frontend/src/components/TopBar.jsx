@@ -11,16 +11,16 @@ export default function TopBar({
   const initial = profile?.full_name?.charAt(0).toUpperCase() || "U";
 
   return (
-    <header className="glass-topbar flex items-center justify-between px-8 py-3.5 sticky top-0 z-10 w-full">
+    <header className="glass-topbar flex items-center justify-between px-4 sm:px-6 md:px-8 py-3.5 sticky top-0 z-10 w-full">
       {/* Left: Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm">
-        <span className="text-slate-400 font-medium">{subtitle}</span>
-        <span className="material-symbols-outlined text-xs text-slate-300">chevron_right</span>
-        <span className="font-bold text-slate-800">{title}</span>
+      <div className="flex items-center gap-2 text-sm min-w-0">
+        <span className="text-slate-400 font-medium hidden sm:inline">{subtitle}</span>
+        <span className="material-symbols-outlined text-xs text-slate-300 hidden sm:inline">chevron_right</span>
+        <span className="font-bold text-slate-800 truncate">{title}</span>
       </div>
 
       {/* Right: Controls */}
-      <div className="flex items-center gap-5">
+      <div className="flex items-center gap-2 sm:gap-4">
         {/* Search */}
         <div className="relative w-56 hidden sm:block">
           <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-base">search</span>
