@@ -67,6 +67,7 @@ export default function Discussion() {
   const [onlineUserIds, setOnlineUserIds] = useState({});
 
   const channelRef = useRef(null);
+  const channelStatusRef = useRef("INIT");
   const typingTimeout = useRef(null);
   const endRef = useRef(null);
   const textareaRef = useRef(null);
@@ -284,14 +285,6 @@ export default function Discussion() {
             { event: "DELETE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${detail.id}` },
             ({ old }) => removeRealtimeMessage(old?.id)
           )
-          .on("broadcast", { event: "message_insert" }, ({ payload }) => {
-            if (!payload?.message) return;
-            upsertRealtimeMessage(payload.message);
-          })
-          .on("broadcast", { event: "message_delete" }, ({ payload }) => {
-            if (!payload?.id) return;
-            removeRealtimeMessage(payload.id);
-          })
           .on("presence", { event: "sync" }, () => syncOnlinePresence(channel))
           .on("broadcast", { event: "typing" }, ({ payload }) => {
             if (!payload || payload.userId === p.id) return;
@@ -304,11 +297,9 @@ export default function Discussion() {
           });
 
         channel.subscribe(async (status) => {
-          if (status === "CHANNEL_ERROR") {
-            setError("Realtime connection issue. Trying to reconnect...");
-            return;
-          }
+          channelStatusRef.current = status;
           if (status !== "SUBSCRIBED") return;
+          setError("");
           await channel.track({
             userId: p.id,
             userName: p.full_name || p.email || "Participant",
@@ -330,10 +321,21 @@ export default function Discussion() {
         channelRef.current.untrack?.();
         supabase.removeChannel(channelRef.current);
       }
+      channelStatusRef.current = "CLOSED";
       if (typingTimeout.current) clearTimeout(typingTimeout.current);
       setOnlineUserIds({});
     };
   }, [loadMessages, loadReadState, removeRealtimeMessage, syncOnlinePresence, upsertRealtimeMessage]);
+
+  // Fallback sync when realtime channel is unavailable.
+  useEffect(() => {
+    if (!project?.id) return undefined;
+    const timer = setInterval(() => {
+      if (channelStatusRef.current === "SUBSCRIBED") return;
+      loadMessages(project.id).catch(() => {});
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [loadMessages, project?.id]);
 
   /* ── Auto-scroll ── */
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [visibleMessages]);
@@ -379,11 +381,6 @@ export default function Discussion() {
         .single();
       if (e) throw e;
       setMessages(prev => prev.some(m => m.id === ins.id) ? prev : [...prev, ins]);
-      channelRef.current?.send({
-        type: "broadcast",
-        event: "message_insert",
-        payload: { message: ins },
-      });
     } catch (e) {
       setError(e.message || "Failed to send.");
       setText(content); // restore on fail
@@ -411,11 +408,6 @@ export default function Discussion() {
         .eq("id", deletedId)
         .eq("sender_id", profile.id);
       if (delErr) throw delErr;
-      channelRef.current?.send({
-        type: "broadcast",
-        event: "message_delete",
-        payload: { id: deletedId },
-      });
     } catch (e) {
       setError(e.message || "Failed to delete message.");
       await loadMessages(project.id);
