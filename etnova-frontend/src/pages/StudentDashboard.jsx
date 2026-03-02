@@ -344,10 +344,26 @@ export default function StudentDashboard({ onNavigate }) {
 
   useEffect(() => {
     if (!profile?.id) return undefined;
-    const timer = setInterval(() => {
+
+    const refreshIfVisible = () => {
+      if (document.visibilityState !== "visible") return;
       loadNotifications();
-    }, 15000);
-    return () => clearInterval(timer);
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        loadNotifications();
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const timer = setInterval(() => {
+      refreshIfVisible();
+    }, 60000);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [profile?.id, loadNotifications]);
 
   const handleMarkAllNotificationsRead = async () => {
