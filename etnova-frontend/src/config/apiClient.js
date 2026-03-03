@@ -5,13 +5,21 @@ const GET_CACHE_TTL_MS = 20_000
 const responseCache = new Map()
 const inflightRequests = new Map()
 
-async function getAccessToken() {
+async function getAccessToken({ forceRefresh = false } = {}) {
   const {
     data: { session },
   } = await supabase.auth.getSession()
-  const token = session?.access_token
-  if (!token) throw new Error('Not authenticated')
-  return token
+  if (!session?.access_token) throw new Error('Not authenticated')
+
+  if (!forceRefresh) {
+    return session.access_token
+  }
+
+  const { data: refreshedData, error: refreshError } = await supabase.auth.refreshSession()
+  if (refreshError || !refreshedData?.session?.access_token) {
+    throw new Error('Session expired. Please sign in again.')
+  }
+  return refreshedData.session.access_token
 }
 
 function getCacheKey(token, url) {
@@ -41,10 +49,17 @@ function clearApiCache() {
 }
 
 export async function apiRequest(path, options = {}) {
-  const token = await getAccessToken()
   const url = path.startsWith('http') ? path : `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
-  const method = (options.method || 'GET').toUpperCase()
-  const isCacheableGet = method === 'GET' && !options.body && !options.skipCache
+  const {
+    skipCache = false,
+    headers: customHeaders = {},
+    __retry401 = false,
+    ...fetchOptions
+  } = options
+
+  let token = await getAccessToken()
+  const method = (fetchOptions.method || 'GET').toUpperCase()
+  const isCacheableGet = method === 'GET' && !fetchOptions.body && !skipCache
   const cacheKey = getCacheKey(token, url)
 
   if (isCacheableGet) {
@@ -55,40 +70,64 @@ export async function apiRequest(path, options = {}) {
     if (inflight) return inflight
   }
 
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-    ...(options.headers || {}),
-  }
+  const requestWithToken = async (accessToken) => {
+    const headers = {
+      Authorization: `Bearer ${accessToken}`,
+      ...(fetchOptions.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+      ...customHeaders,
+    }
 
-  const fetchPromise = (async () => {
     let response
     try {
       response = await fetch(url, {
-        ...options,
+        ...fetchOptions,
         headers,
         body:
-          options.body === undefined || options.body instanceof FormData
-            ? options.body
-            : JSON.stringify(options.body),
+          fetchOptions.body === undefined || fetchOptions.body instanceof FormData
+            ? fetchOptions.body
+            : JSON.stringify(fetchOptions.body),
       })
     } catch {
       throw new Error(`API unreachable at ${API_BASE_URL}. Start backend and verify VITE_API_URL.`)
     }
 
     if (response.status === 204) {
-      if (!isCacheableGet) clearApiCache()
       return null
     }
 
     const data = await response.json().catch(() => ({}))
     if (!response.ok) {
-      throw new Error(data?.message || `Request failed (${response.status})`)
+      const error = new Error(data?.message || `Request failed (${response.status})`)
+      error.status = response.status
+      throw error
     }
 
-    if (isCacheableGet) setCachedResponse(cacheKey, data)
-    else clearApiCache()
     return data
+  }
+
+  const fetchPromise = (async () => {
+    try {
+      const data = await requestWithToken(token)
+      if (isCacheableGet) setCachedResponse(cacheKey, data)
+      else clearApiCache()
+      return data
+    } catch (error) {
+      if (error?.status === 401 && !__retry401) {
+        try {
+          token = await getAccessToken({ forceRefresh: true })
+          const retryData = await requestWithToken(token)
+          if (isCacheableGet) setCachedResponse(cacheKey, retryData)
+          else clearApiCache()
+          return retryData
+        } catch {
+          clearApiCache()
+          await supabase.auth.signOut()
+          throw new Error('Session expired. Please sign in again.')
+        }
+      }
+
+      throw error
+    }
   })()
 
   if (isCacheableGet) inflightRequests.set(cacheKey, fetchPromise)

@@ -8,6 +8,28 @@ const safeProfileName = (profile, fallback = 'Student') => {
 
 const LOCKED_PROJECT_STATUSES = new Set(['approved', 'completed']);
 const isProjectLocked = (status) => LOCKED_PROJECT_STATUSES.has((status || '').toLowerCase());
+const STUDENT_PROJECT_SELECT = `
+  *,
+  mentor:profiles!projects_mentor_id_fkey(id, full_name, email, department),
+  coordinator:profiles!projects_coordinator_id_fkey(id, full_name, email, department),
+  team_members(
+    id,
+    student_id,
+    role,
+    joined_at,
+    profiles!team_members_student_id_fkey(
+      id,
+      full_name,
+      email,
+      roll_number,
+      department,
+      batch,
+      class_section
+    )
+  ),
+  documents(id, document_type, status, uploaded_at, file_name, file_url, version, feedback),
+  evaluations(id, evaluation_type, obtained_marks, max_marks, feedback, created_at)
+`;
 
 const createNotifications = async (rows) => {
   if (!rows?.length) return;
@@ -53,6 +75,61 @@ export const updateUserProfile = async (req, res) => {
     }
 
     res.json(data);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const getDashboardData = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const [profileResult, notificationsResult, membershipsResult] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single(),
+      supabase
+        .from('notifications')
+        .select('id, user_id, type, title, message, read, created_at')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(50),
+      supabase
+        .from('team_members')
+        .select('project_id')
+        .eq('student_id', userId),
+    ]);
+
+    if (profileResult.error) {
+      return res.status(404).json({ message: 'Profile not found', error: profileResult.error.message });
+    }
+    if (notificationsResult.error) throw notificationsResult.error;
+    if (membershipsResult.error) throw membershipsResult.error;
+
+    const projectIds = [...new Set((membershipsResult.data || []).map((m) => m.project_id).filter(Boolean))];
+    let projects = [];
+    if (projectIds.length > 0) {
+      const { data: projectRows, error: projectsError } = await supabase
+        .from('projects')
+        .select(STUDENT_PROJECT_SELECT)
+        .in('id', projectIds)
+        .order('created_at', { ascending: false });
+
+      if (projectsError) throw projectsError;
+      projects = projectRows || [];
+    }
+
+    const notifications = notificationsResult.data || [];
+    res.json({
+      profile: profileResult.data,
+      projects,
+      notifications,
+      meta: {
+        unreadNotifications: notifications.filter((n) => !n.read).length,
+      },
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -116,28 +193,7 @@ export const getProjects = async (req, res) => {
 
       const { data, error } = await supabase
         .from('projects')
-        .select(`
-          *,
-          mentor:profiles!projects_mentor_id_fkey(id, full_name, email, department),
-          coordinator:profiles!projects_coordinator_id_fkey(id, full_name, email, department),
-          team_members(
-            id,
-            student_id,
-            role,
-            joined_at,
-            profiles!team_members_student_id_fkey(
-              id,
-              full_name,
-              email,
-              roll_number,
-              department,
-              batch,
-              class_section
-            )
-          ),
-          documents(id, document_type, status, uploaded_at, file_name, file_url, version, feedback),
-          evaluations(id, evaluation_type, obtained_marks, max_marks, feedback, created_at)
-        `)
+        .select(STUDENT_PROJECT_SELECT)
         .in('id', projectIds)
         .order('created_at', { ascending: false });
 

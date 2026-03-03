@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from "react";
-import { apiRequest } from "../config/apiClient";
+import { fetchStudentBootstrapData } from "../services/studentData";
 
 // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -81,15 +81,10 @@ export default function MyProject({ onNavigate }) {
       setLoading(true);
       setError("");
       try {
-        const [me, projects] = await Promise.all([
-          apiRequest("/profile"),
-          apiRequest("/projects"),
-        ]);
+        const { profile: me, projects } = await fetchStudentBootstrapData();
         setProfile(me);
         const p = projects?.[0];
-        if (!p?.id) { setProject(null); return; }
-        const detail = await apiRequest(`/projects/${p.id}`);
-        setProject(detail);
+        setProject(p || null);
       } catch (err) {
         setError(err.message || "Failed to load project");
       } finally {

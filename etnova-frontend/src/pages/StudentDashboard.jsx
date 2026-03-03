@@ -9,6 +9,7 @@ import ProfileSettingsModal from "../components/ProfileSettingsModal";
 import ProjectTracker from "../components/ProjectTracker";
 import supabase from "../config/supabaseClient";
 import { apiRequest } from "../config/apiClient";
+import { fetchStudentBootstrapData, invalidateStudentBootstrapCache } from "../services/studentData";
 
 // ─── Static Deadline Schedule ─────────────────────────────────────────────────
 const DEADLINES = [
@@ -295,22 +296,30 @@ export default function StudentDashboard({ onNavigate }) {
   const loadData = useCallback(async () => {
     setLoading(true); setError("");
     try {
-      const [p, list] = await Promise.all([apiRequest("/profile"), apiRequest("/projects")]);
+      const { profile: p, projects: list, notifications: initialNotifications } =
+        await fetchStudentBootstrapData({ includeNotifications: true });
+
       setProfile(p);
+      setNotifications(initialNotifications);
+
       const proj = list?.[0];
-      if (!proj?.id) { setProject(null); setDocuments([]); setEvaluations([]); return; }
-      // /projects list already embeds documents & evaluations for students — no second fetch needed
+      if (!proj?.id) {
+        setProject(null);
+        setDocuments([]);
+        setEvaluations([]);
+        return;
+      }
+
+      // /dashboard-data already returns projects with documents and evaluations.
       setProject(proj);
       setDocuments((proj.documents || []).sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at)));
       setEvaluations((proj.evaluations || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
-      // Do not block dashboard paint on notifications.
-      loadNotifications();
     } catch (e) {
       setError(e.message || "Failed to load dashboard.");
     } finally {
       setLoading(false);
     }
-  }, [loadNotifications]);
+  }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -497,11 +506,28 @@ export default function StudentDashboard({ onNavigate }) {
         isOpen={showSettingsModal}
         onClose={() => setShowSettingsModal(false)}
         profile={profile}
-        onSuccess={loadData}
+        onSuccess={async () => {
+          invalidateStudentBootstrapCache();
+          await loadData();
+        }}
         requireCompletion={!profileComplete}
       />
-      <CreateProjectModal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} onSuccess={loadData} />
-      <JoinProjectModal isOpen={showJoinModal} onClose={() => setShowJoinModal(false)} onSuccess={loadData} />
+      <CreateProjectModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSuccess={async () => {
+          invalidateStudentBootstrapCache();
+          await loadData();
+        }}
+      />
+      <JoinProjectModal
+        isOpen={showJoinModal}
+        onClose={() => setShowJoinModal(false)}
+        onSuccess={async () => {
+          invalidateStudentBootstrapCache();
+          await loadData();
+        }}
+      />
 
       {/* ══ Error ═══════════════════════════════════════════════════════════ */}
       {error && (
@@ -712,3 +738,5 @@ export default function StudentDashboard({ onNavigate }) {
     </div>
   );
 }
+
+

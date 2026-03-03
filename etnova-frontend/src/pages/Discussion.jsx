@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import supabase from "../config/supabaseClient";
-import { apiRequest } from "../config/apiClient";
+import { fetchStudentBootstrapData } from "../services/studentData";
 
 /* ── Topics ───────────────────────────────────────────────────────────── */
 const TOPICS = [
@@ -255,34 +255,32 @@ export default function Discussion() {
     (async () => {
       setLoading(true); setError("");
       try {
-        const [p, projects] = await Promise.all([apiRequest("/profile"), apiRequest("/projects")]);
+        const { profile: p, projects } = await fetchStudentBootstrapData();
         if (!mounted) return;
         setProfile(p);
         const cur = projects?.[0];
         if (!cur?.id) return;
-        const detail = await apiRequest(`/projects/${cur.id}`);
-        if (!mounted) return;
-        setProject(detail);
-        await loadMessages(detail.id);
-        await loadReadState(detail.id, p.id);
+        setProject(cur);
+        await loadMessages(cur.id);
+        await loadReadState(cur.id, p.id);
 
         const channel = supabase
-          .channel(`discussion-${detail.id}`, {
+          .channel(`discussion-${cur.id}`, {
             config: { presence: { key: p.id } },
           })
           .on(
             "postgres_changes",
-            { event: "INSERT", schema: "public", table: "discussion_messages", filter: `project_id=eq.${detail.id}` },
+            { event: "INSERT", schema: "public", table: "discussion_messages", filter: `project_id=eq.${cur.id}` },
             ({ new: nextRow }) => upsertRealtimeMessage(nextRow)
           )
           .on(
             "postgres_changes",
-            { event: "UPDATE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${detail.id}` },
+            { event: "UPDATE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${cur.id}` },
             ({ new: nextRow }) => upsertRealtimeMessage(nextRow)
           )
           .on(
             "postgres_changes",
-            { event: "DELETE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${detail.id}` },
+            { event: "DELETE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${cur.id}` },
             ({ old }) => removeRealtimeMessage(old?.id)
           )
           .on("presence", { event: "sync" }, () => syncOnlinePresence(channel))

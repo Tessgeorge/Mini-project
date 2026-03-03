@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import supabase from '../config/supabaseClient';
 import { apiRequest } from '../config/apiClient';
+import { fetchStudentBootstrapData, invalidateStudentBootstrapCache } from '../services/studentData';
 
 const DOC_TYPES = [
     { value: 'abstract', label: 'Abstract' },
@@ -80,7 +81,7 @@ export default function Submissions() {
         else setLoading(true);
         setError('');
         try {
-            const projects = await apiRequest('/projects');
+            const { projects } = await fetchStudentBootstrapData({ force: isRefresh });
             const proj = projects?.[0];
             if (!proj?.id) { setLoading(false); return; }
             setProject(proj);
@@ -130,6 +131,7 @@ export default function Submissions() {
         setError('');
         try {
             await apiRequest(`/documents/${doc.id}`, { method: 'DELETE' });
+            invalidateStudentBootstrapCache();
             if (doc.file_url) {
                 try {
                     const url = new URL(doc.file_url);
@@ -180,6 +182,7 @@ export default function Submissions() {
                 });
             }
 
+            invalidateStudentBootstrapCache();
             setSuccessMsg(`${DOC_TYPES.find(d => d.value === docType)?.label} ${existingDoc ? `updated to v${version}` : 'submitted (v1)'}${!fileUrl ? ' - no file attached' : ''}`);
             setDocType(''); setSelectedFile(null);
             if (fileInputRef.current) fileInputRef.current.value = '';

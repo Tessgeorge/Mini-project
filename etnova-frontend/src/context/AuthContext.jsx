@@ -24,14 +24,31 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let isMounted = true
     let isInitialized = false
+    let activeRequestId = 0
+    let lastSessionKey = null
 
-    const handleSession = async (nextSession) => {
+    const toSessionKey = (nextSession) => {
+      if (!nextSession?.user) return 'anon'
+      return nextSession.access_token || nextSession.user.id
+    }
+
+    const handleSession = async (nextSession, { force = false } = {}) => {
+      const sessionKey = toSessionKey(nextSession)
+      if (!force && isInitialized && sessionKey === lastSessionKey) {
+        return
+      }
+      lastSessionKey = sessionKey
+
+      const requestId = ++activeRequestId
       setSession(nextSession)
       setUser(nextSession?.user ?? null)
 
       if (!nextSession?.user) {
-        setRole(null)
-        setLoading(false)
+        if (isMounted && requestId === activeRequestId) {
+          setRole(null)
+          setLoading(false)
+          isInitialized = true
+        }
         return
       }
 
@@ -42,16 +59,18 @@ export function AuthProvider({ children }) {
 
       try {
         const nextRole = await fetchUserRole()
-        if (isMounted) {
+        if (isMounted && requestId === activeRequestId) {
           setRole(nextRole)
         }
       } catch (error) {
-        console.error('Failed to load user role:', error)
-        if (isMounted) {
+        if (error?.message !== 'Not authenticated' && error?.message !== 'Session expired. Please sign in again.') {
+          console.error('Failed to load user role:', error)
+        }
+        if (isMounted && requestId === activeRequestId) {
           setRole(null)
         }
       } finally {
-        if (isMounted) {
+        if (isMounted && requestId === activeRequestId) {
           setLoading(false)
           isInitialized = true
         }
@@ -63,7 +82,7 @@ export function AuthProvider({ children }) {
         data: { session: initialSession },
       } = await supabase.auth.getSession()
       if (isMounted) {
-        handleSession(initialSession)
+        handleSession(initialSession, { force: true })
       }
     }
 
@@ -71,7 +90,10 @@ export function AuthProvider({ children }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (!['INITIAL_SESSION', 'SIGNED_IN', 'SIGNED_OUT', 'TOKEN_REFRESHED', 'USER_UPDATED'].includes(event)) {
+        return
+      }
       handleSession(nextSession)
     })
 
