@@ -190,10 +190,12 @@ export default function SignIn() {
                 <input
                   type={showPassword ? 'text' : 'password'}
                   id="password"
+                  name="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full pl-12 pr-12 py-3.5 bg-white border border-transparent rounded-xl focus:ring-1 focus:ring-muted/50 focus:border-muted outline-none transition-all text-ink placeholder:text-muted"
                   placeholder="••••••••"
+                  autoComplete="current-password"
                   required
                 />
                 <button
