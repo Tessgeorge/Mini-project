@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import JoinRequestsModal from "../components/JoinRequestsModal";
 import { apiRequest } from "../config/apiClient";
 import supabase from "../config/supabaseClient";
+import { fetchStudentBootstrapData, invalidateStudentBootstrapCache } from "../services/studentData";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -453,16 +454,14 @@ export default function MyTeam() {
   const [taskForm, setTaskForm] = useState({ title: "", assignee_ids: [], priority: "medium", due_date: "", status: "todo" });
   const [savingTask, setSavingTask] = useState(false);
 
-  const loadTeam = async () => {
+  const loadTeam = async ({ force = false } = {}) => {
     setLoading(true);
     setError("");
     try {
-      const [p, projects] = await Promise.all([apiRequest("/profile"), apiRequest("/projects")]);
+      const { profile: p, projects } = await fetchStudentBootstrapData({ force });
       setProfile(p);
       const current = projects?.[0];
-      if (!current?.id) { setProject(null); return; }
-      const detail = await apiRequest(`/projects/${current.id}`);
-      setProject(detail);
+      setProject(current || null);
     } catch (e) {
       setError(e.message || "Failed to load team");
     } finally {
@@ -593,7 +592,8 @@ export default function MyTeam() {
     if (!window.confirm("Remove this member from the team? This action cannot be undone.")) return;
     try {
       await apiRequest(`/projects/${project.id}/team/${studentId}`, { method: "DELETE" });
-      await loadTeam();
+      invalidateStudentBootstrapCache();
+      await loadTeam({ force: true });
     } catch (e) { setError(e.message || "Failed to remove member"); }
   };
 
@@ -602,7 +602,8 @@ export default function MyTeam() {
     if (!window.confirm("Are you sure you want to leave this team?")) return;
     try {
       await apiRequest(`/projects/${project.id}/leave`, { method: "DELETE" });
-      await loadTeam();
+      invalidateStudentBootstrapCache();
+      await loadTeam({ force: true });
     } catch (e) { setError(e.message || "Failed to leave team"); }
   };
 

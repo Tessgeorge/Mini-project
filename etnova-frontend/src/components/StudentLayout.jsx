@@ -1,12 +1,19 @@
-import { Suspense, lazy, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import Sidebar from "./Sidebar";
 
-const StudentDashboard = lazy(() => import("../pages/StudentDashboard"));
-const MyProject = lazy(() => import("../pages/MyProject"));
-const MyTeam = lazy(() => import("../pages/MyTeam"));
-const Submissions = lazy(() => import("../pages/Submissions"));
-const Marks = lazy(() => import("../pages/Marks"));
-const Discussion = lazy(() => import("../pages/Discussion"));
+const importStudentDashboard = () => import("../pages/StudentDashboard");
+const importMyProject = () => import("../pages/MyProject");
+const importMyTeam = () => import("../pages/MyTeam");
+const importSubmissions = () => import("../pages/Submissions");
+const importMarks = () => import("../pages/Marks");
+const importDiscussion = () => import("../pages/Discussion");
+
+const StudentDashboard = lazy(importStudentDashboard);
+const MyProject = lazy(importMyProject);
+const MyTeam = lazy(importMyTeam);
+const Submissions = lazy(importSubmissions);
+const Marks = lazy(importMarks);
+const Discussion = lazy(importDiscussion);
 
 const ALLOWED_VIEWS = new Set([
     "dashboard",
@@ -28,6 +35,24 @@ export default function StudentLayout({ onLogout }) {
         localStorage.setItem('studentView', safeView);
         setCurrentView(safeView);
     };
+
+    useEffect(() => {
+        const preload = () => {
+            importMyProject();
+            importMyTeam();
+            importSubmissions();
+            importMarks();
+            importDiscussion();
+        };
+
+        if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+            const idleId = window.requestIdleCallback(preload, { timeout: 2000 });
+            return () => window.cancelIdleCallback(idleId);
+        }
+
+        const timer = setTimeout(preload, 500);
+        return () => clearTimeout(timer);
+    }, []);
 
     const renderView = () => {
         switch (currentView) {
@@ -60,7 +85,7 @@ export default function StudentLayout({ onLogout }) {
     return (
         <div className="flex min-h-screen etnova-bg">
             <Sidebar currentView={currentView} onNavigate={handleNavigate} onLogout={onLogout} />
-            <main className={`flex-1 md:ml-64 ${currentView === 'discussion' ? 'h-screen overflow-hidden' : 'pb-20 md:pb-0'}`}>
+            <main className="flex-1 md:ml-64 pb-20 md:pb-0">
                 <Suspense
                     fallback={
                         <div className="min-h-full etnova-bg flex items-center justify-center text-slate-600">

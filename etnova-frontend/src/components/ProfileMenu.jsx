@@ -25,7 +25,7 @@ export default function ProfileMenu({ profile, isOpen, onClose, onLogout, onEdit
     return (
         <div
             ref={menuRef}
-            className="absolute right-0 top-full mt-3 w-80 rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50"
+            className="absolute right-0 top-full mt-3 w-[calc(100vw-1rem)] max-w-sm sm:w-80 rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50"
             style={{
                 background: 'white',
                 boxShadow: '0 20px 60px rgba(0,0,0,0.12), 0 4px 16px rgba(0,0,0,0.07)',
@@ -76,7 +76,7 @@ export default function ProfileMenu({ profile, isOpen, onClose, onLogout, onEdit
 
             {/* ── Info Grid ── */}
             {infoItems.length > 0 && (
-                <div className="px-5 py-3 border-b border-slate-100 grid grid-cols-2 gap-y-3 gap-x-4">
+                <div className="px-5 py-3 border-b border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-4">
                     {infoItems.map(item => (
                         <div key={item.label}>
                             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{item.label}</p>

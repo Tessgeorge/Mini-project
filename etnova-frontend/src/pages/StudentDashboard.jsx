@@ -9,6 +9,7 @@ import ProfileSettingsModal from "../components/ProfileSettingsModal";
 import ProjectTracker from "../components/ProjectTracker";
 import supabase from "../config/supabaseClient";
 import { apiRequest } from "../config/apiClient";
+import { fetchStudentBootstrapData, invalidateStudentBootstrapCache } from "../services/studentData";
 
 // ─── Static Deadline Schedule ─────────────────────────────────────────────────
 const DEADLINES = [
@@ -229,7 +230,7 @@ function DeadlineCalendar({ deadlines, onNavigate }) {
 // ─── No-Project Onboarding ────────────────────────────────────────────────────
 function Onboarding({ profile, onCreate, onJoin }) {
   return (
-    <div className="px-6 md:px-8 py-10">
+    <div className="px-4 sm:px-6 md:px-8 py-8 sm:py-10">
       <div className="mb-8">
         <h1 className="text-2xl font-black text-slate-900">
           {getGreeting()}{profile?.full_name ? `, ${profile.full_name.split(" ")[0]}` : ""} 👋
@@ -295,22 +296,30 @@ export default function StudentDashboard({ onNavigate }) {
   const loadData = useCallback(async () => {
     setLoading(true); setError("");
     try {
-      const [p, list] = await Promise.all([apiRequest("/profile"), apiRequest("/projects")]);
+      const { profile: p, projects: list, notifications: initialNotifications } =
+        await fetchStudentBootstrapData({ includeNotifications: true });
+
       setProfile(p);
+      setNotifications(initialNotifications);
+
       const proj = list?.[0];
-      if (!proj?.id) { setProject(null); setDocuments([]); setEvaluations([]); return; }
-      // /projects list already embeds documents & evaluations for students — no second fetch needed
+      if (!proj?.id) {
+        setProject(null);
+        setDocuments([]);
+        setEvaluations([]);
+        return;
+      }
+
+      // /dashboard-data already returns projects with documents and evaluations.
       setProject(proj);
       setDocuments((proj.documents || []).sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at)));
       setEvaluations((proj.evaluations || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
-      // Do not block dashboard paint on notifications.
-      loadNotifications();
     } catch (e) {
       setError(e.message || "Failed to load dashboard.");
     } finally {
       setLoading(false);
     }
-  }, [loadNotifications]);
+  }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -471,7 +480,7 @@ export default function StudentDashboard({ onNavigate }) {
           }}
         />
         {showNotifications && (
-          <div className="absolute right-24 top-full z-50">
+          <div className="absolute right-2 sm:right-6 md:right-24 top-full z-50">
             <NotificationPanel
               isOpen={showNotifications}
               onClose={() => setShowNotifications(false)}
@@ -486,7 +495,7 @@ export default function StudentDashboard({ onNavigate }) {
       </div>
 
       {showProfileMenu && (
-        <div className="fixed top-16 right-8 z-50">
+        <div className="fixed top-14 right-2 sm:right-6 md:right-8 z-50">
           <ProfileMenu profile={profile} isOpen={showProfileMenu}
             onClose={() => setShowProfileMenu(false)} onLogout={handleLogout}
             onEditProfile={() => { setShowProfileMenu(false); setShowSettingsModal(true); }} />
@@ -497,11 +506,28 @@ export default function StudentDashboard({ onNavigate }) {
         isOpen={showSettingsModal}
         onClose={() => setShowSettingsModal(false)}
         profile={profile}
-        onSuccess={loadData}
+        onSuccess={async () => {
+          invalidateStudentBootstrapCache();
+          await loadData();
+        }}
         requireCompletion={!profileComplete}
       />
-      <CreateProjectModal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} onSuccess={loadData} />
-      <JoinProjectModal isOpen={showJoinModal} onClose={() => setShowJoinModal(false)} onSuccess={loadData} />
+      <CreateProjectModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSuccess={async () => {
+          invalidateStudentBootstrapCache();
+          await loadData();
+        }}
+      />
+      <JoinProjectModal
+        isOpen={showJoinModal}
+        onClose={() => setShowJoinModal(false)}
+        onSuccess={async () => {
+          invalidateStudentBootstrapCache();
+          await loadData();
+        }}
+      />
 
       {/* ══ Error ═══════════════════════════════════════════════════════════ */}
       {error && (
@@ -512,7 +538,7 @@ export default function StudentDashboard({ onNavigate }) {
 
       {/* ══ No Project — Onboarding ══════════════════════════════════════════ */}
       {!loading && profile && !profileComplete && (
-        <div className="px-6 md:px-8 py-10">
+        <div className="px-4 sm:px-6 md:px-8 py-8 sm:py-10">
           <div className="max-w-3xl bg-white rounded-2xl border border-slate-200 shadow-sm p-7">
             <h2 className="text-2xl font-black text-slate-900">Complete Your Profile</h2>
             <p className="text-sm text-slate-500 mt-2">
@@ -547,7 +573,7 @@ export default function StudentDashboard({ onNavigate }) {
 
       {/* ══ Main Dashboard ══════════════════════════════════════════════════ */}
       {profileComplete && project && (
-        <div className="px-6 md:px-8 py-6 space-y-5 max-w-[1400px] mx-auto">
+        <div className="px-4 sm:px-6 md:px-8 py-6 space-y-5 max-w-[1400px] mx-auto">
 
           {/* ── § 1 Smart Context Header ──────────────────────────────────── */}
           <div className="px-2 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -603,7 +629,7 @@ export default function StudentDashboard({ onNavigate }) {
 
           {/* ── § 3 Priority Alert Banner ─────────────────────────────────── */}
           {alert && (
-            <div className="relative overflow-hidden rounded-2xl flex items-center gap-4 px-5 py-4"
+            <div className="relative overflow-hidden rounded-2xl flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 sm:px-5 py-4"
               style={{
                 background: `linear-gradient(135deg, ${alert.color}12 0%, ${alert.color}06 100%)`,
                 border: `1px solid ${alert.color}30`,
@@ -644,7 +670,7 @@ export default function StudentDashboard({ onNavigate }) {
 
             {/* Left: Recent Activity */}
             <div className="glass-card-strong lg:col-span-3 overflow-hidden">
-              <div className="px-6 py-4 border-b border-white/70 flex items-center gap-2.5">
+              <div className="px-4 sm:px-6 py-4 border-b border-white/70 flex items-center gap-2.5">
                 <div className="size-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: "rgba(0,210,196,0.12)" }}>
                   <span className="material-symbols-outlined text-sm" style={{ color: "#00D2C4" }}>history</span>
                 </div>
@@ -667,7 +693,7 @@ export default function StudentDashboard({ onNavigate }) {
 
             {/* Right: Deadline Calendar */}
             <div className="glass-card-strong lg:col-span-2 overflow-visible">
-              <div className="px-6 py-4 border-b border-white/70 flex items-center gap-2.5">
+              <div className="px-4 sm:px-6 py-4 border-b border-white/70 flex items-center gap-2.5">
                 <div className="size-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: "rgba(0,210,196,0.12)" }}>
                   <span className="material-symbols-outlined text-sm" style={{ color: "#00D2C4" }}>calendar_month</span>
                 </div>
@@ -682,7 +708,7 @@ export default function StudentDashboard({ onNavigate }) {
 
           {/* ── § 6 Quick Navigation ──────────────────────────────────────── */}
           <div className="glass-card-strong overflow-hidden">
-            <div className="px-6 py-4 border-b border-white/70 flex items-center gap-2.5">
+            <div className="px-4 sm:px-6 py-4 border-b border-white/70 flex items-center gap-2.5">
               <div className="size-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: "rgba(0,210,196,0.12)" }}>
                 <span className="material-symbols-outlined text-sm" style={{ color: "#00D2C4" }}>apps</span>
               </div>
@@ -712,3 +738,5 @@ export default function StudentDashboard({ onNavigate }) {
     </div>
   );
 }
+
+

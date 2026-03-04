@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { apiRequest } from "../config/apiClient";
+import { fetchStudentBootstrapData } from "../services/studentData";
 
 const RUBRIC_TEMPLATE = {
   abstract: [
@@ -42,7 +42,7 @@ export default function Marks() {
       setLoading(true);
       setError("");
       try {
-        const projects = await apiRequest("/projects");
+        const { projects } = await fetchStudentBootstrapData();
         const p = projects?.[0];
         if (!p?.id) return;
         // list embeds evaluations inline — no second fetch needed

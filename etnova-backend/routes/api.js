@@ -1,5 +1,6 @@
 import express from 'express';
 import { 
+  getDashboardData,
   getUserProfile, 
   updateUserProfile,
 
@@ -54,6 +55,7 @@ import { authenticateUser, requireRole, requireCoordinator, canAccessProject } f
 const router = express.Router();
 
 // ====== USER PROFILE ROUTES ======
+router.get('/dashboard-data', authenticateUser, getDashboardData);
 router.get('/profile', authenticateUser, getUserProfile);
 router.put('/profile', authenticateUser, updateUserProfile);
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import supabase from "../config/supabaseClient";
-import { apiRequest } from "../config/apiClient";
+import { fetchStudentBootstrapData } from "../services/studentData";
 
 /* ── Topics ───────────────────────────────────────────────────────────── */
 const TOPICS = [
@@ -67,6 +67,7 @@ export default function Discussion() {
   const [onlineUserIds, setOnlineUserIds] = useState({});
 
   const channelRef = useRef(null);
+  const channelStatusRef = useRef("INIT");
   const typingTimeout = useRef(null);
   const endRef = useRef(null);
   const textareaRef = useRef(null);
@@ -254,34 +255,32 @@ export default function Discussion() {
     (async () => {
       setLoading(true); setError("");
       try {
-        const [p, projects] = await Promise.all([apiRequest("/profile"), apiRequest("/projects")]);
+        const { profile: p, projects } = await fetchStudentBootstrapData();
         if (!mounted) return;
         setProfile(p);
         const cur = projects?.[0];
         if (!cur?.id) return;
-        const detail = await apiRequest(`/projects/${cur.id}`);
-        if (!mounted) return;
-        setProject(detail);
-        await loadMessages(detail.id);
-        await loadReadState(detail.id, p.id);
+        setProject(cur);
+        await loadMessages(cur.id);
+        await loadReadState(cur.id, p.id);
 
         const channel = supabase
-          .channel(`discussion-${detail.id}`, {
+          .channel(`discussion-${cur.id}`, {
             config: { presence: { key: p.id } },
           })
           .on(
             "postgres_changes",
-            { event: "INSERT", schema: "public", table: "discussion_messages", filter: `project_id=eq.${detail.id}` },
+            { event: "INSERT", schema: "public", table: "discussion_messages", filter: `project_id=eq.${cur.id}` },
             ({ new: nextRow }) => upsertRealtimeMessage(nextRow)
           )
           .on(
             "postgres_changes",
-            { event: "UPDATE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${detail.id}` },
+            { event: "UPDATE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${cur.id}` },
             ({ new: nextRow }) => upsertRealtimeMessage(nextRow)
           )
           .on(
             "postgres_changes",
-            { event: "DELETE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${detail.id}` },
+            { event: "DELETE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${cur.id}` },
             ({ old }) => removeRealtimeMessage(old?.id)
           )
           .on("presence", { event: "sync" }, () => syncOnlinePresence(channel))
@@ -296,7 +295,9 @@ export default function Discussion() {
           });
 
         channel.subscribe(async (status) => {
+          channelStatusRef.current = status;
           if (status !== "SUBSCRIBED") return;
+          setError("");
           await channel.track({
             userId: p.id,
             userName: p.full_name || p.email || "Participant",
@@ -318,10 +319,21 @@ export default function Discussion() {
         channelRef.current.untrack?.();
         supabase.removeChannel(channelRef.current);
       }
+      channelStatusRef.current = "CLOSED";
       if (typingTimeout.current) clearTimeout(typingTimeout.current);
       setOnlineUserIds({});
     };
   }, [loadMessages, loadReadState, removeRealtimeMessage, syncOnlinePresence, upsertRealtimeMessage]);
+
+  // Fallback sync when realtime channel is unavailable.
+  useEffect(() => {
+    if (!project?.id) return undefined;
+    const timer = setInterval(() => {
+      if (channelStatusRef.current === "SUBSCRIBED") return;
+      loadMessages(project.id).catch(() => {});
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [loadMessages, project?.id]);
 
   /* ── Auto-scroll ── */
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [visibleMessages]);
@@ -420,11 +432,11 @@ export default function Discussion() {
 
   /* ══════════════════════════════════════════════════════════════════ */
   return (
-    <div className="h-full etnova-bg p-3 md:p-4">
-      <div className="h-full flex overflow-hidden rounded-3xl border border-white/75 shadow-[0_20px_60px_rgba(15,23,42,0.10)] bg-white/35 backdrop-blur-[6px]">
+    <div className="min-h-[calc(100vh-56px)] md:h-full etnova-bg p-0 md:p-4">
+      <div className="h-full flex flex-col lg:flex-row overflow-hidden rounded-none md:rounded-3xl border-0 md:border border-white/75 shadow-none md:shadow-[0_20px_60px_rgba(15,23,42,0.10)] bg-white/35 backdrop-blur-[6px]">
 
       {/* ─────────────── LEFT SIDEBAR ─────────────── */}
-      <div className="w-[300px] flex-shrink-0 flex flex-col glass-sidebar border-r border-white/70 overflow-hidden">
+      <div className="hidden lg:flex w-[300px] flex-shrink-0 flex-col glass-sidebar border-r border-white/70 overflow-hidden">
 
         {/* Project name */}
         <div className="px-5 py-4 border-b border-white/70"
@@ -488,10 +500,10 @@ export default function Discussion() {
       </div>
 
       {/* ─────────────── CHAT PANEL ─────────────── */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-white/35">
+      <div className="flex-1 flex flex-col overflow-hidden bg-white/35 min-h-0">
 
         {/* Chat header */}
-        <div className="flex-shrink-0 flex items-center gap-3 px-5 py-3.5 border-b border-white/70"
+        <div className="flex-shrink-0 flex items-center gap-3 px-3 sm:px-5 py-3.5 border-b border-white/70"
           style={{ background: "rgba(255,255,255,0.90)", backdropFilter: "blur(20px)" }}>
           <div className="size-9 rounded-xl flex items-center justify-center flex-shrink-0"
             style={{ backgroundColor: `${currentTopic.color}15` }}>
@@ -500,6 +512,35 @@ export default function Discussion() {
           <div className="min-w-0">
             <h1 className="text-sm font-black text-slate-900 leading-none">{topic}</h1>
             <p className="text-[11px] text-slate-400 mt-0.5">{participants.length} participants · {visibleMessages.length} messages</p>
+          </div>
+        </div>
+
+        {/* Mobile topic tabs */}
+        <div className="lg:hidden flex-shrink-0 px-2.5 py-2 border-b border-white/70 bg-white/65 overflow-x-auto">
+          <div className="flex items-center gap-2 min-w-max">
+            {TOPICS.map((t) => {
+              const active = topic === t.id;
+              const unread = active ? 0 : (unreadByTopic[t.id] || 0);
+              return (
+                <button
+                  key={`m-${t.id}`}
+                  onClick={() => setTopic(t.id)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs whitespace-nowrap border ${active ? "font-bold text-slate-900" : "text-slate-500"}`}
+                  style={active ? {
+                    background: `linear-gradient(135deg, ${t.color}22 0%, ${t.color}0A 100%)`,
+                    borderColor: `${t.color}50`,
+                  } : { borderColor: "#e2e8f0", backgroundColor: "rgba(255,255,255,0.75)" }}
+                >
+                  <span className="material-symbols-outlined text-sm" style={{ color: active ? t.color : "#94a3b8" }}>{t.icon}</span>
+                  <span>{t.id}</span>
+                  {unread > 0 && (
+                    <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full text-white" style={{ backgroundColor: t.color }}>
+                      {unread}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -573,7 +614,7 @@ export default function Discussion() {
                           </div>
                         )}
 
-                        <div className={`flex flex-col gap-0.5 max-w-[68%] ${mine ? "items-end" : "items-start"}`}>
+                        <div className={`flex flex-col gap-0.5 max-w-[82%] md:max-w-[68%] ${mine ? "items-end" : "items-start"}`}>
 
                           {/* Sender name (other, first bubble only) */}
                           {!mine && isFirst && (

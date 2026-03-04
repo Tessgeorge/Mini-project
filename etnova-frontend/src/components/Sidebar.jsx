@@ -36,7 +36,10 @@ export default function Sidebar({ currentView, onNavigate, onLogout }) {
         <div
           className="flex items-center gap-3"
           style={{
-            animation: "sidebarFadeUp 0.4s ease both",
+            animationName: "sidebarFadeUp",
+            animationDuration: "0.4s",
+            animationTimingFunction: "ease",
+            animationFillMode: "both",
             animationDelay: "0ms",
           }}
         >
@@ -83,7 +86,10 @@ export default function Sidebar({ currentView, onNavigate, onLogout }) {
                   fontWeight: active ? 700 : 500,
                   transition: "color 0.18s ease",
                   /* Staggered entrance */
-                  animation: mounted ? `sidebarFadeUp 0.35s ease both` : "none",
+                  animationName: mounted ? "sidebarFadeUp" : "none",
+                  animationDuration: mounted ? "0.35s" : "0s",
+                  animationTimingFunction: "ease",
+                  animationFillMode: "both",
                   animationDelay: `${i * 45}ms`,
                 }}
                 onMouseEnter={(e) => { if (!active) e.currentTarget.style.color = "#0f172a"; }}
@@ -108,7 +114,13 @@ export default function Sidebar({ currentView, onNavigate, onLogout }) {
       {/* ── Bottom panel ── */}
       <div
         className="flex flex-col gap-3"
-        style={{ animation: "sidebarFadeUp 0.4s ease both", animationDelay: "360ms" }}
+        style={{
+          animationName: "sidebarFadeUp",
+          animationDuration: "0.4s",
+          animationTimingFunction: "ease",
+          animationFillMode: "both",
+          animationDelay: "360ms",
+        }}
       >
         <button
           onClick={onLogout}
