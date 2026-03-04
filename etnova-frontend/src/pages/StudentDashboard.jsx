@@ -104,7 +104,7 @@ function ActivityRow({ icon, text, time, color = "#00D2C4" }) {
 }
 
 // ─── Deadline Calendar ────────────────────────────────────────────────────────
-function DeadlineCalendar({ deadlines, onNavigate }) {
+function DeadlineCalendar({ deadlines, onNavigateTab }) {
   const today = new Date();
   const [view, setView] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [active, setActive] = useState(null); // date string key
@@ -201,7 +201,7 @@ function DeadlineCalendar({ deadlines, onNavigate }) {
                   {isPast && <p className="text-[10px] text-slate-400 mt-1">Deadline passed</p>}
                   <button
                     type="button"
-                    onClick={() => onNavigate?.("submissions")}
+                    onClick={() => onNavigateTab?.("submissions")}
                     className="mt-2.5 w-full py-1.5 rounded-lg text-[10px] font-black text-black transition-all hover:opacity-90"
                     style={{ backgroundColor: "#00D2C4" }}
                   >
@@ -263,8 +263,23 @@ function Onboarding({ profile, onCreate, onJoin }) {
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export default function StudentDashboard({ onNavigate }) {
+export default function StudentDashboard() {
   const navigate = useNavigate();
+  const goToStudentTab = useCallback(
+    (tab) => {
+      const routeByTab = {
+        dashboard: "/student/dashboard",
+        team: "/student/team",
+        submissions: "/student/submissions",
+        marks: "/student/marks",
+        project: "/student/profile",
+        discussion: "/student/chat",
+        chat: "/student/chat",
+      };
+      navigate(routeByTab[tab] || "/student/dashboard");
+    },
+    [navigate]
+  );
 
   // Data state
   const [loading, setLoading] = useState(true);
@@ -400,7 +415,7 @@ export default function StudentDashboard({ onNavigate }) {
         localStorage.setItem("studentOpenJoinRequests", "1");
         setShowNotifications(false);
         setShowAllNotifications(false);
-        onNavigate?.("team");
+        goToStudentTab("team");
       }
     }
   };
@@ -652,7 +667,7 @@ export default function StudentDashboard({ onNavigate }) {
               <p className={`flex-1 text-sm font-semibold ${alert.text}`}>{alert.msg}</p>
 
               {/* CTA button */}
-              <button type="button" onClick={() => onNavigate?.("submissions")}
+              <button type="button" onClick={() => goToStudentTab("submissions")}
                 className="flex-shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-xs font-black transition-all hover:opacity-90 hover:scale-[1.03] active:scale-95 whitespace-nowrap"
                 style={{ backgroundColor: alert.color, boxShadow: `0 3px 10px ${alert.color}40` }}>
                 Go to Submissions
@@ -701,7 +716,7 @@ export default function StudentDashboard({ onNavigate }) {
                 <span className="ml-auto text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Read-only</span>
               </div>
               <div className="p-5">
-                <DeadlineCalendar deadlines={DEADLINES} onNavigate={onNavigate} />
+                <DeadlineCalendar deadlines={DEADLINES} onNavigateTab={goToStudentTab} />
               </div>
             </div>
           </div>
@@ -721,7 +736,7 @@ export default function StudentDashboard({ onNavigate }) {
                 { id: "submissions", icon: "upload_file", label: "Submissions", color: "#10b981" },
                 { id: "marks", icon: "grade", label: "Marks", color: "#f43f5e" },
               ].map(nav => (
-                <button key={nav.id} type="button" onClick={() => onNavigate?.(nav.id)}
+                <button key={nav.id} type="button" onClick={() => goToStudentTab(nav.id)}
                   className="flex flex-col items-center gap-2.5 py-5 px-3 rounded-xl border border-white/60 bg-white/40 hover:bg-white/70 hover:shadow-sm transition-all group">
                   <div className="size-11 rounded-2xl flex items-center justify-center transition-transform group-hover:scale-110"
                     style={{ backgroundColor: `${nav.color}12` }}>

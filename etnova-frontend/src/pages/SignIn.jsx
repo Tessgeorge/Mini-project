@@ -6,7 +6,7 @@ import { apiRequest } from '../config/apiClient'
 const ACCENT_COLOR = '#00D2C4'
 
 const ROLE_ROUTES = {
-  student: '/student',
+  student: '/student/dashboard',
   mentor: '/mentor',
   admin: '/admin',
 }
@@ -50,8 +50,6 @@ export default function SignIn() {
         throw new Error('Your role is not assigned yet. Please contact support.')
       }
 
-      // Always start at dashboard on fresh login
-      localStorage.removeItem('studentView')
       navigate(destination, { replace: true })
     } catch (error) {
       setAuthError(error.message ?? 'Unable to sign in right now.')

@@ -216,11 +216,11 @@ export default function Submissions() {
 
     /* ══ Main render ══════════════════════════════════════════════════════ */
     return (
-        <div className="etnova-bg pb-8">
+        <div className="etnova-bg pb-20 md:pb-8">
 
             {/* ── Page Header ── */}
-            <div className="glass-topbar px-6 py-4">
-                <div className="max-w-7xl mx-auto flex items-center gap-3">
+            <div className="glass-topbar px-4 sm:px-6 py-3.5 sm:py-4">
+                <div className="max-w-7xl mx-auto flex flex-wrap items-center gap-3">
                     <div className="size-9 rounded-xl flex items-center justify-center flex-shrink-0"
                         style={{ background: 'linear-gradient(135deg,#00C4B4 0%,#00897B 100%)' }}>
                         <span className="material-symbols-outlined text-white text-[18px]">upload_file</span>
@@ -238,7 +238,7 @@ export default function Submissions() {
                 </div>
             </div>
 
-            <div className="max-w-7xl mx-auto px-6 py-6">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-6">
 
                 {/* ── Alerts ── */}
                 {error && (
