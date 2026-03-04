@@ -7,6 +7,11 @@ import supabase from './config/supabaseClient'
 const SignIn = lazy(() => import('./pages/SignIn'))
 const MentorDashboard = lazy(() => import('./pages/MentorDashboard'))
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
+const AdminGuideAllocation = lazy(() => import('./pages/AdminGuideAllocation'))
+const AdminMentorManagement = lazy(() => import('./pages/AdminMentorManagement'))
+const AdminReviewManagement = lazy(() => import('./pages/AdminReviewManagement'))
+const AdminClasses = lazy(() => import('./pages/AdminClasses'))
+const AdminReviewStages = lazy(() => import('./pages/AdminReviewStages'))
 const StudentLayout = lazy(() => import('./components/StudentLayout'))
 
 function StudentRouteWrapper() {
@@ -59,6 +64,46 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <AdminDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/guide-allocation"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AdminGuideAllocation />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/mentor-management"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AdminMentorManagement />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/review-management"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AdminReviewStages />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/review-stages"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AdminReviewStages />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/classes"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AdminClasses />
               </ProtectedRoute>
             }
           />

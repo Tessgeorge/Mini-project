@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=1440, initial-scale=1" />
+  <title>ETNOVA — Admin Dashboard Mockup</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#F8FAFC;
+      --card:#ffffff;
+      --teal:#14B8A6;
+      --blue:#0ea5e9;
+      --muted:#6B7280;
+      --radius:16px;
+      --shadow: 0 10px 30px rgba(15,23,42,0.06);
+      --soft-shadow: 0 6px 20px rgba(2,6,23,0.06);
+    }
+    html,body{height:100%;}
+    body{
+      margin:0;
+      font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      background:linear-gradient(180deg, var(--bg), #ffffff 60%);
+      color:#0f172a;
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+      padding:28px;
+      font-size:15px;
+      line-height:1.45;
+    }
+    .app{max-width:1440px;margin:0 auto;background:transparent}
+
+    /* Top header gradient */
+    .topbar{
+      display:flex;align-items:center;justify-content:space-between;
+      gap:20px;padding:24px;border-radius:18px;
+      background:linear-gradient(90deg, rgba(20,184,166,0.12), rgba(14,165,233,0.06));
+      box-shadow:var(--soft-shadow);
+      margin-bottom:20px;
+      backdrop-filter: blur(6px);
+    }
+    .breadcrumb{font-size:13px;color:var(--muted)}
+    .header-right{display:flex;align-items:center;gap:14px}
+    .search{display:flex;align-items:center;background:rgba(255,255,255,0.6);padding:8px 12px;border-radius:10px;border:1px solid rgba(15,23,42,0.04)}
+    .search input{border:none;background:transparent;outline:none;width:220px;font-size:14px}
+    .icon{width:18px;height:18px;opacity:0.9}
+    .notif{position:relative}
+    .notif-badge{position:absolute;top:-6px;right:-6px;background:#ef4444;color:white;border-radius:999px;padding:2px 6px;font-size:11px}
+    .avatar{width:40px;height:40px;border-radius:999px;background:linear-gradient(180deg,var(--teal),var(--blue));display:flex;align-items:center;justify-content:center;color:white;font-weight:600}
+    .year-label{font-size:13px;color:var(--muted);background:rgba(15,23,42,0.03);padding:6px 10px;border-radius:10px}
+
+    .layout{display:grid;grid-template-columns:260px 1fr;gap:20px;margin-top:18px}
+
+    /* Sidebar */
+    .sidebar{background:transparent;padding:8px 6px}
+    .menu{background:transparent;border-radius:12px;padding:10px}
+    .menu-item{display:flex;align-items:center;gap:12px;padding:12px;border-radius:12px;color:#0f172a;font-weight:600}
+    .menu-item.small{font-weight:500;color:var(--muted)}
+    .menu-item:hover{background:rgba(20,184,166,0.06)}
+    .menu .spacer{height:14px}
+    .signout{position:fixed;left:18px;bottom:32px;width:220px}
+
+    /* Main area */
+    .main{padding:0}
+    .grid{display:grid;grid-template-columns:1fr;gap:18px}
+
+    .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--soft-shadow);padding:18px}
+    .welcome{display:flex;justify-content:space-between;gap:20px;align-items:center}
+    .welcome .left h1{margin:0;font-family:Poppins,Inter;font-size:22px}
+    .welcome .left p{margin:6px 0 0;color:var(--muted)}
+    .welcome .right{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+    .dept-badge{background:linear-gradient(90deg,#e6fffa,#f0f9ff);color:var(--teal);padding:6px 10px;border-radius:999px;font-weight:600;border:1px solid rgba(20,184,166,0.08)}
+
+    /* KPI cards row */
+    .kpi-row{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+    .kpi{display:flex;gap:14px;align-items:center;padding:16px;border-radius:12px}
+    .kpi .left{width:6px;height:56px;border-radius:8px}
+    .kpi h3{margin:0;font-size:20px}
+    .kpi p{margin:2px 0 0;color:var(--muted);font-size:13px}
+
+    /* Sections row */
+    .two-col{display:grid;grid-template-columns:1fr 420px;gap:18px}
+    .chart{height:260px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-weight:600}
+
+    .list-table{max-height:260px;overflow:auto}
+    table{width:100%;border-collapse:collapse;font-size:14px}
+    th,td{padding:10px;border-bottom:1px solid rgba(15,23,42,0.04);text-align:left}
+    th{color:var(--muted);font-weight:600;font-size:13px}
+
+    /* Guide allocation */
+    .progress-row{display:flex;flex-direction:column;gap:10px}
+    .gitem{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .gleft{display:flex;gap:12px;align-items:center}
+    .gbar{height:12px;background:#EEF2F7;border-radius:10px;flex:1;overflow:hidden}
+    .gbar > i{display:block;height:100%;background:linear-gradient(90deg,#34D399,#059669);box-shadow:inset 0 -2px 8px rgba(3,105,72,0.06)}
+    .run-btn{background:var(--teal);color:white;padding:10px 12px;border-radius:10px;border:none;font-weight:600}
+
+    /* Timeline */
+    .timeline{display:flex;flex-direction:column;gap:12px}
+    .stage{display:flex;gap:12px;align-items:center}
+    .dot{width:40px;height:40px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-weight:700}
+    .dot.pending{background:#fff;border:2px solid rgba(15,23,42,0.06);color:var(--muted)}
+    .dot.active{background:linear-gradient(180deg,var(--teal),var(--blue));color:white}
+    .stage .meta{color:var(--muted)}
+
+    /* Publish panel */
+    .publish{display:flex;flex-direction:column;gap:12px}
+    .primary{background:var(--teal);color:white;padding:12px 14px;border-radius:12px;border:none;font-weight:700;box-shadow:0 6px 18px rgba(20,184,166,0.12)}
+    .warning{color:#92400e;background:#fff7ed;padding:10px;border-radius:10px;border:1px solid rgba(249,115,22,0.06)}
+
+    /* Responsive-ish: keep layout for screenshot */
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:14px">
+        <div style="display:flex;flex-direction:column">
+          <div class="breadcrumb">Home › Admin Dashboard</div>
+              <div style="font-weight:700;font-size:18px;margin-top:6px">ETNOVA — Admin Console</div>
+              <div style="font-size:13px;color:var(--muted);margin-top:6px">Department: Computer Science & Engineering</div>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="search">
+          <svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M21 21l-4.35-4.35" stroke="#0F172A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path><circle cx="11" cy="11" r="6" stroke="#0F172A" stroke-width="1.5"></circle></svg>
+          <input placeholder="Search projects, students, guides" />
+        </div>
+        <div class="notif">
+          <svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M15 17H9" stroke="#0F172A" stroke-width="1.5" stroke-linecap="round"></path><path d="M12 2v2" stroke="#0F172A" stroke-width="1.5" stroke-linecap="round"></path><path d="M18 8v4a6 6 0 01-12 0V8" stroke="#0F172A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          <div class="notif-badge">3</div>
+        </div>
+        <div class="year-label">2026 — S6 Mini Project</div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+          <div class="avatar">Dr</div>
+          <div style="font-size:12px;color:var(--muted);text-align:right">HOD</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <div style="margin-bottom:10px;color:var(--muted);font-weight:700">CSE Department — Admin</div>
+        <div class="menu card">
+          <div class="menu-item"><svg class="icon" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="7" rx="1.5" stroke="#0F172A" stroke-width="1.5"/></svg> Dashboard</div>
+          <div class="menu-item"><svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M3 7h18" stroke="#0F172A" stroke-width="1.5"/></svg> Guides & Roles</div>
+          <div class="menu-item"><svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M12 20v-6" stroke="#0F172A" stroke-width="1.5"/><path d="M6 10l6-6 6 6" stroke="#0F172A" stroke-width="1.5"/></svg> Class Coordinators</div>
+          <div class="menu-item"><svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M8 12h8" stroke="#0F172A" stroke-width="1.5"/></svg> Guide Allocation</div>
+          <div class="menu-item"><svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M3 6h18" stroke="#0F172A" stroke-width="1.5"/></svg> Review & Deadlines</div>
+          <div class="menu-item"><svg class="icon" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="10" r="3" stroke="#0F172A" stroke-width="1.5"/></svg> Rubrics</div>
+          <div class="menu-item"><svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M3 12h18" stroke="#0F172A" stroke-width="1.5"/></svg> Project Monitoring</div>
+          <div class="menu-item"><svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M3 6h18" stroke="#0F172A" stroke-width="1.5"/></svg> Marks & Publishing</div>
+          <div class="menu-item"><svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M12 2v20" stroke="#0F172A" stroke-width="1.5"/></svg> CO–PO Reports</div>
+          <div class="spacer"></div>
+          <div class="menu-item small">Audit Logs</div>
+        </div>
+        <div class="signout card" style="padding:12px;display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;flex-direction:column">
+            <div style="color:var(--muted)">Signed in as</div>
+            <div style="font-weight:700">Dr. A. Kumar • HOD</div>
+          </div>
+          <div style="color:var(--muted);font-weight:700">Sign Out</div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div class="grid">
+          <div class="card welcome">
+            <div class="left">
+              <h1>Good Evening, Dr. A. Kumar</h1>
+              <p>CSE Department – Project Evaluation Control Panel</p>
+            </div>
+            <div class="right">
+              <div style="font-size:13px;color:var(--muted)">02 March 2026</div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <div class="dept-badge">CSE</div>
+                <div style="font-size:13px;color:var(--muted)">Academic Year: 2026 — S6</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="kpi-row">
+            <div class="card kpi" style="align-items:center">
+              <div class="left" style="background:linear-gradient(180deg,#60A5FA,#0EA5E9)"></div>
+              <div>
+                <h3>128</h3>
+                <p>Total Teams</p>
+              </div>
+            </div>
+            <div class="card kpi">
+              <div class="left" style="background:linear-gradient(180deg,#34D399,#059669)"></div>
+              <div>
+                <h3>42</h3>
+                <p>Total Guides</p>
+              </div>
+            </div>
+            <div class="card kpi">
+              <div class="left" style="background:linear-gradient(180deg,#FBBF24,#F97316)"></div>
+              <div>
+                <h3>18</h3>
+                <p>Pending Evaluations</p>
+              </div>
+            </div>
+            <div class="card kpi">
+              <div class="left" style="background:linear-gradient(180deg,#7C3AED,#9333EA)"></div>
+              <div>
+                <h3>1st Review</h3>
+                <p>Active Review Stage</p>
+              </div>
+            </div>
+            <div class="card kpi">
+              <div class="left" style="background:linear-gradient(180deg,#14B8A6,#0EA5E9)"></div>
+              <div>
+                <h3>Not Yet</h3>
+                <p>Results Published</p>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="two-col">
+            <div class="card">
+              <h3 style="margin-top:0;margin-bottom:12px">Guide Allocation Overview</h3>
+              <div style="font-size:13px;color:var(--muted);margin-bottom:12px">Max 2 Teams Per Guide Enforced</div>
+              <div class="progress-row">
+                <div class="gitem"><div class="gleft"><div style="width:36px;height:36px;border-radius:8px;background:linear-gradient(90deg,#34D399,#059669);display:flex;align-items:center;justify-content:center;color:white;font-weight:700">G1</div><div style="font-weight:700">Dr. S. Rao</div></div><div style="width:120px;text-align:right;color:var(--muted);font-weight:700">2 / 2</div></div>
+                <div class="gbar" aria-hidden><i style="width:100%"></i></div>
+
+                <div class="gitem"><div class="gleft"><div style="width:36px;height:36px;border-radius:8px;background:linear-gradient(90deg,#60A5FA,#0EA5E9);display:flex;align-items:center;justify-content:center;color:white;font-weight:700">G2</div><div style="font-weight:700">Dr. R. Singh</div></div><div style="width:120px;text-align:right;color:var(--muted);font-weight:700">1 / 2</div></div>
+                <div class="gbar" aria-hidden><i style="width:50%"></i></div>
+
+                <div style="display:flex;justify-content:flex-end;margin-top:8px">
+                  <button class="run-btn">Run Random Allocation</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <h3 style="margin-top:0;margin-bottom:12px">Result Publishing</h3>
+              <div class="publish">
+                <div style="font-size:13px;color:var(--muted)">Marks Verification: <strong style="color:var(--teal)">Pending</strong></div>
+                <div class="warning">Note: Publishing will lock marks for this academic year.</div>
+                <button class="primary">Approve & Publish Results</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 style="margin-top:0;margin-bottom:12px">Review & Deadline Status</h3>
+            <div class="timeline">
+              <div class="stage"><div class="dot"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#CBD5E1" stroke-width="1.5"/></svg></div><div><div style="font-weight:700">Abstract</div><div class="meta">Completed • 12 Feb 2026</div></div></div>
+              <div class="stage"><div class="dot active">0</div><div><div style="font-weight:700">0th Review</div><div class="meta">Completed • 18 Feb 2026</div></div></div>
+              <div class="stage"><div class="dot active">1</div><div><div style="font-weight:700">1st Review</div><div class="meta">Active • Due 05 Mar 2026</div></div></div>
+              <div class="stage"><div class="dot pending">2</div><div><div style="font-weight:700">2nd Review</div><div class="meta">Upcoming • 12 Mar 2026</div></div></div>
+              <div class="stage"><div class="dot pending">F</div><div><div style="font-weight:700">Final Review</div><div class="meta">Upcoming • 25 Mar 2026</div></div></div>
+            </div>
+          </div>
+
+          <div class="two-col">
+            <div class="card">
+              <h3 style="margin-top:0;margin-bottom:12px">Project Monitoring</h3>
+              <div style="display:flex;gap:18px;align-items:center">
+                <div style="flex:1">
+                  <div class="chart">Donut Chart • Stage Distribution</div>
+                </div>
+                <div style="width:360px">
+                  <div style="font-weight:700;margin-bottom:8px">Pending Submissions</div>
+                  <div class="list-table">
+                    <table>
+                      <thead><tr><th>Team</th><th>Guide</th><th>Stage</th></tr></thead>
+                      <tbody>
+                        <tr><td>Team 12</td><td>Dr. S. Rao</td><td>1st Review</td></tr>
+                        <tr><td>Team 36</td><td>Dr. R. Singh</td><td>1st Review</td></tr>
+                        <tr><td>Team 9</td><td>Dr. A. Mehta</td><td>Abstract</td></tr>
+                        <tr><td>Team 20</td><td>Dr. P. Das</td><td>2nd Review</td></tr>
+                        <tr><td>Team 4</td><td>Dr. S. Rao</td><td>1st Review</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <h3 style="margin-top:0;margin-bottom:12px">Quick Actions</h3>
+              <div style="display:flex;flex-direction:column;gap:10px">
+                <button style="padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.04);background:transparent">Export CO–PO Report</button>
+                <button style="padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.04);background:transparent">Audit Logs</button>
+                <button style="padding:10px;border-radius:10px;border:1px solid rgba(15,23,42,0.04);background:transparent">Manage Rubrics</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

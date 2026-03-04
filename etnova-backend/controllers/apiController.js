@@ -8,6 +8,67 @@ const safeProfileName = (profile, fallback = 'Student') => {
 
 const LOCKED_PROJECT_STATUSES = new Set(['approved', 'completed']);
 const isProjectLocked = (status) => LOCKED_PROJECT_STATUSES.has((status || '').toLowerCase());
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isUuid = (value) => typeof value === 'string' && UUID_REGEX.test(value);
+
+const attachGuideAllocationDetails = async (projects = []) => {
+  if (!Array.isArray(projects) || projects.length === 0) return projects;
+
+  const projectIds = [...new Set(projects.map((project) => project?.id).filter(isUuid))];
+  if (projectIds.length === 0) return projects;
+
+  const { data: allocations, error: allocError } = await supabase
+    .from('guide_allocations')
+    .select(`
+      id,
+      project_id,
+      guide_id,
+      status,
+      assigned_at,
+      comment,
+      guide:profiles!guide_allocations_guide_id_fkey(
+        id,
+        full_name,
+        email,
+        department
+      )
+    `)
+    .eq('status', 'active')
+    .in('project_id', projectIds)
+    .order('assigned_at', { ascending: false });
+
+  if (allocError) {
+    throw allocError;
+  }
+
+  const allocationMap = new Map();
+  (allocations || []).forEach((row) => {
+    if (!row?.project_id) return;
+    if (!allocationMap.has(row.project_id)) {
+      allocationMap.set(row.project_id, row);
+    }
+  });
+
+  return projects.map((project) => {
+    const activeAllocation = allocationMap.get(project.id) || null;
+    const allocatedGuide = activeAllocation?.guide || null;
+
+    return {
+      ...project,
+      mentor: allocatedGuide || project.mentor || null,
+      guide_allocation: activeAllocation
+        ? {
+            id: activeAllocation.id,
+            guide_id: activeAllocation.guide_id,
+            status: activeAllocation.status,
+            assigned_at: activeAllocation.assigned_at,
+            comment: activeAllocation.comment || null,
+          }
+        : null,
+    };
+  });
+};
 
 const createNotifications = async (rows) => {
   if (!rows?.length) return;
@@ -142,7 +203,8 @@ export const getProjects = async (req, res) => {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return res.json(data || []);
+      const enriched = await attachGuideAllocationDetails(data || []);
+      return res.json(enriched || []);
     } else if (req.userRole === 'mentor') {
       const mentorProjectsSelect = `
         *,
@@ -250,7 +312,8 @@ export const getProjectById = async (req, res) => {
       .single();
 
     if (error) throw error;
-    res.json(data);
+    const [enriched] = await attachGuideAllocationDetails(data ? [data] : []);
+    res.json(enriched || data);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
