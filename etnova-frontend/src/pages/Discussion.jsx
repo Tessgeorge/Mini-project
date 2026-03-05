@@ -587,7 +587,8 @@ export default function Discussion() {
 
   /* â”€â”€ Typing â”€â”€ */
   const sendTyping = (isTyping) => {
-    channelRef.current?.send({
+    if (!channelRef.current || channelStatusRef.current !== "SUBSCRIBED") return;
+    void channelRef.current.send({
       type: "broadcast", event: "typing",
       payload: { userId: profile?.id, userName: profile?.full_name || "Participant", topic, isTyping }
     });
