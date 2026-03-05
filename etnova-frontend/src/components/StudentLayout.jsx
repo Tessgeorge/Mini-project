@@ -17,7 +17,7 @@ export default function StudentLayout({ onLogout }) {
     location.pathname.startsWith("/student/chat") ||
     location.pathname.startsWith("/student/discussion");
   const mainClasses = isChatRoute
-    ? "h-[calc(100dvh-4.5rem-env(safe-area-inset-bottom))] md:h-screen overflow-hidden"
+    ? "h-[calc(100dvh-5rem-env(safe-area-inset-bottom))] md:h-screen overflow-hidden"
     : "h-[100dvh] md:h-screen pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0 overflow-y-auto";
 
   useEffect(() => {

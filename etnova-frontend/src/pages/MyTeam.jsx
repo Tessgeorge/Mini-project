@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import JoinRequestsModal from "../components/JoinRequestsModal";
 import { apiRequest } from "../config/apiClient";
 import supabase from "../config/supabaseClient";
@@ -447,12 +447,29 @@ export default function MyTeam() {
   const [project, setProject] = useState(null);
   const [profile, setProfile] = useState(null);
   const [showJoinRequests, setShowJoinRequests] = useState(false);
+  const [pendingJoinRequestsCount, setPendingJoinRequestsCount] = useState(0);
 
   // Sprint board state
   const [tasks, setTasks] = useState([]);
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [taskForm, setTaskForm] = useState({ title: "", assignee_ids: [], priority: "medium", due_date: "", status: "todo" });
   const [savingTask, setSavingTask] = useState(false);
+
+  const refreshPendingJoinRequestsCount = useCallback(async (projectId) => {
+    if (!projectId) {
+      setPendingJoinRequestsCount(0);
+      return;
+    }
+    try {
+      const requests = await apiRequest("/join-requests/leader");
+      const count = (requests || []).filter(
+        (request) => (request.project_id || request.project?.id) === projectId
+      ).length;
+      setPendingJoinRequestsCount(count);
+    } catch {
+      setPendingJoinRequestsCount(0);
+    }
+  }, []);
 
   const loadTeam = async ({ force = false } = {}) => {
     setLoading(true);
@@ -462,6 +479,12 @@ export default function MyTeam() {
       setProfile(p);
       const current = projects?.[0];
       setProject(current || null);
+      const myMembership = (current?.team_members || []).find((member) => member.student_id === p?.id);
+      if (myMembership?.role === "leader") {
+        await refreshPendingJoinRequestsCount(current.id);
+      } else {
+        setPendingJoinRequestsCount(0);
+      }
     } catch (e) {
       setError(e.message || "Failed to load team");
     } finally {
@@ -541,6 +564,14 @@ export default function MyTeam() {
   const me = teamMembers.find((m) => m.student_id === profile?.id);
   const myRole = me?.role || "member";
   const locked = isLocked(project?.status);
+
+  useEffect(() => {
+    if (!project?.id || myRole !== "leader") return undefined;
+    const timer = setInterval(() => {
+      refreshPendingJoinRequestsCount(project.id);
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [myRole, project?.id, refreshPendingJoinRequestsCount]);
 
   useEffect(() => {
     const shouldOpenJoinRequests = localStorage.getItem("studentOpenJoinRequests") === "1";
@@ -704,15 +735,23 @@ export default function MyTeam() {
             <SectionHead icon="manage_accounts" title="Member Management">
               {myRole === "leader" && !locked && (
                 <button
-                  onClick={() => setShowJoinRequests(true)}
+                  onClick={async () => {
+                    await refreshPendingJoinRequestsCount(project.id);
+                    setShowJoinRequests(true);
+                  }}
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-black text-xs font-bold transition-all hover:opacity-90"
                   style={{ backgroundColor: "#00D2C4" }}>
                   <span className="material-symbols-outlined text-sm">mail</span>
                   Join Requests
+                  {pendingJoinRequestsCount > 0 && (
+                    <span className="min-w-[18px] h-[18px] px-1.5 rounded-full bg-rose-500 text-white text-[10px] leading-[18px] text-center font-black">
+                      {pendingJoinRequestsCount > 99 ? "99+" : pendingJoinRequestsCount}
+                    </span>
+                  )}
                 </button>
               )}
               {myRole === "member" && locked && (
-                <span className="text-xs text-slate-400 italic">Read-only ‚team is {project.status}</span>
+                <span className="text-xs text-slate-400 italic">Read-only - team is {project.status}</span>
               )}
             </SectionHead>
           </div>
@@ -984,7 +1023,10 @@ export default function MyTeam() {
       <JoinRequestsModal
         isOpen={showJoinRequests}
         onClose={() => setShowJoinRequests(false)}
-        onRequestHandled={loadTeam}
+        onRequestHandled={async () => {
+          setPendingJoinRequestsCount((prev) => Math.max(0, prev - 1));
+          await loadTeam({ force: true });
+        }}
       />
 
       {/* New Task Modal */}

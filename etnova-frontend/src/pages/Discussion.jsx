@@ -754,7 +754,7 @@ export default function Discussion() {
 
   /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
   return (
-    <div className="h-full etnova-bg p-0 md:p-4 overflow-hidden">
+    <div className="h-full etnova-bg p-0 md:p-4 overflow-hidden pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0">
       <div className="h-full flex flex-col lg:flex-row overflow-hidden rounded-none sm:rounded-2xl md:rounded-3xl border-0 md:border border-white/75 shadow-none md:shadow-[0_20px_60px_rgba(15,23,42,0.10)] bg-white/35 backdrop-blur-[6px]">
 
       {/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ LEFT SIDEBAR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
@@ -888,7 +888,7 @@ export default function Discussion() {
               backgroundColor: "#eef2f7",
             }}
           >
-            <div className="min-h-full flex flex-col justify-end py-4" style={{ scrollbarGutter: "stable" }}>
+            <div className="min-h-full flex flex-col justify-end py-4 pb-24 md:pb-4" style={{ scrollbarGutter: "stable" }}>
               {visibleMessages.length > 0 && (
                 <div className="flex items-center justify-center mb-2">
                   {loadingOlder ? (
@@ -1063,7 +1063,7 @@ export default function Discussion() {
           </div>
 
           {showJumpToBottom && (
-            <div className="absolute bottom-20 md:bottom-4 right-4 z-20">
+            <div className="absolute bottom-[6.5rem] md:bottom-4 right-4 z-20">
               <button
                 onClick={() => scrollToBottom("smooth")}
                 aria-label="Jump to latest messages"
@@ -1090,7 +1090,7 @@ export default function Discussion() {
 
         {/* â”€â”€ Input area â”€â”€ */}
         <div
-          className="shrink-0 border-t border-white/70 px-3 md:px-4 py-2 md:py-2.5 pb-[max(0.6rem,env(safe-area-inset-bottom))]"
+          className="shrink-0 sticky bottom-0 z-10 border-t border-white/70 px-3 md:px-4 py-2 md:py-2.5 pb-[max(0.6rem,env(safe-area-inset-bottom))]"
           style={{ background: "rgba(255,255,255,0.96)", backdropFilter: "blur(20px)" }}
         >
 
