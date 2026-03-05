@@ -139,7 +139,7 @@ export async function runRandomAllocation() {
     if (insertError) throw insertError;
 
     const mentorWorkload = randomizedMentors.map((mentor) => ({
-      mentor_id: mentor.id,
+      guide_id: mentor.id,
       mentor_name: mentor.full_name || "Unnamed Mentor",
       active_projects: workloadMap.get(mentor.id) || 0,
       max_projects: MAX_PROJECTS_PER_MENTOR,

@@ -240,7 +240,8 @@ export default function AdminMentorManagement() {
           .from("evaluations")
           .select(`
             id,
-            mentor_id,
+            guide_id,
+            mentor_id:guide_id,
             project_id,
             stage:evaluation_type,
             obtained_marks,
@@ -254,7 +255,7 @@ export default function AdminMentorManagement() {
               )
             )
           `)
-          .eq("mentor_id", selectedMentorId);
+          .eq("guide_id", selectedMentorId);
 
         const [guidanceRes, evaluationsRes] = await Promise.all([
           guidanceQuery,
