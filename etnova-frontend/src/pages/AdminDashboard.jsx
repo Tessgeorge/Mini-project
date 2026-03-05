@@ -9,6 +9,7 @@ import ReviewTimeline from "../components/admin/ReviewTimeline";
 import PublishPanel from "../components/admin/PublishPanel";
 import AcademicActivityPanel from "../components/admin/AcademicActivityPanel";
 import ClassProgressAnalyzer from "../components/admin/ClassProgressAnalyzer";
+import AdminProfileSettingsModal from "../components/admin/AdminProfileSettingsModal";
 import { adminRepository } from "../data/adminRepository";
 
 const ADMIN_NAME = "Meenakshi";
@@ -58,6 +59,39 @@ export default function AdminDashboard() {
   const [mentors, setMentors] = useState([]);
   const [reviewStages, setReviewStages] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showProfileSettings, setShowProfileSettings] = useState(false);
+  const [adminProfile, setAdminProfile] = useState({
+    full_name: "",
+    department: "",
+  });
+
+  const fetchAdminProfile = useCallback(async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user?.id) {
+      setAdminProfile({ full_name: "", department: "" });
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("full_name, department")
+      .eq("id", user.id)
+      .eq("role", "admin")
+      .single();
+
+    if (error || !data) {
+      setAdminProfile({ full_name: "", department: "" });
+      return;
+    }
+
+    setAdminProfile({
+      full_name: data.full_name || "",
+      department: data.department || "",
+    });
+  }, []);
 
   const fetchDashboardData = useCallback(async () => {
     setLoading(true);
@@ -79,6 +113,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetchDashboardData();
+    fetchAdminProfile();
 
     const channel = supabase
       .channel("dashboard-projects-live")
@@ -89,7 +124,7 @@ export default function AdminDashboard() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [fetchDashboardData]);
+  }, [fetchAdminProfile, fetchDashboardData]);
 
   useEffect(() => {
     const refreshStages = () => {
@@ -182,18 +217,26 @@ export default function AdminDashboard() {
     [teams]
   );
 
+  const adminName = adminProfile.full_name || ADMIN_NAME;
+  const adminDepartment = adminProfile.department || "CSE";
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Sidebar activeItem="dashboard" onSignOut={handleSignOut} onNavigate={handleNavigate} />
 
       <main className="lg:ml-72 min-h-screen">
-        <TopNavbar adminName={ADMIN_NAME} academicYearLabel="2026 - S6 Mini Project" pageTitle="Admin Dashboard" />
+        <TopNavbar
+          adminName={adminName}
+          academicYearLabel="2026 - S6 Mini Project"
+          pageTitle="Admin Dashboard"
+          onProfileClick={() => setShowProfileSettings(true)}
+        />
 
         <div className="p-4 md:p-6 lg:p-8 space-y-6">
           <section className="rounded-xl shadow-md bg-gradient-to-r from-teal-600 to-teal-500 text-white p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-semibold">Good Evening, Dr. {ADMIN_NAME}</h1>
-              <p className="text-teal-50 mt-1 text-sm">CSE Department - Project Evaluation Control Panel</p>
+              <h1 className="text-2xl font-semibold">Good Evening, Dr. {adminName}</h1>
+              <p className="text-teal-50 mt-1 text-sm">{adminDepartment} Department - Project Evaluation Control Panel</p>
             </div>
             <div className="text-sm sm:text-right text-teal-50">
               <p className="font-semibold text-white">Today</p>
@@ -265,6 +308,11 @@ export default function AdminDashboard() {
       </main>
 
       <AcademicActivityPanel reviewStages={reviewStages} teams={teams} />
+      <AdminProfileSettingsModal
+        isOpen={showProfileSettings}
+        onClose={() => setShowProfileSettings(false)}
+        onSuccess={fetchAdminProfile}
+      />
     </div>
   );
 }

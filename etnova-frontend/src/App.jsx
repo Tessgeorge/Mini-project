@@ -87,7 +87,7 @@ function App() {
             path="/admin/review-management"
             element={
               <ProtectedRoute allowedRoles={['admin']}>
-                <AdminReviewStages />
+                <AdminReviewManagement />
               </ProtectedRoute>
             }
           />

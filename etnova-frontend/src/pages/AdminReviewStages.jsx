@@ -3,11 +3,6 @@ import supabase from "../lib/supabase";
 import useAdminAuth from "../hooks/useAdminAuth";
 import { emitAdminDataUpdated } from "../utils/adminLiveSync";
 
-function classNameOf(row) {
-  if (Array.isArray(row.classes)) return row.classes[0]?.class_name || "Unknown Class";
-  return row.classes?.class_name || "Unknown Class";
-}
-
 function formatDeadline(deadline) {
   if (!deadline) return "-";
   const date = new Date(deadline);
@@ -15,37 +10,42 @@ function formatDeadline(deadline) {
   return date.toLocaleString("en-IN");
 }
 
+function stageKey(row) {
+  return `${row.class_id}::${row.stage_name}`;
+}
+
 export default function AdminReviewStages() {
-  useAdminAuth();
-  const [rows, setRows] = useState([]);
+  const { loading: authLoading, isAdmin } = useAdminAuth();
+  const [stages, setStages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [unlockComments, setUnlockComments] = useState({});
   const [error, setError] = useState("");
 
-  const fetchRows = useCallback(async () => {
+  const fetchReviewStages = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const { data, error: fetchError } = await supabase
         .from("review_stages")
         .select(`
-          id,
           class_id,
           stage_name,
           deadline,
           is_active,
           is_completed,
           is_locked,
-          unlock_comment,
           classes:class_id (
             class_name
           )
         `)
         .order("class_id", { ascending: true })
-        .order("created_at", { ascending: true });
-      if (fetchError) throw fetchError;
-      setRows((data || []).map((row) => ({ ...row, class_name: classNameOf(row) })));
+        .order("stage_name", { ascending: true });
+      if (fetchError) {
+        console.error("Error fetching stages:", fetchError);
+        throw fetchError;
+      }
+      setStages(data || []);
     } catch (err) {
       setError(err.message || "Failed to fetch review stages.");
     } finally {
@@ -58,37 +58,43 @@ export default function AdminReviewStages() {
       const now = new Date().toISOString();
       const { data, error: candidatesError } = await supabase
         .from("review_stages")
-        .select("id")
+        .select("class_id, stage_name")
         .eq("is_completed", false)
         .eq("is_locked", false)
         .lt("deadline", now);
       if (candidatesError) throw candidatesError;
       if (!data || data.length === 0) return;
 
-      const ids = data.map((x) => x.id);
-      const { error: lockError } = await supabase
-        .from("review_stages")
-        .update({ is_locked: true, is_active: false })
-        .in("id", ids);
-      if (lockError) throw lockError;
-      await fetchRows();
+      for (const stage of data) {
+        const { error: lockError } = await supabase
+          .from("review_stages")
+          .update({ is_locked: true, is_active: false })
+          .eq("class_id", stage.class_id)
+          .eq("stage_name", stage.stage_name);
+        if (lockError) throw lockError;
+      }
+
+      await fetchReviewStages();
     } catch (err) {
       setError(err.message || "Failed auto-locking expired stages.");
     }
-  }, [fetchRows]);
+  }, [fetchReviewStages]);
 
   useEffect(() => {
-    fetchRows();
-  }, [fetchRows]);
+    if (authLoading || !isAdmin) return;
+    fetchReviewStages();
+  }, [authLoading, fetchReviewStages, isAdmin]);
 
   useEffect(() => {
+    if (authLoading || !isAdmin) return undefined;
     autoLockStages();
     const timer = setInterval(autoLockStages, 60000);
     return () => clearInterval(timer);
-  }, [autoLockStages]);
+  }, [authLoading, autoLockStages, isAdmin]);
 
   const toggleActive = async (row) => {
-    setBusy(`a-${row.id}`);
+    const key = stageKey(row);
+    setBusy(`a-${key}`);
     setError("");
     try {
       if (row.is_locked) throw new Error("Locked stage cannot be activated/deactivated.");
@@ -98,23 +104,25 @@ export default function AdminReviewStages() {
         const { error: offError } = await supabase
           .from("review_stages")
           .update({ is_active: false })
-          .eq("id", row.id);
+          .eq("class_id", row.class_id)
+          .eq("stage_name", row.stage_name);
         if (offError) throw offError;
       } else {
         const { error: offOthersError } = await supabase
           .from("review_stages")
           .update({ is_active: false })
           .eq("class_id", row.class_id)
-          .neq("id", row.id);
+          .neq("stage_name", row.stage_name);
         if (offOthersError) throw offOthersError;
 
         const { error: onError } = await supabase
           .from("review_stages")
           .update({ is_active: true })
-          .eq("id", row.id);
+          .eq("class_id", row.class_id)
+          .eq("stage_name", row.stage_name);
         if (onError) throw onError;
       }
-      await fetchRows();
+      await fetchReviewStages();
       emitAdminDataUpdated();
     } catch (err) {
       setError(err.message || "Failed toggling active stage.");
@@ -124,7 +132,8 @@ export default function AdminReviewStages() {
   };
 
   const toggleComplete = async (row) => {
-    setBusy(`c-${row.id}`);
+    const key = stageKey(row);
+    setBusy(`c-${key}`);
     setError("");
     try {
       if (row.is_locked) throw new Error("Locked stage cannot be completed/undone.");
@@ -133,9 +142,10 @@ export default function AdminReviewStages() {
       const { error: completeError } = await supabase
         .from("review_stages")
         .update({ is_completed: !row.is_completed, is_active: false })
-        .eq("id", row.id);
+        .eq("class_id", row.class_id)
+        .eq("stage_name", row.stage_name);
       if (completeError) throw completeError;
-      await fetchRows();
+      await fetchReviewStages();
       emitAdminDataUpdated();
     } catch (err) {
       setError(err.message || "Failed toggling stage completion.");
@@ -145,20 +155,22 @@ export default function AdminReviewStages() {
   };
 
   const unlock = async (row) => {
-    setBusy(`u-${row.id}`);
+    const key = stageKey(row);
+    setBusy(`u-${key}`);
     setError("");
     try {
-      const comment = (unlockComments[row.id] || "").trim();
+      const comment = (unlockComments[key] || "").trim();
       if (!row.is_locked) throw new Error("Stage is already unlocked.");
       if (!comment) throw new Error("Unlock comment is required.");
 
       const { error: unlockError } = await supabase
         .from("review_stages")
-        .update({ is_locked: false, unlock_comment: comment })
-        .eq("id", row.id);
+        .update({ is_locked: false })
+        .eq("class_id", row.class_id)
+        .eq("stage_name", row.stage_name);
       if (unlockError) throw unlockError;
-      setUnlockComments((prev) => ({ ...prev, [row.id]: "" }));
-      await fetchRows();
+      setUnlockComments((prev) => ({ ...prev, [key]: "" }));
+      await fetchReviewStages();
       emitAdminDataUpdated();
     } catch (err) {
       setError(err.message || "Failed to unlock stage.");
@@ -193,12 +205,12 @@ export default function AdminReviewStages() {
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">Loading review stages...</td></tr>
-              ) : rows.length === 0 ? (
+              ) : stages.length === 0 ? (
                 <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No review stages found.</td></tr>
               ) : (
-                rows.map((row) => (
-                  <tr key={row.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-gray-800">{row.class_name}</td>
+                stages.map((row) => (
+                  <tr key={stageKey(row)} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-gray-800">{row.classes?.class_name || "Unknown Class"}</td>
                     <td className="px-4 py-3 text-gray-700">{row.stage_name}</td>
                     <td className="px-4 py-3 text-gray-700">{formatDeadline(row.deadline)}</td>
                     <td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${row.is_active ? "bg-teal-100 text-teal-700" : "bg-gray-100 text-gray-600"}`}>{row.is_active ? "Active" : "Inactive"}</span></td>
@@ -212,8 +224,8 @@ export default function AdminReviewStages() {
                       <div className="flex items-center gap-2">
                         <input
                           type="text"
-                          value={unlockComments[row.id] || ""}
-                          onChange={(event) => setUnlockComments((prev) => ({ ...prev, [row.id]: event.target.value }))}
+                          value={unlockComments[stageKey(row)] || ""}
+                          onChange={(event) => setUnlockComments((prev) => ({ ...prev, [stageKey(row)]: event.target.value }))}
                           placeholder="Unlock comment"
                           className="flex-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30"
                         />

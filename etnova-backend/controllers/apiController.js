@@ -8,7 +8,6 @@ const safeProfileName = (profile, fallback = 'Student') => {
 
 const LOCKED_PROJECT_STATUSES = new Set(['approved', 'completed']);
 const isProjectLocked = (status) => LOCKED_PROJECT_STATUSES.has((status || '').toLowerCase());
-<<<<<<< HEAD
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const isUuid = (value) => typeof value === 'string' && UUID_REGEX.test(value);
@@ -70,7 +69,6 @@ const attachGuideAllocationDetails = async (projects = []) => {
     };
   });
 };
-=======
 const STUDENT_PROJECT_SELECT = `
   *,
   mentor:profiles!projects_mentor_id_fkey(id, full_name, email, department),
@@ -93,8 +91,6 @@ const STUDENT_PROJECT_SELECT = `
   documents(id, document_type, status, uploaded_at, file_name, file_url, version, feedback),
   evaluations(id, evaluation_type, obtained_marks, max_marks, feedback, created_at)
 `;
->>>>>>> 38035730056d6321a9df159ff72b41150ec4008e
-
 const createNotifications = async (rows) => {
   if (!rows?.length) return;
   const validRows = rows.filter((r) => r?.user_id && r?.title && r?.message && r?.type);

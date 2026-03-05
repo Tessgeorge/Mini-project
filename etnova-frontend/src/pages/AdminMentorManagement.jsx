@@ -19,21 +19,6 @@ function projectClassName(project) {
   return project.classes?.class_name || "Unknown Class";
 }
 
-function getCoordinatorAssignments(mentor) {
-  if (mentor?.is_coordinator && mentor?.class_id) {
-    return 1;
-  }
-  return 0;
-}
-
-function getCoordinatorClass(selectedMentor, classes) {
-  if (!selectedMentor) return null;
-  const mentorClassId = selectedMentor.class_id || selectedMentor.classId;
-  if (!mentorClassId) return null;
-  const classObj = (classes || []).find((item) => item.id === mentorClassId);
-  return classObj ? classObj.class_name : null;
-}
-
 export default function AdminMentorManagement() {
   useAdminAuth();
   const navigate = useNavigate();
@@ -221,7 +206,8 @@ export default function AdminMentorManagement() {
       setWorkloadLoading(true);
       try {
         const selectedMentorProfile = (mentors || []).find((mentor) => mentor.id === selectedMentorId) || null;
-        const coordinationAssignments = getCoordinatorAssignments(selectedMentorProfile);
+        const coordinationAssignments =
+          selectedMentorProfile?.is_coordinator && selectedMentorProfile?.class_id ? 1 : 0;
 
         const guidanceQuery = supabase
           .from("projects")
@@ -504,8 +490,35 @@ export default function AdminMentorManagement() {
   };
 
   const selectedMentor = mentorRows.find((mentor) => mentor.id === selectedMentorId) || null;
-  const coordinatorClassName = getCoordinatorClass(selectedMentor, classes);
-  const guidancePercent = Math.min(100, Math.round((workload.summary.guidanceTeams / 2) * 100));
+  const selectedMentorProfile = mentors.find((mentor) => mentor.id === selectedMentorId) || null;
+
+  const getGuidanceTeams = () => {
+    if (!selectedMentorProfile) return 0;
+    return projects.filter((p) => p.guide_id === selectedMentorProfile.id).length;
+  };
+
+  const getCoordinatorAssignments = () => {
+    if (!selectedMentorProfile) return 0;
+    if (selectedMentorProfile.is_coordinator && selectedMentorProfile.class_id) {
+      return 1;
+    }
+    return 0;
+  };
+
+  const getCoordinatorClassName = () => {
+    if (!selectedMentorProfile || !selectedMentorProfile.class_id) return null;
+
+    const cls = classes.find(
+      (c) => c.id === selectedMentorProfile.class_id
+    );
+
+    return cls ? cls.class_name : null;
+  };
+
+  const coordinatorClassName = getCoordinatorClassName();
+  const coordinatorAssignments = getCoordinatorAssignments();
+  const guidanceTeams = getGuidanceTeams();
+  const guidancePercent = Math.min(100, Math.round((guidanceTeams / 2) * 100));
   const evaluationPercent = workload.summary.totalEvaluations > 0
     ? Math.round((workload.summary.completedEvaluations / workload.summary.totalEvaluations) * 100)
     : 0;
@@ -596,17 +609,18 @@ export default function AdminMentorManagement() {
             {workloadOpen ? (
               <div className="p-6 space-y-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                  <MentorStatCard title="Total Guidance Teams" value={workload.summary.guidanceTeams} icon="guide" borderClass="border-t-teal-500" />
-                  <MentorStatCard title="Coordination Assignments" value={workload.summary.coordinationAssignments} icon="coordinator" borderClass="border-t-violet-500" />
+                  <MentorStatCard title="Total Guidance Teams" value={guidanceTeams} icon="guide" borderClass="border-t-teal-500" />
+                  <div>
+                    <MentorStatCard title="Coordination Assignments" value={coordinatorAssignments} icon="coordinator" borderClass="border-t-violet-500" />
+                    {coordinatorClassName && (
+                      <div className="text-sm text-gray-500 mt-2">
+                        Class: {coordinatorClassName}
+                      </div>
+                    )}
+                  </div>
                   <MentorStatCard title="Total Evaluations" value={workload.summary.totalEvaluations} icon="evaluator" borderClass="border-t-cyan-500" />
                   <MentorStatCard title="Pending Evaluations" value={workload.summary.pendingEvaluations} icon="evaluator" borderClass="border-t-rose-500" />
                 </div>
-                {selectedMentor && workload.summary.coordinationAssignments > 0 ? (
-                  <p className="text-sm text-gray-600">
-                    Coordinator Class: {coordinatorClassName || "Not assigned"}
-                  </p>
-                ) : null}
-
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <section className="rounded-xl border border-gray-100 bg-gray-50 p-4">
                     <h3 className="text-sm font-semibold text-gray-800">Guidance Load (Max 2)</h3>
@@ -615,7 +629,7 @@ export default function AdminMentorManagement() {
                         guidancePercent >= 100 ? "bg-rose-500" : guidancePercent >= 50 ? "bg-amber-500" : "bg-emerald-500"
                       }`} style={{ width: `${guidancePercent}%` }} />
                     </div>
-                    <p className="mt-2 text-xs text-gray-600">{workload.summary.guidanceTeams}/2 teams</p>
+                    <p className="mt-2 text-xs text-gray-600">{guidanceTeams}/2 teams</p>
                   </section>
 
                   <section className="rounded-xl border border-gray-100 bg-gray-50 p-4">
