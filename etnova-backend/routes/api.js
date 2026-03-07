@@ -66,7 +66,7 @@ router.get('/projects/public/pending', authenticateUser, requireRole(['student']
 router.post('/projects', authenticateUser, requireRole(['student']), createProject);
 router.get('/projects', authenticateUser, getProjects); // Get projects based on user role
 router.get('/projects/:id', authenticateUser, canAccessProject(), getProjectById);
-router.put('/projects/:id', authenticateUser, canAccessProject({ studentMustBeLeader: true }), updateProject);
+router.put('/projects/:id', authenticateUser, requireRole(['student']), canAccessProject(), updateProject);
 router.delete('/projects/:id', authenticateUser, requireRole(['student', 'admin']), canAccessProject({ studentMustBeLeader: true }), deleteProject);
 
 // Mentor routes

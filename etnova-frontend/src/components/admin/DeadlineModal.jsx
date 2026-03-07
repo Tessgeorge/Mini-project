@@ -1,32 +1,19 @@
 export default function DeadlineModal({
   stage,
   isOpen,
-  classADate,
-  classATime,
-  classBDate,
-  classBTime,
-  marksDate,
-  marksTime,
-  onClassADateChange,
-  onClassATimeChange,
-  onClassBDateChange,
-  onClassBTimeChange,
-  onMarksDateChange,
-  onMarksTimeChange,
+  deadlineDate,
+  deadlineTime,
+  onDeadlineDateChange,
+  onDeadlineTimeChange,
   onClose,
   onSave,
+  saving = false,
 }) {
   if (!isOpen || !stage) return null;
 
   const handleSave = () => {
-    if (!classADate || !classBDate || !marksDate) return;
-    onSave(stage.id, {
-      classDeadlines: {
-        "S6 CSE A": `${classADate}T${classATime || "09:00"}:00`,
-        "S6 CSE B": `${classBDate}T${classBTime || "09:00"}:00`,
-      },
-      mentorMarksDeadline: `${marksDate}T${marksTime || "17:00"}:00`,
-    });
+    if (!deadlineDate) return;
+    onSave(stage.id, `${deadlineDate}T${deadlineTime || "09:00"}:00`);
   };
 
   return (
@@ -43,56 +30,20 @@ export default function DeadlineModal({
 
         <div className="mt-5 space-y-4">
           <div>
-            <label className="block text-sm text-gray-600 mb-1.5">S6 CSE A Date</label>
+            <label className="block text-sm text-gray-600 mb-1.5">Deadline Date</label>
               <input
                 type="date"
-                value={classADate}
-                onChange={(event) => onClassADateChange(event.target.value)}
+                value={deadlineDate}
+                onChange={(event) => onDeadlineDateChange(event.target.value)}
                 className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/40"
               />
           </div>
           <div>
-            <label className="block text-sm text-gray-600 mb-1.5">S6 CSE A Time</label>
+            <label className="block text-sm text-gray-600 mb-1.5">Deadline Time</label>
               <input
                 type="time"
-                value={classATime}
-                onChange={(event) => onClassATimeChange(event.target.value)}
-                className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/40"
-              />
-          </div>
-          <div>
-            <label className="block text-sm text-gray-600 mb-1.5">S6 CSE B Date</label>
-              <input
-                type="date"
-                value={classBDate}
-                onChange={(event) => onClassBDateChange(event.target.value)}
-                className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/40"
-              />
-          </div>
-          <div>
-            <label className="block text-sm text-gray-600 mb-1.5">S6 CSE B Time</label>
-              <input
-                type="time"
-                value={classBTime}
-                onChange={(event) => onClassBTimeChange(event.target.value)}
-                className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/40"
-              />
-          </div>
-          <div>
-            <label className="block text-sm text-gray-600 mb-1.5">Mentor Marks Deadline Date</label>
-              <input
-                type="date"
-                value={marksDate}
-                onChange={(event) => onMarksDateChange(event.target.value)}
-                className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/40"
-              />
-          </div>
-          <div>
-            <label className="block text-sm text-gray-600 mb-1.5">Mentor Marks Deadline Time</label>
-              <input
-                type="time"
-                value={marksTime}
-                onChange={(event) => onMarksTimeChange(event.target.value)}
+                value={deadlineTime}
+                onChange={(event) => onDeadlineTimeChange(event.target.value)}
                 className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/40"
               />
           </div>
@@ -109,9 +60,10 @@ export default function DeadlineModal({
           <button
             type="button"
             onClick={handleSave}
-            className="px-4 py-2 rounded-lg bg-teal-600 text-white font-semibold hover:bg-teal-700 transition-colors"
+            disabled={!deadlineDate || saving}
+            className="px-4 py-2 rounded-lg bg-teal-600 text-white font-semibold hover:bg-teal-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            Save
+            {saving ? "Saving..." : "Save"}
           </button>
         </div>
       </div>

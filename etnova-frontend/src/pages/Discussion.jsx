@@ -784,7 +784,7 @@ export default function Discussion() {
               {/* Send button */}
               <button
                 onClick={postMessage}
-                disabled={sending || !text.trim()}
+                disabled={sending || !text.trim() || !profile}
                 title="Send"
                 className="size-10 rounded-full flex items-center justify-center flex-shrink-0 transition-all disabled:opacity-40"
                 style={{

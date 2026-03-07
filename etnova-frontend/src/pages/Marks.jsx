@@ -64,11 +64,11 @@ export default function Marks() {
     return { obtained, max, percent };
   }, [evaluations]);
 
-  if (loading) return <div className="min-h-screen etnova-bg flex items-center justify-center text-slate-600">Loading marks...</div>;
-  if (!project) return <div className="min-h-screen etnova-bg flex items-center justify-center text-slate-600">No project found.</div>;
+  if (loading) return <div className="min-h-full md:min-h-screen etnova-bg flex items-center justify-center text-slate-600">Loading marks...</div>;
+  if (!project) return <div className="min-h-full md:min-h-screen etnova-bg flex items-center justify-center text-slate-600">No project found.</div>;
 
   return (
-    <div className="min-h-screen px-6 py-6">
+    <div className="min-h-full md:min-h-screen px-4 sm:px-6 py-5 sm:py-6">
       <div className="max-w-6xl mx-auto space-y-6">
         <div>
           <h1 className="text-2xl font-black text-slate-900">Marks</h1>

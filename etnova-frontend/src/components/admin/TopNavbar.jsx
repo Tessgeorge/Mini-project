@@ -34,7 +34,7 @@ function SearchIcon() {
   );
 }
 
-export default function TopNavbar({ adminName, academicYearLabel, pageTitle = "Admin Dashboard" }) {
+export default function TopNavbar({ adminName, academicYearLabel, pageTitle = "Admin Dashboard", onProfileClick }) {
   const initial = adminName?.charAt(0)?.toUpperCase() || "A";
 
   return (
@@ -67,9 +67,14 @@ export default function TopNavbar({ adminName, academicYearLabel, pageTitle = "A
           <BellIcon />
         </button>
 
-        <div className="size-9 rounded-full bg-gradient-to-br from-teal-500 to-teal-700 text-white flex items-center justify-center text-sm font-semibold shadow-sm">
+        <button
+          type="button"
+          onClick={onProfileClick}
+          className="size-9 rounded-full bg-gradient-to-br from-teal-500 to-teal-700 text-white flex items-center justify-center text-sm font-semibold shadow-sm"
+          aria-label="Open profile settings"
+        >
           {initial}
-        </div>
+        </button>
       </div>
     </header>
   );

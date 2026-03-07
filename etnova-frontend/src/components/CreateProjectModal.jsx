@@ -2,12 +2,25 @@ import { useState } from 'react';
 import Modal from './Modal';
 import { apiRequest } from '../config/apiClient';
 
+const INITIAL_FORM = {
+    title: '',
+    domain: '',
+    technologyStacks: '',
+    description: '',
+    abstract: '',
+};
+
+function parseTechnologyStacks(input) {
+    return [...new Set(
+        String(input || '')
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean)
+    )];
+}
+
 export default function CreateProjectModal({ isOpen, onClose, onSuccess }) {
-    const [formData, setFormData] = useState({
-        title: '',
-        description: '',
-        abstract: '',
-    });
+    const [formData, setFormData] = useState(INITIAL_FORM);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
@@ -25,13 +38,15 @@ export default function CreateProjectModal({ isOpen, onClose, onSuccess }) {
                 method: 'POST',
                 body: {
                     title: formData.title,
+                    domain: formData.domain,
+                    technology_stacks: parseTechnologyStacks(formData.technologyStacks),
                     description: formData.description,
                     abstract: formData.abstract,
                 },
             });
 
             // Success!
-            setFormData({ title: '', description: '', abstract: '' });
+            setFormData(INITIAL_FORM);
             onSuccess?.();
             onClose();
         } catch (err) {
@@ -64,6 +79,37 @@ export default function CreateProjectModal({ isOpen, onClose, onSuccess }) {
                         required
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900 placeholder:text-slate-400"
                         placeholder="Enter your project title"
+                    />
+                </div>
+
+                <div>
+                    <label htmlFor="domain" className="block text-sm font-bold text-slate-900 mb-2">
+                        Domain / Category *
+                    </label>
+                    <input
+                        type="text"
+                        id="domain"
+                        name="domain"
+                        value={formData.domain}
+                        onChange={handleChange}
+                        required
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900 placeholder:text-slate-400"
+                        placeholder="e.g., AI & ML, Web Development, Cyber Security"
+                    />
+                </div>
+
+                <div>
+                    <label htmlFor="technologyStacks" className="block text-sm font-bold text-slate-900 mb-2">
+                        Technology Stacks
+                    </label>
+                    <input
+                        type="text"
+                        id="technologyStacks"
+                        name="technologyStacks"
+                        value={formData.technologyStacks}
+                        onChange={handleChange}
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900 placeholder:text-slate-400"
+                        placeholder="React, Node.js, Supabase (comma separated)"
                     />
                 </div>
 
