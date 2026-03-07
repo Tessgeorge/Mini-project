@@ -1,7 +1,10 @@
-﻿import { useEffect, useMemo, useState } from "react";
-import { fetchStudentBootstrapData } from "../services/studentData";
-
-// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import EditProjectModal from "../components/EditProjectModal";
+import {
+  fetchStudentBootstrapData,
+  invalidateStudentBootstrapCache,
+} from "../services/studentData";
 
 function getAcademicYear() {
   const now = new Date();
@@ -10,9 +13,16 @@ function getAcademicYear() {
   return `${start}-${start + 1}`;
 }
 
-
-
-// â”€â”€â”€ Sub-components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function normalizeTechnologyStacks(stacks) {
+  if (!stacks) return [];
+  if (Array.isArray(stacks)) {
+    return stacks.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+  return String(stacks)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
 
 function SectionHead({ icon, title, badge }) {
   return (
@@ -38,14 +48,37 @@ function FieldBlock({ label, children }) {
 }
 
 function StatusBadge({ status }) {
-  const s = (status || "pending").toLowerCase();
+  const normalized = (status || "pending").toLowerCase();
   const map = {
-    approved: { cls: "bg-emerald-50 text-emerald-700 border-emerald-200", icon: "verified", label: "Approved" },
-    completed: { cls: "bg-blue-50   text-blue-700   border-blue-200", icon: "task_alt", label: "Completed" },
-    rejected: { cls: "bg-rose-50   text-rose-700   border-rose-200", icon: "cancel", label: "Rejected" },
-    active: { cls: "bg-amber-50  text-amber-700  border-amber-200", icon: "hourglass_top", label: "In Progress" },
+    pending: {
+      cls: "bg-amber-50 text-amber-700 border-amber-200",
+      icon: "hourglass_top",
+      label: "In Progress",
+    },
+    active: {
+      cls: "bg-amber-50 text-amber-700 border-amber-200",
+      icon: "hourglass_top",
+      label: "In Progress",
+    },
+    approved: {
+      cls: "bg-emerald-50 text-emerald-700 border-emerald-200",
+      icon: "verified",
+      label: "Approved",
+    },
+    completed: {
+      cls: "bg-blue-50 text-blue-700 border-blue-200",
+      icon: "task_alt",
+      label: "Completed",
+    },
+    rejected: {
+      cls: "bg-rose-50 text-rose-700 border-rose-200",
+      icon: "cancel",
+      label: "Rejected",
+    },
   };
-  const { cls, icon, label } = map[s] || { cls: "bg-amber-50 text-amber-700 border-amber-200", icon: "hourglass_top", label: "In Progress" };
+
+  const { cls, icon, label } = map[normalized] || map.pending;
+
   return (
     <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border ${cls}`}>
       <span className="material-symbols-outlined text-sm">{icon}</span>
@@ -68,13 +101,13 @@ function Avatar({ name, size = 9 }) {
   );
 }
 
-// â”€â”€â”€ Main Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-export default function MyProject({ onNavigate }) {
+export default function MyProject() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [project, setProject] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [showEditModal, setShowEditModal] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -83,8 +116,7 @@ export default function MyProject({ onNavigate }) {
       try {
         const { profile: me, projects } = await fetchStudentBootstrapData();
         setProfile(me);
-        const p = projects?.[0];
-        setProject(p || null);
+        setProject(projects?.[0] || null);
       } catch (err) {
         setError(err.message || "Failed to load project");
       } finally {
@@ -92,8 +124,23 @@ export default function MyProject({ onNavigate }) {
       }
     })();
   }, []);
+
   const teamName = project?.title ? `${project.title} Team` : "My Team";
-  const department = profile?.department || project?.team_members?.[0]?.profiles?.department || "-";
+  const department =
+    profile?.department || project?.team_members?.[0]?.profiles?.department || "-";
+
+  const canEditProject = useMemo(() => {
+    if (!profile?.id) return false;
+    if (!project?.team_members?.length) return false;
+    return project.team_members.some(
+      (member) => member.student_id === profile.id,
+    );
+  }, [profile?.id, project?.team_members]);
+
+  const technologyStacks = useMemo(
+    () => normalizeTechnologyStacks(project?.technology_stacks),
+    [project?.technology_stacks],
+  );
 
   const checklist = useMemo(() => {
     const docs = project?.documents || [];
@@ -120,40 +167,44 @@ export default function MyProject({ onNavigate }) {
     ];
   }, [project]);
 
-  // â”€â”€ Loading â”€â”€
-  if (loading) return (
-    <div className="min-h-screen etnova-bg flex items-center justify-center">
-      <div className="text-center">
-        <div className="inline-block size-12 border-4 border-slate-200 border-t-[#00D2C4] rounded-full animate-spin" />
-        <p className="mt-4 text-slate-600 font-medium">Loading project record...</p>
-      </div>
-    </div>
-  );
+  const handleProjectSaved = (updatedProject) => {
+    setProject((prev) => (prev ? { ...prev, ...updatedProject } : updatedProject));
+    invalidateStudentBootstrapCache();
+  };
 
-  // â”€â”€ No project â”€â”€
-  if (!project) return (
-    <div className="min-h-screen etnova-bg flex items-center justify-center">
-      <div className="text-center max-w-sm">
-        <div className="size-20 rounded-2xl mx-auto mb-5 flex items-center justify-center bg-slate-100">
-          <span className="material-symbols-outlined text-4xl text-slate-400">folder_off</span>
+  if (loading) {
+    return (
+      <div className="min-h-screen etnova-bg flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block size-12 border-4 border-slate-200 border-t-[#00D2C4] rounded-full animate-spin" />
+          <p className="mt-4 text-slate-600 font-medium">Loading project record...</p>
         </div>
-        <h2 className="text-xl font-black text-slate-900 mb-2">No Project Found</h2>
-        <p className="text-slate-500 text-sm leading-relaxed">
-          Join or create a project to view its official academic record here.
-        </p>
       </div>
-    </div>
-  );
+    );
+  }
+
+  if (!project) {
+    return (
+      <div className="min-h-screen etnova-bg flex items-center justify-center">
+        <div className="text-center max-w-sm">
+          <div className="size-20 rounded-2xl mx-auto mb-5 flex items-center justify-center bg-slate-100">
+            <span className="material-symbols-outlined text-4xl text-slate-400">folder_off</span>
+          </div>
+          <h2 className="text-xl font-black text-slate-900 mb-2">No Project Found</h2>
+          <p className="text-slate-500 text-sm leading-relaxed">
+            Join or create a project to view its official academic record here.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen etnova-bg">
-
-      {/* â”€â”€ Sticky Page Header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+    <div className="min-h-full md:min-h-screen etnova-bg">
       <div className="glass-topbar sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 sm:py-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="size-10 rounded-xl flex items-center justify-center"
-              style={{ backgroundColor: "#00D2C4" }}>
+            <div className="size-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: "#00D2C4" }}>
               <span className="material-symbols-outlined text-black">folder_open</span>
             </div>
             <div>
@@ -165,34 +216,46 @@ export default function MyProject({ onNavigate }) {
         </div>
       </div>
 
-      <main className="max-w-6xl mx-auto px-6 py-7 space-y-6">
-
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-5 sm:py-7 space-y-6">
         {error && (
           <div className="flex items-center gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-            <span className="material-symbols-outlined text-base">error</span>{error}
+            <span className="material-symbols-outlined text-base">error</span>
+            {error}
           </div>
         )}
 
-        {/* â•â• SECTION 1 â€“ Project Overview â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
         <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          {/* Teal accent bar */}
           <div className="h-1" style={{ background: "linear-gradient(90deg,#00D2C4,#00a89d)" }} />
-          <div className="p-6">
-            <SectionHead icon="article" title="Project Overview" />
+          <div className="p-4 sm:p-6">
+            <SectionHead
+              icon="article"
+              title="Project Overview"
+              badge={
+                canEditProject ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowEditModal(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-black text-xs font-bold transition-all hover:opacity-90"
+                    style={{ backgroundColor: "#00D2C4" }}
+                  >
+                    <span className="material-symbols-outlined text-sm">edit</span>
+                    Edit Project
+                  </button>
+                ) : null
+              }
+            />
 
-            {/* Title hero */}
             <div className="mb-6 p-5 rounded-xl border border-white/60 bg-white/40">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Project Title</p>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                Project Title
+              </p>
               <h3 className="text-xl font-black text-slate-900">{project.title}</h3>
             </div>
 
-            {/* Grid of fields */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
               <FieldBlock label="Academic Year">{getAcademicYear()}</FieldBlock>
               <FieldBlock label="Department">{department}</FieldBlock>
-              <FieldBlock label="Domain / Category">
-                {project.domain || department}
-              </FieldBlock>
+              <FieldBlock label="Domain / Category">{project.domain || "Not specified"}</FieldBlock>
               <FieldBlock label="Project ID">
                 <span className="font-mono text-xs text-slate-600">
                   {`PRJ-${project.id?.slice(0, 8)?.toUpperCase()}`}
@@ -200,30 +263,55 @@ export default function MyProject({ onNavigate }) {
               </FieldBlock>
             </div>
 
-            {/* Abstract */}
-            <div className="border-t border-slate-100 pt-4">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Abstract</p>
-              <p className="text-sm text-slate-700 leading-relaxed">
-                {project.abstract || project.description || "Abstract not added yet. Update your project to add the academic abstract."}
+            <div className="border-t border-slate-100 pt-4 grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Description</p>
+                <p className="text-sm text-slate-700 leading-relaxed">
+                  {project.description || "Description not added yet."}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Abstract</p>
+                <p className="text-sm text-slate-700 leading-relaxed">
+                  {project.abstract || "Abstract not added yet."}
+                </p>
+              </div>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4 mt-4">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                Technology Stacks
               </p>
+              {technologyStacks.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {technologyStacks.map((stack) => (
+                    <span
+                      key={stack}
+                      className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-teal-50 text-teal-700 border border-teal-200"
+                    >
+                      {stack}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">No technology stack added yet.</p>
+              )}
             </div>
           </div>
         </section>
 
-
-
-        {/* â•â• SECTION 3 + 4 â€“ Team & Mentor â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-          {/* Team Summary */}
           <section className="glass-card-strong overflow-hidden">
-            <div className="px-6 py-5 border-b border-slate-100">
-              <SectionHead icon="group" title="Team Summary"
+            <div className="px-4 sm:px-6 py-5 border-b border-slate-100">
+              <SectionHead
+                icon="group"
+                title="Team Summary"
                 badge={
                   <button
-                    onClick={() => onNavigate?.("team")}
+                    onClick={() => navigate("/student/team")}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-black text-xs font-bold transition-all hover:opacity-90"
-                    style={{ backgroundColor: "#00D2C4" }}>
+                    style={{ backgroundColor: "#00D2C4" }}
+                  >
                     <span className="material-symbols-outlined text-sm">manage_accounts</span>
                     Manage Team
                   </button>
@@ -231,28 +319,31 @@ export default function MyProject({ onNavigate }) {
               />
             </div>
             <div className="p-5">
-              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-3">
-                {teamName}
-              </p>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-3">{teamName}</p>
               <div className="space-y-3">
                 {(project.team_members || []).length === 0 ? (
                   <p className="text-sm text-slate-400 italic">No team members found.</p>
                 ) : (
                   (project.team_members || [])
-                    .sort((a, b) => a.role === "leader" ? -1 : b.role === "leader" ? 1 : 0)
-                    .map((m) => (
-                      <div key={m.id} className="flex items-center gap-3">
-                        <Avatar name={m.profiles?.full_name} size={8} />
+                    .sort((a, b) => (a.role === "leader" ? -1 : b.role === "leader" ? 1 : 0))
+                    .map((member) => (
+                      <div key={member.id} className="flex items-center gap-3">
+                        <Avatar name={member.profiles?.full_name} size={8} />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-black text-slate-900 truncate">
-                            {m.profiles?.full_name || "Unnamed"}
+                            {member.profiles?.full_name || "Unnamed"}
                           </p>
-                          <p className="text-xs text-slate-400">{m.profiles?.roll_number || m.profiles?.email || ""}</p>
+                          <p className="text-xs text-slate-400">
+                            {member.profiles?.roll_number || member.profiles?.email || ""}
+                          </p>
                         </div>
-                        {m.role === "leader" && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0"
-                            style={{ backgroundColor: "rgba(0,210,196,0.12)", color: "#00897B" }}>
-                            <span className="material-symbols-outlined text-xs">star</span>Leader
+                        {member.role === "leader" && (
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0"
+                            style={{ backgroundColor: "rgba(0,210,196,0.12)", color: "#00897B" }}
+                          >
+                            <span className="material-symbols-outlined text-xs">star</span>
+                            Leader
                           </span>
                         )}
                       </div>
@@ -266,9 +357,8 @@ export default function MyProject({ onNavigate }) {
             </div>
           </section>
 
-          {/* Mentor Information */}
           <section className="glass-card-strong overflow-hidden">
-            <div className="px-6 py-5 border-b border-slate-100">
+            <div className="px-4 sm:px-6 py-5 border-b border-slate-100">
               <SectionHead icon="school" title="Mentor Information" />
             </div>
             <div className="p-5">
@@ -279,7 +369,9 @@ export default function MyProject({ onNavigate }) {
                   </div>
                   <div>
                     <p className="text-sm font-black text-slate-700">Pending Assignment</p>
-                    <p className="text-xs text-slate-400 mt-1">A mentor will be assigned by the administrator.</p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      A mentor will be assigned by the administrator.
+                    </p>
                   </div>
                 </div>
               ) : (
@@ -289,7 +381,8 @@ export default function MyProject({ onNavigate }) {
                     <div>
                       <p className="font-black text-slate-900 text-base">{project.mentor.full_name}</p>
                       <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700">
-                        <span className="material-symbols-outlined text-xs">verified</span>Assigned
+                        <span className="material-symbols-outlined text-xs">verified</span>
+                        Assigned
                       </span>
                     </div>
                     <div className="space-y-2 pt-1">
@@ -297,10 +390,10 @@ export default function MyProject({ onNavigate }) {
                         { label: "Designation", value: project.mentor.department || "Faculty Mentor" },
                         { label: "Email", value: project.mentor.email || "-" },
                         { label: "Department", value: project.mentor.department || "-" },
-                      ].map((r) => (
-                        <div key={r.label}>
-                          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{r.label}</p>
-                          <p className="text-sm font-bold text-slate-800 break-all">{r.value}</p>
+                      ].map((row) => (
+                        <div key={row.label}>
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{row.label}</p>
+                          <p className="text-sm font-bold text-slate-800 break-all">{row.value}</p>
                         </div>
                       ))}
                     </div>
@@ -311,22 +404,21 @@ export default function MyProject({ onNavigate }) {
           </section>
         </div>
 
-        {/* â•â• SECTION 5 â€“ Project Timeline Checklist â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
-        <section className="glass-card-strong p-6">
+        <section className="glass-card-strong p-4 sm:p-6">
           <SectionHead icon="checklist" title="Project Timeline Checklist" />
           <div className="relative">
-            {/* Vertical connector */}
             <div className="absolute left-[17px] top-6 bottom-6 w-px bg-slate-100" />
             <div className="space-y-5">
-              {checklist.map((item, i) => (
+              {checklist.map((item, index) => (
                 <div key={item.label} className="flex items-start gap-4">
                   <div
-                    className={`size-9 rounded-full flex items-center justify-center flex-shrink-0 z-10 ${item.done
-                      ? "bg-emerald-400 text-white shadow-sm"
-                      : i === checklist.findIndex((c) => !c.done)
-                        ? "border-2 border-[#00D2C4] text-[#00D2C4] bg-white"
-                        : "border-2 border-slate-200 text-slate-300 bg-white"
-                      }`}
+                    className={`size-9 rounded-full flex items-center justify-center flex-shrink-0 z-10 ${
+                      item.done
+                        ? "bg-emerald-400 text-white shadow-sm"
+                        : index === checklist.findIndex((c) => !c.done)
+                          ? "border-2 border-[#00D2C4] text-[#00D2C4] bg-white"
+                          : "border-2 border-slate-200 text-slate-300 bg-white"
+                    }`}
                   >
                     <span className="material-symbols-outlined text-base">
                       {item.done ? "check" : item.icon}
@@ -337,11 +429,15 @@ export default function MyProject({ onNavigate }) {
                       <p className={`text-sm font-black ${item.done ? "text-slate-900" : "text-slate-500"}`}>
                         {item.label}
                       </p>
-                      {item.done
-                        ? <span className="text-xs font-bold text-emerald-600">Done</span>
-                        : i === checklist.findIndex((c) => !c.done)
-                          ? <span className="text-xs font-bold" style={{ color: "#00D2C4" }}>Current</span>
-                          : <span className="text-xs text-slate-400">Pending</span>}
+                      {item.done ? (
+                        <span className="text-xs font-bold text-emerald-600">Done</span>
+                      ) : index === checklist.findIndex((c) => !c.done) ? (
+                        <span className="text-xs font-bold" style={{ color: "#00D2C4" }}>
+                          Current
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400">Pending</span>
+                      )}
                     </div>
                     <p className="text-xs text-slate-400 mt-0.5">{item.sub}</p>
                   </div>
@@ -350,9 +446,15 @@ export default function MyProject({ onNavigate }) {
             </div>
           </div>
         </section>
-
-
       </main>
+
+      <EditProjectModal
+        isOpen={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        project={project}
+        onSaved={handleProjectSaved}
+      />
     </div>
   );
 }
+

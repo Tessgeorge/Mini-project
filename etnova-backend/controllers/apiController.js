@@ -101,6 +101,41 @@ const createNotifications = async (rows) => {
   }
 };
 
+const normalizeTextField = (value, { required = false, maxLength = 5000 } = {}) => {
+  if (value === undefined) return undefined;
+  if (value === null) {
+    if (required) return null;
+    return null;
+  }
+
+  const normalized = String(value).trim();
+  if (!normalized) {
+    if (required) return null;
+    return null;
+  }
+
+  return normalized.slice(0, maxLength);
+};
+
+const normalizeTechnologyStacks = (value) => {
+  if (value === undefined) return undefined;
+
+  const raw = Array.isArray(value)
+    ? value
+    : String(value || '')
+      .split(',')
+      .map((item) => item.trim());
+
+  const unique = [...new Set(
+    raw
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+      .map((item) => item.slice(0, 40))
+  )];
+
+  return unique.slice(0, 20);
+};
+
 // ====== USER PROFILE FUNCTIONS ======
 
 export const getUserProfile = async (req, res) => {
@@ -199,14 +234,27 @@ export const getDashboardData = async (req, res) => {
 
 export const createProject = async (req, res) => {
   try {
-    const { title, description, abstract } = req.body;
+    const title = normalizeTextField(req.body?.title, { required: true, maxLength: 200 });
+    const domain = normalizeTextField(req.body?.domain, { required: true, maxLength: 120 });
+    const description = normalizeTextField(req.body?.description, { maxLength: 3000 });
+    const abstract = normalizeTextField(req.body?.abstract, { maxLength: 3000 });
+    const technologyStacks = normalizeTechnologyStacks(req.body?.technology_stacks);
+
+    if (!title) {
+      return res.status(400).json({ message: 'Project title is required' });
+    }
+    if (!domain) {
+      return res.status(400).json({ message: 'Project domain is required' });
+    }
 
     const { data, error } = await supabase
       .from('projects')
       .insert({
         title,
+        domain,
         description,
         abstract,
+        technology_stacks: technologyStacks ?? [],
         created_by: req.user.id,
         status: 'pending'
       })
@@ -376,9 +424,37 @@ export const getProjectById = async (req, res) => {
 
 export const updateProject = async (req, res) => {
   try {
+    const updates = {};
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'title')) {
+      const title = normalizeTextField(req.body.title, { required: true, maxLength: 200 });
+      if (!title) return res.status(400).json({ message: 'Project title cannot be empty' });
+      updates.title = title;
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'domain')) {
+      const domain = normalizeTextField(req.body.domain, { required: true, maxLength: 120 });
+      if (!domain) return res.status(400).json({ message: 'Project domain cannot be empty' });
+      updates.domain = domain;
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'description')) {
+      updates.description = normalizeTextField(req.body.description, { maxLength: 3000 });
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'abstract')) {
+      updates.abstract = normalizeTextField(req.body.abstract, { maxLength: 3000 });
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'technology_stacks')) {
+      updates.technology_stacks = normalizeTechnologyStacks(req.body.technology_stacks) ?? [];
+    }
+
+    if (!Object.keys(updates).length) {
+      return res.status(400).json({ message: 'No valid project fields provided for update' });
+    }
+
+    updates.updated_at = new Date().toISOString();
+
     const { data, error } = await supabase
       .from('projects')
-      .update(req.body)
+      .update(updates)
       .eq('id', req.params.id)
       .select()
       .single();
@@ -948,6 +1024,7 @@ export const getPendingProjects = async (req, res) => {
       .select(`
         id,
         title,
+        domain,
         description,
         status,
         created_at,

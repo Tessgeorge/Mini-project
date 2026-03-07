@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import TopBar from "../components/TopBar";
 import ProfileMenu from "../components/ProfileMenu";
@@ -11,7 +11,7 @@ import supabase from "../config/supabaseClient";
 import { apiRequest } from "../config/apiClient";
 import { fetchStudentBootstrapData, invalidateStudentBootstrapCache } from "../services/studentData";
 
-// ─── Static Deadline Schedule ─────────────────────────────────────────────────
+// Static Deadline Schedule
 const DEADLINES = [
   { stage: "Abstract", date: "2026-03-01" },
   { stage: "Proposal", date: "2026-03-15" },
@@ -20,7 +20,14 @@ const DEADLINES = [
   { stage: "Presentation", date: "2026-05-15" },
 ];
 
-// ─── Pure Helpers ─────────────────────────────────────────────────────────────
+const QUICK_NAV_ITEMS = [
+  { id: "project", icon: "folder_open", label: "My Project", color: "#00D2C4" },
+  { id: "team", icon: "group", label: "My Team", color: "#6366f1" },
+  { id: "submissions", icon: "upload_file", label: "Submissions", color: "#10b981" },
+  { id: "marks", icon: "grade", label: "Marks", color: "#f43f5e" },
+];
+
+// Pure Helpers
 function getGreeting() {
   const h = new Date().getHours();
   if (h < 12) return "Good Morning";
@@ -33,12 +40,12 @@ function daysUntil(dateStr) {
 }
 
 function fmtShort(d) {
-  if (!d) return "—";
+  if (!d) return "-";
   return new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
 function fmtRelative(d) {
-  if (!d) return "—";
+  if (!d) return "-";
   const diff = Math.round((new Date() - new Date(d)) / 60000);
   if (diff < 2) return "just now";
   if (diff < 60) return `${diff}m ago`;
@@ -71,7 +78,7 @@ function isProfileComplete(profile) {
   );
 }
 
-// ─── KPI Glass Card ───────────────────────────────────────────────────────────
+// KPI Glass Card
 function KPICard({ label, value, sub, icon, color }) {
   return (
     <div className="glass-card relative overflow-hidden p-5 flex flex-col gap-3">
@@ -91,7 +98,7 @@ function KPICard({ label, value, sub, icon, color }) {
   );
 }
 
-// ─── Activity Feed Item ───────────────────────────────────────────────────────
+// Activity Feed Item
 function ActivityRow({ icon, text, time, color = "#00D2C4" }) {
   return (
     <div className="flex items-start gap-3.5 py-3 border-b border-slate-50 last:border-0">
@@ -107,8 +114,8 @@ function ActivityRow({ icon, text, time, color = "#00D2C4" }) {
   );
 }
 
-// ─── Deadline Calendar ────────────────────────────────────────────────────────
-function DeadlineCalendar({ deadlines, onNavigate }) {
+// Deadline Calendar
+function DeadlineCalendar({ deadlines, onNavigateTab }) {
   const today = new Date();
   const [view, setView] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [active, setActive] = useState(null); // date string key
@@ -205,7 +212,7 @@ function DeadlineCalendar({ deadlines, onNavigate }) {
                   {isPast && <p className="text-[10px] text-slate-400 mt-1">Deadline passed</p>}
                   <button
                     type="button"
-                    onClick={() => onNavigate?.("submissions")}
+                    onClick={() => onNavigateTab?.("submissions")}
                     className="mt-2.5 w-full py-1.5 rounded-lg text-[10px] font-black text-black transition-all hover:opacity-90"
                     style={{ backgroundColor: "#00D2C4" }}
                   >
@@ -231,13 +238,13 @@ function DeadlineCalendar({ deadlines, onNavigate }) {
   );
 }
 
-// ─── No-Project Onboarding ────────────────────────────────────────────────────
+// No-Project Onboarding
 function Onboarding({ profile, onCreate, onJoin }) {
   return (
     <div className="px-4 sm:px-6 md:px-8 py-8 sm:py-10">
       <div className="mb-8">
         <h1 className="text-2xl font-black text-slate-900">
-          {getGreeting()}{profile?.full_name ? `, ${profile.full_name.split(" ")[0]}` : ""} 👋
+          {getGreeting()}{profile?.full_name ? `, ${profile.full_name.split(" ")[0]}` : ""}👋!
         </h1>
         <p className="text-sm text-slate-500 mt-1">Get started by creating or joining a project team.</p>
       </div>
@@ -266,9 +273,24 @@ function Onboarding({ profile, onCreate, onJoin }) {
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
-export default function StudentDashboard({ onNavigate }) {
+// Main Component
+export default function StudentDashboard() {
   const navigate = useNavigate();
+  const goToStudentTab = useCallback(
+    (tab) => {
+      const routeByTab = {
+        dashboard: "/student/dashboard",
+        team: "/student/team",
+        submissions: "/student/submissions",
+        marks: "/student/marks",
+        project: "/student/profile",
+        discussion: "/student/chat",
+        chat: "/student/chat",
+      };
+      navigate(routeByTab[tab] || "/student/dashboard");
+    },
+    [navigate]
+  );
 
   // Data state
   const [loading, setLoading] = useState(true);
@@ -286,6 +308,7 @@ export default function StudentDashboard({ onNavigate }) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
 
   const loadNotifications = useCallback(async () => {
     try {
@@ -296,7 +319,7 @@ export default function StudentDashboard({ onNavigate }) {
     }
   }, []);
 
-  // ── Load data ──
+  // Load data
   const loadData = useCallback(async () => {
     setLoading(true); setError("");
     try {
@@ -329,7 +352,7 @@ export default function StudentDashboard({ onNavigate }) {
 
   const handleLogout = async () => { await supabase.auth.signOut(); navigate("/signin"); };
 
-  // ── Derived values ──
+  // Derived values
   const currentStage = useMemo(() => derivedStage(documents), [documents]);
 
   const nextDeadline = useMemo(() => {
@@ -342,11 +365,12 @@ export default function StudentDashboard({ onNavigate }) {
   const totalScore = useMemo(() => {
     const got = evaluations.reduce((s, e) => s + Number(e.obtained_marks || 0), 0);
     const max = evaluations.reduce((s, e) => s + Number(e.max_marks || 0), 0);
-    return max > 0 ? `${got}/${max}` : "—";
+    return max > 0 ? `${got}/${max}` : "-";
   }, [evaluations]);
 
   const activeMembers = project?.team_members?.length ?? 0;
   const profileComplete = useMemo(() => isProfileComplete(profile), [profile]);
+  const normalizedSearch = searchTerm.trim().toLowerCase();
 
   useEffect(() => {
     if (!profile) return;
@@ -404,19 +428,19 @@ export default function StudentDashboard({ onNavigate }) {
         localStorage.setItem("studentOpenJoinRequests", "1");
         setShowNotifications(false);
         setShowAllNotifications(false);
-        onNavigate?.("team");
+        goToStudentTab("team");
       }
     }
   };
 
-  // ── Alert priority logic ──
+  // Alert priority logic
   const alert = useMemo(() => {
     if (!project) return null;
     const revision = documents.find(d => isRejectedStatus(d.status));
     if (revision) return {
       icon: "warning", bg: "bg-amber-50", border: "border-amber-200",
       text: "text-amber-900", color: "#f59e0b",
-      msg: `Revision required on "${revision.document_type?.replace(/_/g, " ")}" — mentor has requested changes.`,
+      msg: `Revision required on "${revision.document_type?.replace(/_/g, " ")}" - mentor has requested changes.`,
     };
     if (daysLeft !== null && daysLeft === 0) return {
       icon: "alarm", bg: "bg-rose-50", border: "border-rose-200",
@@ -431,7 +455,7 @@ export default function StudentDashboard({ onNavigate }) {
     return null;
   }, [documents, daysLeft, nextDeadline, project]);
 
-  // ── Activity feed ──
+  // Activity feed
   const activityFeed = useMemo(() => {
     const items = [];
     documents.slice(0, 4).forEach(doc => {
@@ -441,19 +465,73 @@ export default function StudentDashboard({ onNavigate }) {
       if (isRejectedStatus(doc.status)) items.push({ id: `dr${doc.id}`, icon: "edit_note", text: `Revision requested for ${label}`, time: fmtRelative(doc.uploaded_at), color: "#f59e0b" });
     });
     evaluations.slice(0, 2).forEach(ev =>
-      items.push({ id: `e${ev.id}`, icon: "grade", text: `Marks updated — ${ev.obtained_marks}/${ev.max_marks}`, time: fmtRelative(ev.created_at), color: "#6366f1" })
+      items.push({ id: `e${ev.id}`, icon: "grade", text: `Marks updated - ${ev.obtained_marks}/${ev.max_marks}`, time: fmtRelative(ev.created_at), color: "#6366f1" })
     );
     if (activeMembers > 1)
       items.push({ id: "team", icon: "group", text: `Team formed (${activeMembers} members)`, time: fmtRelative(project?.created_at), color: "#8b5cf6" });
     return items.slice(0, 7);
   }, [documents, evaluations, activeMembers, project]);
 
-  // ── Loading screen ──
+  const searchResults = useMemo(() => {
+    if (!normalizedSearch) return [];
+
+    const pageResults = QUICK_NAV_ITEMS
+      .filter((item) => `${item.label} ${item.id}`.toLowerCase().includes(normalizedSearch))
+      .map((item) => ({
+        id: `page-${item.id}`,
+        icon: item.icon,
+        label: item.label,
+        meta: "Open page",
+        action: () => goToStudentTab(item.id),
+      }));
+
+    const deadlineResults = DEADLINES
+      .filter((deadline) => `${deadline.stage} ${deadline.date}`.toLowerCase().includes(normalizedSearch))
+      .map((deadline) => ({
+        id: `deadline-${deadline.stage}`,
+        icon: "event",
+        label: `${deadline.stage} deadline`,
+        meta: `Due ${fmtShort(deadline.date)} - open Submissions`,
+        action: () => goToStudentTab("submissions"),
+      }));
+
+    const activityResults = activityFeed
+      .filter((item) => `${item.text} ${item.time}`.toLowerCase().includes(normalizedSearch))
+      .map((item) => ({
+        id: `activity-${item.id}`,
+        icon: item.icon,
+        label: item.text,
+        meta: `Recent activity - ${item.time}`,
+        action: () => {
+          if (item.text.toLowerCase().includes("marks")) return goToStudentTab("marks");
+          if (item.text.toLowerCase().includes("team")) return goToStudentTab("team");
+          return goToStudentTab("submissions");
+        },
+      }));
+
+    return [...pageResults, ...deadlineResults, ...activityResults].slice(0, 8);
+  }, [normalizedSearch, activityFeed, goToStudentTab]);
+
+  const handleSearchSubmit = useCallback((rawQuery) => {
+    const query = (rawQuery || "").trim().toLowerCase();
+    if (!query) return;
+    if (searchResults.length > 0) {
+      searchResults[0].action?.();
+      setSearchTerm("");
+    }
+  }, [searchResults]);
+
+  const handleSearchResultSelect = useCallback((result) => {
+    result?.action?.();
+    setSearchTerm("");
+  }, []);
+
+  // Loading screen
   if (loading) return (
     <div className="min-h-full etnova-bg flex items-center justify-center">
       <div className="text-center">
         <div className="inline-block size-10 border-4 border-slate-200 border-t-[#00D2C4] rounded-full animate-spin" />
-        <p className="mt-4 text-sm text-slate-500 font-medium">Loading your dashboard…</p>
+        <p className="mt-4 text-sm text-slate-500 font-medium">Loading your dashboard...</p>
       </div>
     </div>
   );
@@ -461,12 +539,18 @@ export default function StudentDashboard({ onNavigate }) {
   return (
     <div className="min-h-full etnova-bg">
 
-      {/* ══ TopBar ══════════════════════════════════════════════════════════ */}
+      {/* TopBar */}
       <div className="relative">
         <TopBar
           title="Dashboard"
           subtitle="Home"
           profile={profile}
+          searchValue={searchTerm}
+          onSearchChange={setSearchTerm}
+          onSearchSubmit={handleSearchSubmit}
+          searchResults={searchResults}
+          onSearchResultSelect={handleSearchResultSelect}
+          searchPlaceholder="Search pages, updates, deadlines..."
           onProfileClick={() => {
             if (!profileComplete) {
               setShowSettingsModal(true);
@@ -533,14 +617,13 @@ export default function StudentDashboard({ onNavigate }) {
         }}
       />
 
-      {/* ══ Error ═══════════════════════════════════════════════════════════ */}
       {error && (
         <div className="mx-6 md:mx-8 mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 flex items-center gap-2">
           <span className="material-symbols-outlined text-base">error</span>{error}
         </div>
       )}
 
-      {/* ══ No Project — Onboarding ══════════════════════════════════════════ */}
+      {/* No Project - Onboarding */}
       {!loading && profile && !profileComplete && (
         <div className="px-4 sm:px-6 md:px-8 py-8 sm:py-10">
           <div className="max-w-3xl bg-white rounded-2xl border border-slate-200 shadow-sm p-7">
@@ -575,11 +658,11 @@ export default function StudentDashboard({ onNavigate }) {
         />
       )}
 
-      {/* ══ Main Dashboard ══════════════════════════════════════════════════ */}
+      {/* Main Dashboard */}
       {profileComplete && project && (
         <div className="px-4 sm:px-6 md:px-8 py-6 space-y-5 max-w-[1400px] mx-auto">
 
-          {/* ── § 1 Smart Context Header ──────────────────────────────────── */}
+          {/* Section 1: Smart Context Header */}
           <div className="px-2 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
 
             {/* Left */}
@@ -589,7 +672,7 @@ export default function StudentDashboard({ onNavigate }) {
                 <span style={{ color: "#00897B" }}>
                   {profile?.full_name?.split(" ")[0] || "Student"}
                 </span>
-                &nbsp;👋
+                &nbsp;👋!
               </h1>
 
               <p className="text-base text-slate-500 mt-2 leading-relaxed max-w-xl">
@@ -622,16 +705,16 @@ export default function StudentDashboard({ onNavigate }) {
 
           </div>
 
-          {/* ── § 2 KPI Cards ─────────────────────────────────────────────── */}
+          {/* Section 2: KPI Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
             <KPICard label="Current Phase" value={currentStage} sub="Academic lifecycle stage" icon="layers" color="#00D2C4" />
-            <KPICard label="Time Remaining" value={daysLeft !== null ? `${daysLeft}d` : "—"} sub={nextDeadline ? `Until ${nextDeadline.stage}` : "No deadline"} icon="schedule" color="#6366f1" />
+            <KPICard label="Time Remaining" value={daysLeft !== null ? `${daysLeft}d` : "-"} sub={nextDeadline ? `Until ${nextDeadline.stage}` : "No deadline"} icon="schedule" color="#6366f1" />
             <KPICard label="Team Status" value={`${activeMembers}/4`} sub={activeMembers >= 4 ? "Full team" : `${4 - activeMembers} slot${4 - activeMembers !== 1 ? "s" : ""} remaining`} icon="group" color="#10b981" />
             <KPICard label="Total Score" value={totalScore} sub={evaluations.length > 0 ? `${evaluations.length} evaluation${evaluations.length !== 1 ? "s" : ""}` : "Not evaluated yet"} icon="grade" color="#f59e0b" />
             <KPICard label="System Status" value={project.status === "approved" ? "Approved" : "Active"} sub={project.status === "approved" ? "Admin verified" : "In progress"} icon={project.status === "approved" ? "verified" : "check_circle"} color={project.status === "approved" ? "#10b981" : "#00D2C4"} />
           </div>
 
-          {/* ── § 3 Priority Alert Banner ─────────────────────────────────── */}
+          {/* Section 3: Priority Alert Banner */}
           {alert && (
             <div className="relative overflow-hidden rounded-2xl flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 sm:px-5 py-4"
               style={{
@@ -656,7 +739,7 @@ export default function StudentDashboard({ onNavigate }) {
               <p className={`flex-1 text-sm font-semibold ${alert.text}`}>{alert.msg}</p>
 
               {/* CTA button */}
-              <button type="button" onClick={() => onNavigate?.("submissions")}
+              <button type="button" onClick={() => goToStudentTab("submissions")}
                 className="flex-shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-xs font-black transition-all hover:opacity-90 hover:scale-[1.03] active:scale-95 whitespace-nowrap"
                 style={{ backgroundColor: alert.color, boxShadow: `0 3px 10px ${alert.color}40` }}>
                 Go to Submissions
@@ -666,10 +749,10 @@ export default function StudentDashboard({ onNavigate }) {
           )}
 
 
-          {/* ── § 4 Project Tracker (existing component, untouched) ────────── */}
+          {/* Section 4: Project Tracker */}
           <ProjectTracker project={project} documents={documents} />
 
-          {/* ── § 5 Activity Feed + Deadline Calendar ─────────────────────── */}
+          {/* Section 5: Activity Feed + Deadline Calendar */}
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
 
             {/* Left: Recent Activity */}
@@ -705,12 +788,12 @@ export default function StudentDashboard({ onNavigate }) {
                 <span className="ml-auto text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Read-only</span>
               </div>
               <div className="p-5">
-                <DeadlineCalendar deadlines={DEADLINES} onNavigate={onNavigate} />
+                <DeadlineCalendar deadlines={DEADLINES} onNavigateTab={goToStudentTab} />
               </div>
             </div>
           </div>
 
-          {/* ── § 6 Quick Navigation ──────────────────────────────────────── */}
+          {/* Section 6: Quick Navigation */}
           <div className="glass-card-strong overflow-hidden">
             <div className="px-4 sm:px-6 py-4 border-b border-white/70 flex items-center gap-2.5">
               <div className="size-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: "rgba(0,210,196,0.12)" }}>
@@ -719,13 +802,8 @@ export default function StudentDashboard({ onNavigate }) {
               <h2 className="text-sm font-black text-slate-900">Quick Navigation</h2>
             </div>
             <div className="p-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {[
-                { id: "project", icon: "folder_open", label: "My Project", color: "#00D2C4" },
-                { id: "team", icon: "group", label: "My Team", color: "#6366f1" },
-                { id: "submissions", icon: "upload_file", label: "Submissions", color: "#10b981" },
-                { id: "marks", icon: "grade", label: "Marks", color: "#f43f5e" },
-              ].map(nav => (
-                <button key={nav.id} type="button" onClick={() => onNavigate?.(nav.id)}
+              {QUICK_NAV_ITEMS.map((nav) => (
+                <button key={nav.id} type="button" onClick={() => goToStudentTab(nav.id)}
                   className="flex flex-col items-center gap-2.5 py-5 px-3 rounded-xl border border-white/60 bg-white/40 hover:bg-white/70 hover:shadow-sm transition-all group">
                   <div className="size-11 rounded-2xl flex items-center justify-center transition-transform group-hover:scale-110"
                     style={{ backgroundColor: `${nav.color}12` }}>
@@ -742,5 +820,4 @@ export default function StudentDashboard({ onNavigate }) {
     </div>
   );
 }
-
 

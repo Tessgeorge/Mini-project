@@ -13,15 +13,20 @@ const AdminReviewManagement = lazy(() => import('./pages/AdminReviewManagement')
 const AdminClasses = lazy(() => import('./pages/AdminClasses'))
 const AdminReviewStages = lazy(() => import('./pages/AdminReviewStages'))
 const StudentLayout = lazy(() => import('./components/StudentLayout'))
+const StudentDashboard = lazy(() => import('./pages/StudentDashboard'))
+const MyProject = lazy(() => import('./pages/MyProject'))
+const MyTeam = lazy(() => import('./pages/MyTeam'))
+const Submissions = lazy(() => import('./pages/Submissions'))
+const Marks = lazy(() => import('./pages/Marks'))
+const Discussion = lazy(() => import('./pages/Discussion'))
 
 function StudentRouteWrapper() {
   const navigate = useNavigate();
 
   const handleLogout = async () => {
     try {
-      localStorage.removeItem('studentView'); // Reset to dashboard on next login
       await supabase.auth.signOut();
-      navigate('/signin');
+      navigate('/signin', { replace: true });
     } catch (error) {
       console.error('Logout error:', error);
     }
@@ -50,7 +55,20 @@ function App() {
           <Route
             path="/student"
             element={<StudentRouteWrapper />}
-          />
+          >
+            <Route index element={<Navigate to="dashboard" replace />} />
+            <Route path="dashboard" element={<StudentDashboard />} />
+            <Route path="chat" element={<Discussion />} />
+            <Route path="submissions" element={<Submissions />} />
+            <Route path="profile" element={<MyProject />} />
+
+            <Route path="team" element={<MyTeam />} />
+            <Route path="marks" element={<Marks />} />
+
+            {/* Backward-compatible aliases */}
+            <Route path="project" element={<Navigate to="/student/profile" replace />} />
+            <Route path="discussion" element={<Navigate to="/student/chat" replace />} />
+          </Route>
           <Route
             path="/mentor"
             element={
