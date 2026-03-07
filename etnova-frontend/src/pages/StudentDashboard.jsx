@@ -63,6 +63,10 @@ function derivedStage(documents = []) {
   return "Initiated";
 }
 
+function isRejectedStatus(status) {
+  return ["rejected", "needs_revision"].includes(String(status || "").toLowerCase());
+}
+
 function isProfileComplete(profile) {
   if (!profile) return false;
   return Boolean(
@@ -432,7 +436,7 @@ export default function StudentDashboard() {
   // Alert priority logic
   const alert = useMemo(() => {
     if (!project) return null;
-    const revision = documents.find(d => d.status === "needs_revision");
+    const revision = documents.find(d => isRejectedStatus(d.status));
     if (revision) return {
       icon: "warning", bg: "bg-amber-50", border: "border-amber-200",
       text: "text-amber-900", color: "#f59e0b",
@@ -458,7 +462,7 @@ export default function StudentDashboard() {
       const label = doc.document_type?.replace(/_/g, " ") ?? "document";
       items.push({ id: `d${doc.id}`, icon: "upload_file", text: `${label} submitted`, time: fmtRelative(doc.uploaded_at), color: "#00D2C4" });
       if (doc.status === "approved") items.push({ id: `da${doc.id}`, icon: "verified", text: `${label} approved by mentor`, time: fmtRelative(doc.uploaded_at), color: "#10b981" });
-      if (doc.status === "needs_revision") items.push({ id: `dr${doc.id}`, icon: "edit_note", text: `Revision requested for ${label}`, time: fmtRelative(doc.uploaded_at), color: "#f59e0b" });
+      if (isRejectedStatus(doc.status)) items.push({ id: `dr${doc.id}`, icon: "edit_note", text: `Revision requested for ${label}`, time: fmtRelative(doc.uploaded_at), color: "#f59e0b" });
     });
     evaluations.slice(0, 2).forEach(ev =>
       items.push({ id: `e${ev.id}`, icon: "grade", text: `Marks updated - ${ev.obtained_marks}/${ev.max_marks}`, time: fmtRelative(ev.created_at), color: "#6366f1" })

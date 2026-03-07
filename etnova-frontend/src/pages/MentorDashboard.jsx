@@ -1,11 +1,1475 @@
-import DashboardShell from '../components/DashboardShell'
+import { useState, useEffect } from "react";
+import TeamWorkspace from "./Teamworkspace";
+import { useNavigate } from "react-router-dom";
+import { supabase } from "../config/supabaseClient";
 
-export default function MentorDashboard() {
+// ─── Icons ─────────────────────────────────────────────────────────────────
+const Icon = {
+  Dashboard: () => (<svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></svg>),
+  Teams: () => (<svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>),
+  Evaluation: () => (<svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>),
+  Logout: () => (<svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>),
+  ChevronRight: () => (<svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6" /></svg>),
+  ArrowRight: () => (<svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>),
+  Clock: () => (<svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>),
+  Check: () => (<svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>),
+  Alert: () => (<svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>),
+  Star: () => (<svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>),
+  X: () => (<svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>),
+  User: () => (<svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>),
+  Edit: () => (<svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>),
+  Save: () => (<svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></svg>),
+  Mail: () => (<svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>),
+  Building: () => (<svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg>),
+  Hash: () => (<svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><line x1="4" y1="9" x2="20" y2="9" /><line x1="4" y1="15" x2="20" y2="15" /><line x1="10" y1="3" x2="8" y2="21" /><line x1="16" y1="3" x2="14" y2="21" /></svg>),
+  Shield: () => (<svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>),
+};
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+const scoreClr = s => s >= 90 ? "text-emerald-600" : s >= 70 ? "text-amber-500" : "text-red-500";
+const scoreBg = s => s >= 90 ? "bg-emerald-500" : s >= 70 ? "bg-amber-400" : "bg-red-400";
+
+const STATUS_MAP = {
+  active: { pill: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-500", label: "Active" },
+  pending: { pill: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-400", label: "Pending" },
+  completed: { pill: "bg-blue-50 text-blue-700 border-blue-200", dot: "bg-blue-500", label: "Completed" },
+  rejected: { pill: "bg-red-50 text-red-600 border-red-200", dot: "bg-red-400", label: "Rejected" },
+};
+
+function StatusBadge({ status }) {
+  const s = STATUS_MAP[status?.toLowerCase()] || STATUS_MAP.pending;
   return (
-    <DashboardShell
-      badgeLabel="Mentor Area"
-      title="Mentor Dashboard"
-      description="This placeholder confirms mentor routing works; wire in mentor tools next."
-    />
-  )
+    <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border ${s.pill}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />{s.label}
+    </span>
+  );
+}
+
+function Spinner() {
+  return <div className="flex justify-center py-20"><div className="w-8 h-8 border-4 border-teal-400 border-t-transparent rounded-full animate-spin" /></div>;
+}
+
+// ─── Mini Bar Chart (pure CSS/SVG, no library needed) ──────────────────────
+function WeeklyChart({ projects, evaluations }) {
+  // Build last-7-days evaluation count per day
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().split("T")[0];
+    const label = d.toLocaleDateString("en-IN", { weekday: "short" });
+    const count = evaluations.filter(e => e.created_at?.startsWith(key)).length;
+    days.push({ label, key, count });
+  }
+  const max = Math.max(...days.map(d => d.count), 1);
+
+  return (
+    <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+      <div className="flex justify-between items-start mb-6">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Weekly Evaluation Activity</p>
+          <p className="text-2xl font-extrabold text-gray-900 mt-1">{evaluations.length} <span className="text-sm font-medium text-gray-400">total evaluations</span></p>
+        </div>
+        <span className="text-xs bg-teal-50 text-teal-600 font-semibold px-3 py-1.5 rounded-full border border-teal-200">Last 7 days</span>
+      </div>
+      <div className="flex items-end justify-between gap-2 h-28">
+        {days.map((d) => {
+          const pct = max === 0 ? 0 : (d.count / max) * 100;
+          return (
+            <div key={d.key} className="flex flex-col items-center gap-1.5 flex-1">
+              <span className="text-xs font-bold text-gray-600">{d.count > 0 ? d.count : ""}</span>
+              <div className="w-full rounded-t-lg bg-gray-100 relative overflow-hidden" style={{ height: "80px" }}>
+                <div
+                  className="absolute bottom-0 w-full rounded-t-lg bg-gradient-to-t from-teal-500 to-teal-300 transition-all duration-700"
+                  style={{ height: `${Math.max(pct, d.count > 0 ? 10 : 0)}%` }}
+                />
+              </div>
+              <span className="text-xs text-gray-400 font-medium">{d.label}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Project Progress Ring ──────────────────────────────────────────────────
+function ProgressRing({ pct, size = 56, stroke = 5 }) {
+  const r = (size - stroke * 2) / 2;
+  const circ = 2 * Math.PI * r;
+  const offset = circ - (pct / 100) * circ;
+  return (
+    <svg width={size} height={size} className="-rotate-90">
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#e5e7eb" strokeWidth={stroke} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#14b8a6" strokeWidth={stroke}
+        strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round"
+        style={{ transition: "stroke-dashoffset 0.8s ease" }} />
+    </svg>
+  );
+}
+
+// ─── Review Modal ───────────────────────────────────────────────────────────
+function ReviewModal({ project, onClose, onSubmit }) {
+  const [form, setForm] = useState({ phase: "Phase 1", score: "", feedback: "" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  const submit = async () => {
+    if (!form.score || !form.feedback) { setErr("Please fill in score and feedback."); return; }
+    setSaving(true); setErr("");
+    await onSubmit({ projectId: project.id, ...form });
+    setSaving(false);
+  };
+
+  const cls = "w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-gray-50 text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-400";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-teal-500 to-emerald-500 px-6 py-5">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest text-teal-100 mb-1">Start Review</p>
+              <h3 className="font-extrabold text-white text-lg leading-tight">{project.title}</h3>
+            </div>
+            <button onClick={onClose} className="text-teal-100 hover:text-white mt-0.5"><Icon.X /></button>
+          </div>
+          {project.abstract && (
+            <p className="text-teal-100 text-xs mt-2 line-clamp-2">{project.abstract}</p>
+          )}
+        </div>
+
+        {/* Members */}
+        {project.team_members?.length > 0 && (
+          <div className="px-6 py-4 border-b border-gray-100 bg-gray-50">
+            <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Team Members</p>
+            <div className="flex flex-wrap gap-2">
+              {project.team_members.map((tm, i) => (
+                <div key={i} className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-full px-3 py-1">
+                  <div className="w-5 h-5 rounded-full bg-teal-400 text-white flex items-center justify-center text-xs font-bold">
+                    {tm.profiles?.full_name?.[0] || "?"}
+                  </div>
+                  <span className="text-xs font-medium text-gray-700">{tm.profiles?.full_name || "—"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Form */}
+        <div className="px-6 py-5 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">Phase</label>
+              <select className={cls} value={form.phase} onChange={e => setForm({ ...form, phase: e.target.value })}>
+                {["Phase 1", "Phase 2", "Phase 3", "Final Review"].map(p => <option key={p}>{p}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">Score (0–100)</label>
+              <input type="number" min="0" max="100" placeholder="e.g. 85" className={cls}
+                value={form.score} onChange={e => setForm({ ...form, score: e.target.value })} />
+            </div>
+          </div>
+          {form.score && (
+            <div className={`text-center py-2 rounded-xl font-bold text-sm ${Number(form.score) >= 90 ? "bg-emerald-50 text-emerald-700" : Number(form.score) >= 70 ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"}`}>
+              {Number(form.score) >= 90 ? "🌟 Excellent" : Number(form.score) >= 70 ? "✓ Good" : "⚠ Needs Improvement"}
+            </div>
+          )}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Feedback</label>
+            <textarea rows={4} placeholder="Provide detailed feedback for the team..." className={`${cls} resize-none`}
+              value={form.feedback} onChange={e => setForm({ ...form, feedback: e.target.value })} />
+          </div>
+          {err && <p className="text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2">{err}</p>}
+          <div className="flex gap-3">
+            <button onClick={onClose} className="flex-1 border border-gray-200 text-gray-600 font-semibold py-3 rounded-xl hover:bg-gray-50 transition-all text-sm">Cancel</button>
+            <button onClick={submit} disabled={saving}
+              className="flex-2 flex-1 bg-teal-400 hover:bg-teal-500 text-white font-bold py-3 rounded-xl transition-all text-sm disabled:opacity-50">
+              {saving ? "Submitting..." : "Submit Review"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Mentor Profile Modal ────────────────────────────────────────────────────
+function MentorProfileModal({ profile, onClose, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    full_name: profile?.full_name || "",
+    email: profile?.email || "",
+    department: profile?.department || "",
+    roll_number: profile?.roll_number || "",
+    phone: profile?.phone || "",
+    bio: profile?.bio || "",
+    specialization: profile?.specialization || "",
+    employee_id: profile?.employee_id || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState("");
+
+  // Gradient avatar colours derived from name
+  const colors = ["#14b8a6", "#3b82f6", "#8b5cf6", "#f59e0b", "#ef4444", "#ec4899"];
+  const colorIdx = [...(form.full_name || "M")].reduce((a, c) => a + c.charCodeAt(0), 0) % colors.length;
+  const avatarColor = colors[colorIdx];
+  const initial = (form.full_name || "M")[0].toUpperCase();
+
+  const field = "w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-gray-50 text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-400 transition-all";
+  const fieldRO = "w-full border border-gray-100 rounded-xl px-4 py-2.5 text-sm bg-gray-50 text-gray-500 cursor-not-allowed";
+
+  const handleSave = async () => {
+    if (!form.full_name.trim()) { setErr("Full name is required."); return; }
+    setSaving(true); setErr("");
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          full_name: form.full_name.trim(),
+          department: form.department.trim(),
+          phone: form.phone.trim(),
+          bio: form.bio.trim(),
+          specialization: form.specialization.trim(),
+          employee_id: form.employee_id.trim(),
+        })
+        .eq("id", profile.id);
+      if (error) throw error;
+      onSave({ ...profile, ...form });
+      setSaved(true);
+      setEditing(false);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (e) {
+      setErr(e.message || "Failed to update profile.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Reusable info row for view mode
+  const InfoRow = ({ icon, label, value, highlight }) => (
+    <div className="flex items-start gap-3 py-3 border-b border-gray-50 last:border-0">
+      <div className="w-8 h-8 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center flex-shrink-0 text-gray-400 mt-0.5">
+        {icon}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">{label}</p>
+        {value
+          ? <p className={"text-sm font-semibold break-words " + (highlight ? "text-teal-700" : "text-gray-800")}>{value}</p>
+          : <p className="text-sm text-gray-300 italic font-normal">Not set</p>
+        }
+      </div>
+    </div>
+  );
+
+  // Field label helper
+  const Label = ({ text, required }) => (
+    <label className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-1.5">
+      {text}{required && <span className="text-red-400 ml-0.5">*</span>}
+    </label>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[92vh]">
+
+        {/* ── Header gradient banner ── */}
+        <div className="relative bg-gradient-to-br from-slate-900 via-slate-800 to-teal-900 px-6 pt-8 pb-14 flex-shrink-0">
+          <button onClick={onClose}
+            className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/10">
+            <Icon.X />
+          </button>
+
+          <div className="text-center">
+            {/* Avatar circle */}
+            <div className="relative inline-block">
+              <div className="w-20 h-20 rounded-full border-4 border-white/20 flex items-center justify-center text-white text-3xl font-extrabold shadow-2xl mx-auto select-none"
+                style={{ background: `linear-gradient(135deg, ${avatarColor} 0%, #0284c7 100%)` }}>
+                {initial}
+              </div>
+              {/* Online dot */}
+              <span className="absolute bottom-0.5 right-0.5 w-5 h-5 rounded-full bg-emerald-400 border-2 border-white flex items-center justify-center">
+                <svg width="9" height="9" fill="none" stroke="white" strokeWidth="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
+              </span>
+            </div>
+
+            <h2 className="text-white font-extrabold text-xl mt-3 leading-tight">{form.full_name || "Mentor"}</h2>
+            <p className="text-teal-300 text-sm font-semibold mt-1">Project Guide</p>
+            {form.department && (
+              <p className="text-slate-400 text-xs mt-1">{form.department}</p>
+            )}
+          </div>
+        </div>
+
+        {/* ── Floating role badge ── */}
+        <div className="flex justify-center -mt-5 relative z-10 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1.5 bg-white border border-gray-200 shadow-lg text-gray-700 text-xs font-bold px-4 py-1.5 rounded-full">
+              <Icon.Shield />
+              {profile?.role
+                ? profile.role.charAt(0).toUpperCase() + profile.role.slice(1)
+                : "Mentor"}
+            </span>
+            {!editing && (
+              <button onClick={() => setEditing(true)}
+                className="flex items-center gap-1.5 bg-teal-400 hover:bg-teal-500 text-white shadow-lg text-xs font-bold px-4 py-1.5 rounded-full transition-all active:scale-95">
+                <Icon.Edit /> Edit Profile
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* ── Scrollable body ── */}
+        <div className="flex-1 overflow-y-auto px-6 pb-6 pt-3">
+
+          {/* Success toast */}
+          {saved && (
+            <div className="mb-4 flex items-center gap-2 text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5 text-sm font-semibold">
+              <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
+              Profile updated successfully!
+            </div>
+          )}
+
+          {!editing ? (
+            /* ── View mode ── */
+            <div className="mt-1">
+              <InfoRow icon={<Icon.User />} label="Full Name" value={form.full_name} highlight />
+              <InfoRow icon={<Icon.Mail />} label="Email" value={form.email} />
+              <InfoRow
+                icon={<svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.1 19.79 19.79 0 0 1 1.59 4.5 2 2 0 0 1 3.56 2.34h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 9.91a16 16 0 0 0 6.07 6.07l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.73 17z" /></svg>}
+                label="Phone" value={form.phone}
+              />
+              <InfoRow icon={<Icon.Building />} label="Department" value={form.department} />
+              <InfoRow
+                icon={<svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>}
+                label="Specialization" value={form.specialization}
+              />
+              <InfoRow icon={<Icon.Hash />} label="Employee / Staff ID" value={form.employee_id || form.roll_number} />
+              {form.bio && (
+                <div className="py-3 border-b border-gray-50">
+                  <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-2">Bio</p>
+                  <p className="text-sm text-gray-600 leading-relaxed">{form.bio}</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* ── Edit mode ── */
+            <div className="mt-2 space-y-4">
+              <div className="bg-teal-50 border border-teal-100 rounded-xl px-4 py-2.5 text-xs text-teal-700 font-semibold flex items-center gap-2">
+                <Icon.Edit /> Editing your profile — changes save to your account
+              </div>
+
+              <div>
+                <Label text="Full Name" required />
+                <input className={field} value={form.full_name}
+                  onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))}
+                  placeholder="e.g. Dr. Mohan S" />
+              </div>
+
+              <div>
+                <Label text="Email" />
+                <input className={fieldRO} value={form.email} readOnly
+                  title="Email cannot be changed here" />
+                <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
+                  <svg width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                  Managed through authentication settings
+                </p>
+              </div>
+
+              <div>
+                <Label text="Phone" />
+                <input className={field} value={form.phone}
+                  onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
+                  placeholder="e.g. +91 98765 43210" />
+              </div>
+
+              <div>
+                <Label text="Department" />
+                <input className={field} value={form.department}
+                  onChange={e => setForm(f => ({ ...f, department: e.target.value }))}
+                  placeholder="e.g. Computer Science" />
+              </div>
+
+              <div>
+                <Label text="Specialization" />
+                <input className={field} value={form.specialization}
+                  onChange={e => setForm(f => ({ ...f, specialization: e.target.value }))}
+                  placeholder="e.g. Machine Learning, IoT" />
+              </div>
+
+              <div>
+                <Label text="Employee / Staff ID" />
+                <input className={field} value={form.employee_id || form.roll_number}
+                  onChange={e => setForm(f => ({ ...f, employee_id: e.target.value }))}
+                  placeholder="e.g. EMP-2024-001" />
+              </div>
+
+              <div>
+                <Label text="Bio" />
+                <textarea className={field + " resize-none"} rows={3} value={form.bio}
+                  onChange={e => setForm(f => ({ ...f, bio: e.target.value }))}
+                  placeholder="Short professional bio or research interests..." />
+              </div>
+
+              {err && (
+                <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-xl px-4 py-2.5 flex items-center gap-2">
+                  <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                  {err}
+                </p>
+              )}
+
+              <div className="flex gap-3 pt-1">
+                <button onClick={() => { setEditing(false); setErr(""); }}
+                  className="flex-1 border border-gray-200 text-gray-600 font-semibold py-3 rounded-xl hover:bg-gray-50 text-sm transition-all">
+                  Cancel
+                </button>
+                <button onClick={handleSave} disabled={saving}
+                  className="flex-1 flex items-center justify-center gap-2 bg-teal-400 hover:bg-teal-500 active:scale-95 text-white font-bold py-3 rounded-xl text-sm disabled:opacity-50 transition-all">
+                  <Icon.Save />{saving ? "Saving…" : "Save Changes"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Sidebar ────────────────────────────────────────────────────────────────
+function Sidebar({ active, setActive, onSignOut }) {
+  const items = [
+    { key: "overview", label: "Dashboard", I: Icon.Dashboard },
+    { key: "teams", label: "My Teams", I: Icon.Teams },
+    { key: "evaluation", label: "Evaluation", I: Icon.Evaluation },
+  ];
+  return (
+    <aside className="w-64 min-h-screen bg-white border-r border-gray-100 flex flex-col shadow-sm flex-shrink-0">
+      <div className="flex items-center gap-3 px-5 py-5 border-b border-gray-100">
+        <div className="w-10 h-10 rounded-xl bg-teal-400 flex items-center justify-center">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+          </svg>
+        </div>
+        <div>
+          <p className="font-extrabold text-gray-800 leading-tight">ETNOVA</p>
+          <p className="text-xs text-gray-400">Mentor Portal</p>
+        </div>
+      </div>
+      <nav className="flex-1 px-3 py-4 space-y-1">
+        {items.map(({ key, label, I }) => (
+          <button key={key} onClick={() => setActive(key)}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${active === key ? "bg-teal-50 text-teal-700 font-semibold" : "text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+              }`}>
+            <span className={active === key ? "text-teal-500" : "text-gray-400"}><I /></span>
+            {label}
+          </button>
+        ))}
+      </nav>
+      <div className="px-3 py-4 border-t border-gray-100">
+        <button onClick={onSignOut} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold text-teal-600 hover:bg-teal-50 transition-all">
+          <Icon.Logout /> Sign out
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+function Topbar({ active, mentorName, onProfileClick }) {
+  const labels = { overview: "Dashboard", teams: "My Teams", evaluation: "Evaluation" };
+  return (
+    <header className="bg-white border-b border-gray-100 px-8 py-4 flex items-center justify-between">
+      <div className="flex items-center gap-2 text-sm text-gray-400">
+        <span>Home</span><Icon.ChevronRight />
+        <span className="text-gray-700 font-semibold">{labels[active]}</span>
+      </div>
+      <button
+        onClick={onProfileClick}
+        className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-gray-50 active:bg-gray-100 transition-all group"
+        title="View / Edit Profile"
+      >
+        <div className="w-8 h-8 rounded-full bg-teal-400 text-white flex items-center justify-center text-sm font-bold group-hover:ring-2 group-hover:ring-teal-300 group-hover:ring-offset-1 transition-all">
+          {mentorName?.[0] || "M"}
+        </div>
+        <div className="text-sm text-left">
+          <p className="font-semibold text-gray-800 leading-tight group-hover:text-teal-700 transition-colors">{mentorName || "Mentor"}</p>
+          <p className="text-xs text-gray-400">Project Guide</p>
+        </div>
+        <div className="text-gray-300 group-hover:text-teal-400 transition-colors ml-1">
+          <Icon.Edit />
+        </div>
+      </button>
+    </header>
+  );
+}
+
+// ─── OVERVIEW TAB ───────────────────────────────────────────────────────────
+function OverviewTab({ projects, evaluations, milestones, recentActivity, loading, onNavigate, onSubmitReview }) {
+  const [reviewProject, setReviewProject] = useState(null);
+
+  if (loading) return <Spinner />;
+
+  // Pending = projects that have NO evaluation yet
+  const pendingProjects = projects.filter(proj =>
+    !evaluations.some(ev => ev.project_id === proj.id)
+  );
+
+  const handleSubmitReview = async (data) => {
+    await onSubmitReview(data);
+    setReviewProject(null);
+  };
+
+  const avgScore = evaluations.length
+    ? Math.round(evaluations.reduce((s, e) => s + Number(e.score), 0) / evaluations.length)
+    : 0;
+
+  return (
+    <div className="space-y-6">
+      {/* ── Top summary cards ── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        {/* Assigned Teams Summary */}
+        <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-1">Assigned Teams Summary</p>
+          <p className="text-5xl font-extrabold text-gray-900 mt-2 mb-1">{projects.length}</p>
+          <p className="text-sm text-gray-400 mb-5">Teams currently assigned under guide role.</p>
+          <button
+            onClick={() => onNavigate("teams")}
+            className="w-full bg-teal-400 hover:bg-teal-500 active:scale-95 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2">
+            View Teams <Icon.ArrowRight />
+          </button>
+        </div>
+
+        {/* Evaluation Panel */}
+        <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-1">Evaluation Panel</p>
+          <p className="text-5xl font-extrabold text-gray-900 mt-2 mb-1">{evaluations.length}</p>
+          <p className="text-sm text-gray-400 mb-5">
+            {pendingProjects.length > 0
+              ? `${pendingProjects.length} project${pendingProjects.length !== 1 ? "s" : ""} pending evaluation.`
+              : "All projects evaluated! 🎉"}
+          </p>
+          <button
+            onClick={() => onNavigate("evaluation")}
+            className="w-full bg-teal-400 hover:bg-teal-500 active:scale-95 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2">
+            <Icon.Evaluation /> Go to Evaluation
+          </button>
+        </div>
+      </div>
+
+      {/* ── Stats strip ── */}
+      <div className="grid grid-cols-3 gap-4">
+        {[
+          { label: "Evaluations Done", value: evaluations.length, color: "text-teal-500", bg: "bg-teal-50" },
+          { label: "Average Score", value: avgScore ? `${avgScore}%` : "—", color: "text-blue-500", bg: "bg-blue-50" },
+          { label: "Completed", value: projects.filter(p => p.status?.toLowerCase() === "completed").length, color: "text-emerald-500", bg: "bg-emerald-50" },
+        ].map(s => (
+          <div key={s.label} className={`${s.bg} rounded-2xl p-4 border border-white`}>
+            <p className={`text-3xl font-extrabold ${s.color}`}>{s.value}</p>
+            <p className="text-xs text-gray-500 mt-1 font-medium">{s.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Weekly chart + Recent Activity ── */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+        <div className="xl:col-span-2">
+          <WeeklyChart projects={projects} evaluations={evaluations} />
+        </div>
+
+        {/* Recent Activity */}
+        <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4">Recent Activity</p>
+          {recentActivity.length === 0 ? (
+            <p className="text-sm text-gray-400">No activity yet.</p>
+          ) : (
+            <div className="space-y-4">
+              {recentActivity.map((item, i) => (
+                <div key={i} className="flex gap-3">
+                  <div className="w-8 h-8 rounded-full bg-teal-50 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Icon.Star />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-800 leading-snug">{item.text}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{item.time}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Deadlines & Milestones + Pending Reviews ── */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+        {/* Milestones */}
+        <div className="xl:col-span-2 bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+          <p className="font-extrabold text-gray-800 text-base mb-1">Deadlines & Milestones</p>
+          <p className="text-xs text-gray-400 mb-5">Read-only timeline controlled by admin.</p>
+          {milestones.length === 0 ? (
+            <p className="text-sm text-gray-400">No milestones set.</p>
+          ) : (
+            <div className="space-y-3">
+              {milestones.map((m, i) => {
+                const today = new Date();
+                const due = new Date(m.due_date);
+                const isPast = due < today;
+                const isToday = due.toDateString() === today.toDateString();
+                const tag = m.status === "completed" ? "Completed"
+                  : isToday ? "Today"
+                    : isPast ? "Overdue"
+                      : "Upcoming";
+                const tagStyle = tag === "Completed" ? "bg-blue-50 text-blue-600 border-blue-200"
+                  : tag === "Overdue" ? "bg-red-50 text-red-600 border-red-200"
+                    : tag === "Today" ? "bg-amber-50 text-amber-600 border-amber-200"
+                      : "bg-teal-50 text-teal-600 border-teal-200";
+                return (
+                  <div key={i} className="flex items-center justify-between p-4 rounded-xl border border-gray-100 bg-gray-50 hover:bg-gray-100 transition-colors">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-2 h-2 rounded-full flex-shrink-0 ${tag === "Completed" ? "bg-blue-500" : tag === "Overdue" ? "bg-red-500" : tag === "Today" ? "bg-amber-500" : "bg-teal-400"}`} />
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800">{m.title}</p>
+                        <p className="text-xs text-gray-400">{m.due_date}</p>
+                      </div>
+                    </div>
+                    <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${tagStyle}`}>{tag}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Team Score Overview */}
+        <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4">Team Score Overview</p>
+          <div className="space-y-4">
+            {projects.map(proj => {
+              const ev = evaluations.filter(e => e.project_id === proj.id);
+              const avg = ev.length ? Math.round(ev.reduce((s, e) => s + Number(e.score), 0) / ev.length) : null;
+              return (
+                <div key={proj.id} className="flex items-center gap-3">
+                  <ProgressRing pct={avg || 0} size={44} stroke={4} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-800 truncate">{proj.title}</p>
+                    <p className={`text-xs font-bold ${avg ? scoreClr(avg) : "text-gray-400"}`}>
+                      {avg ? `${avg}/100` : "Not evaluated"}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+            {projects.length === 0 && <p className="text-sm text-gray-400">No projects assigned.</p>}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Pending Reviews Section ── */}
+      {pendingProjects.length > 0 && (
+        <div id="pending-section" className="bg-white rounded-2xl border border-amber-100 shadow-sm overflow-hidden">
+          <div className="flex items-center gap-3 px-6 py-4 bg-amber-50 border-b border-amber-100">
+            <span className="text-amber-500"><Icon.Alert /></span>
+            <div>
+              <p className="font-extrabold text-gray-800">Pending Reviews</p>
+              <p className="text-xs text-gray-500">{pendingProjects.length} project{pendingProjects.length !== 1 ? "s" : ""} waiting for your evaluation</p>
+            </div>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {pendingProjects.map(proj => (
+              <div key={proj.id} className="flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600 font-extrabold text-sm flex-shrink-0">
+                    {proj.title?.[0] || "?"}
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800">{proj.title}</p>
+                    <div className="flex items-center gap-3 mt-0.5">
+                      <span className="text-xs text-gray-400 flex items-center gap-1">
+                        <Icon.Clock />{proj.team_members?.length || 0} members
+                      </span>
+                      <StatusBadge status={proj.status} />
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setReviewProject(proj)}
+                  className="flex items-center gap-2 bg-teal-400 hover:bg-teal-500 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-all active:scale-95">
+                  Start Review <Icon.ArrowRight />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Review Modal */}
+      {reviewProject && (
+        <ReviewModal
+          project={reviewProject}
+          onClose={() => setReviewProject(null)}
+          onSubmit={handleSubmitReview}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── TEAMS TAB ──────────────────────────────────────────────────────────────
+const PHASES = ["Research", "Proposal", "Development", "Testing", "Final Pitch"];
+
+function FileIcon({ name }) {
+  const ext = name?.split(".").pop()?.toLowerCase();
+  const map = {
+    pdf: ["#ef4444", "PDF"], pptx: ["#f97316", "PPT"], ppt: ["#f97316", "PPT"],
+    xlsx: ["#22c55e", "XLS"], xls: ["#22c55e", "XLS"], docx: ["#3b82f6", "DOC"],
+    doc: ["#3b82f6", "DOC"], zip: ["#8b5cf6", "ZIP"]
+  };
+  const [color, label] = map[ext] || ["#6b7280", "FILE"];
+  return (
+    <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-xs font-extrabold flex-shrink-0" style={{ background: color }}>
+      {label}
+    </div>
+  );
+}
+
+function TeamDetailView({ proj, evaluations, onBack, onStartReview, documents, docsLoading }) {
+  const [reviewProject, setReviewProject] = useState(null);
+  const evs = evaluations.filter(e => e.project_id === proj.id);
+  const avg = evs.length ? Math.round(evs.reduce((s, e) => s + Number(e.score), 0) / evs.length) : null;
+
+  // Determine current phase index from evaluations
+  const phasesDone = [...new Set(evs.map(e => e.phase))];
+  const currentPhaseIdx = Math.min(phasesDone.length, PHASES.length - 1);
+
+  // Score history for mini sparkline
+  const scoreHistory = [...evs].reverse();
+
+  const handleDownload = (doc) => {
+    if (!doc.file_url) return;
+    // file_url is a direct URL (Supabase Storage public URL or external)
+    // Create a hidden anchor and trigger download
+    const a = document.createElement("a");
+    a.href = doc.file_url;
+    a.download = doc.file_name || "download";
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const formatFileSize = (bytes) => {
+    if (!bytes) return "—";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1048576).toFixed(1)} MB`;
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Back */}
+      <button onClick={onBack} className="flex items-center gap-2 text-sm font-semibold text-teal-600 hover:text-teal-700 transition-colors">
+        <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>
+        Back to Projects
+      </button>
+
+      {/* ── Hero Banner ── */}
+      <div className="rounded-2xl overflow-hidden" style={{ background: "linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #134e4a 100%)" }}>
+        <div className="px-7 pt-7 pb-5">
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-teal-400/20 border border-teal-400/30 flex items-center justify-center flex-shrink-0">
+                <svg width="24" height="24" fill="none" stroke="#2dd4bf" strokeWidth="1.8" viewBox="0 0 24 24">
+                  <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-2xl font-extrabold text-white leading-tight">{proj.title}</h2>
+                {proj.abstract && <p className="text-slate-400 text-sm mt-1 max-w-lg leading-relaxed">{proj.abstract}</p>}
+                <div className="flex items-center gap-3 mt-3">
+                  <StatusBadge status={proj.status} />
+                  <span className="text-xs text-slate-500">
+                    Current Phase: <span className="text-teal-400 font-semibold">{PHASES[currentPhaseIdx]}</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2 flex-shrink-0">
+              <button
+                onClick={() => setReviewProject(proj)}
+                className="flex items-center gap-2 bg-teal-400 hover:bg-teal-300 text-slate-900 text-sm font-bold px-4 py-2.5 rounded-xl transition-all active:scale-95">
+                <Icon.Star /> Add Review
+              </button>
+            </div>
+          </div>
+
+          {/* Members + progress */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-5 pt-5 border-t border-white/10">
+            <div className="flex items-center gap-2">
+              {proj.team_members?.slice(0, 4).map((tm, i) => (
+                <div key={i} className="w-8 h-8 rounded-full border-2 border-slate-800 flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                  style={{ background: ["#14b8a6", "#3b82f6", "#8b5cf6", "#f59e0b"][i % 4], marginLeft: i > 0 ? "-8px" : "0" }}>
+                  {tm.profiles?.full_name?.[0] || "?"}
+                </div>
+              ))}
+              {proj.team_members?.length > 4 && (
+                <span className="text-xs text-slate-400 ml-1">+{proj.team_members.length - 4} more</span>
+              )}
+              <span className="text-slate-400 text-xs ml-2">| {proj.team_members?.length || 0} members</span>
+            </div>
+            <div className="flex items-center gap-3 min-w-[180px]">
+              <span className="text-xs text-slate-400 whitespace-nowrap">Project Progress</span>
+              <div className="flex-1 h-2 bg-white/10 rounded-full overflow-hidden">
+                <div className="h-full rounded-full bg-gradient-to-r from-teal-400 to-emerald-400 transition-all duration-700"
+                  style={{ width: `${Math.round((currentPhaseIdx / (PHASES.length - 1)) * 100)}%` }} />
+              </div>
+              <span className="text-teal-400 font-bold text-xs whitespace-nowrap">
+                {Math.round((currentPhaseIdx / (PHASES.length - 1)) * 100)}%
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Milestone Timeline + Submissions ── */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+
+        {/* Left: Milestone + Submissions */}
+        <div className="xl:col-span-2 space-y-5">
+
+          {/* Milestone Timeline */}
+          <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+            <div className="flex items-center gap-2 mb-5">
+              <svg width="18" height="18" fill="none" stroke="#14b8a6" strokeWidth="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
+              <p className="font-bold text-gray-800">Milestone Timeline</p>
+            </div>
+            <div className="flex items-center justify-between relative">
+              {/* connecting line */}
+              <div className="absolute top-4 left-4 right-4 h-0.5 bg-gray-200 z-0" />
+              {PHASES.map((phase, i) => {
+                const done = i < currentPhaseIdx;
+                const current = i === currentPhaseIdx;
+                const pending = i > currentPhaseIdx;
+                return (
+                  <div key={phase} className="flex flex-col items-center gap-2 z-10 flex-1">
+                    <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all ${done ? "bg-teal-400 border-teal-400" :
+                        current ? "bg-white border-teal-400 shadow-lg shadow-teal-100" :
+                          "bg-white border-gray-200"
+                      }`}>
+                      {done
+                        ? <svg width="14" height="14" fill="none" stroke="white" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
+                        : <div className={`w-2.5 h-2.5 rounded-full ${current ? "bg-teal-400" : "bg-gray-300"}`} />
+                      }
+                    </div>
+                    <span className={`text-xs font-semibold text-center leading-tight ${current ? "text-teal-600" : done ? "text-gray-500" : "text-gray-300"}`}>
+                      {phase}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Recent Submissions */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <svg width="16" height="16" fill="none" stroke="#14b8a6" strokeWidth="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+                <p className="font-bold text-gray-800">Recent Submissions</p>
+              </div>
+              <span className="text-xs text-gray-400">{documents.length} file{documents.length !== 1 ? "s" : ""}</span>
+            </div>
+            {docsLoading ? (
+              <div className="px-6 py-8 flex justify-center">
+                <div className="w-6 h-6 border-3 border-teal-400 border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : documents.length === 0 ? (
+              <div className="px-6 py-10 text-center">
+                <div className="w-12 h-12 mx-auto rounded-full bg-gray-50 flex items-center justify-center mb-3">
+                  <svg width="22" height="22" fill="none" stroke="#9ca3af" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+                </div>
+                <p className="text-sm font-semibold text-gray-500">No submissions yet</p>
+                <p className="text-xs text-gray-400 mt-1">Team hasn't uploaded any documents.</p>
+              </div>
+            ) : (
+              <>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-100">
+                      <th className="text-left px-6 py-3 text-xs font-bold uppercase tracking-wider text-gray-400">Document</th>
+                      <th className="text-left px-6 py-3 text-xs font-bold uppercase tracking-wider text-gray-400">Uploaded By</th>
+                      <th className="text-left px-6 py-3 text-xs font-bold uppercase tracking-wider text-gray-400">Date</th>
+                      <th className="text-left px-6 py-3 text-xs font-bold uppercase tracking-wider text-gray-400">Status</th>
+                      <th className="text-left px-6 py-3 text-xs font-bold uppercase tracking-wider text-gray-400">Feedback</th>
+                      <th className="px-6 py-3" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {documents.map((doc, i) => {
+                      // Exact column names from your documents table
+                      const stMap = {
+                        "approved": "bg-emerald-50 text-emerald-700 border-emerald-200",
+                        "pending": "bg-amber-50 text-amber-700 border-amber-200",
+                        "pending_review": "bg-amber-50 text-amber-700 border-amber-200",
+                        "under_review": "bg-blue-50 text-blue-700 border-blue-200",
+                        "rejected": "bg-red-50 text-red-600 border-red-200",
+                        "submitted": "bg-teal-50 text-teal-700 border-teal-200",
+                      };
+                      const statusKey = doc.status?.toLowerCase().replace(/\s+/g, "_") || "pending";
+                      return (
+                        <tr key={doc.id || i} className="hover:bg-gray-50 transition-colors">
+                          {/* Document name + type */}
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-3">
+                              <FileIcon name={doc.file_name} />
+                              <div>
+                                <p className="font-semibold text-gray-800 text-sm truncate max-w-[150px]">{doc.file_name || "—"}</p>
+                                <p className="text-xs text-gray-400 mt-0.5">
+                                  {doc.document_type || "Document"} · {formatFileSize(doc.file_size)}
+                                  {doc.version ? ` · v${doc.version}` : ""}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                          {/* Uploaded by — profiles joined */}
+                          <td className="px-6 py-4 text-gray-600 text-sm">
+                            {doc.profiles?.full_name || "—"}
+                          </td>
+                          {/* Date — use uploaded_at */}
+                          <td className="px-6 py-4 text-gray-400 text-xs whitespace-nowrap">
+                            {doc.uploaded_at
+                              ? new Date(doc.uploaded_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+                              : "—"}
+                          </td>
+                          {/* Status */}
+                          <td className="px-6 py-4">
+                            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border capitalize ${stMap[statusKey] || stMap.pending}`}>
+                              {doc.status || "Pending"}
+                            </span>
+                          </td>
+                          {/* Feedback */}
+                          <td className="px-6 py-4 max-w-[140px]">
+                            {doc.feedback
+                              ? <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{doc.feedback}</p>
+                              : <span className="text-xs text-gray-300">—</span>
+                            }
+                          </td>
+                          {/* Download */}
+                          <td className="px-6 py-4">
+                            {doc.file_url ? (
+                              <button
+                                onClick={() => handleDownload(doc)}
+                                className="flex items-center gap-1.5 text-teal-600 hover:text-teal-700 text-xs font-semibold hover:bg-teal-50 px-2.5 py-1.5 rounded-lg transition-all">
+                                <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                  <polyline points="7 10 12 15 17 10" />
+                                  <line x1="12" y1="15" x2="12" y2="3" />
+                                </svg>
+                                Download
+                              </button>
+                            ) : (
+                              <span className="text-xs text-gray-300 px-2.5 py-1.5">No file</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Right: Members + Score Analytics */}
+        <div className="space-y-5">
+
+          {/* Team Members */}
+          <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
+            <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4">Team Members</p>
+            <div className="space-y-3">
+              {proj.team_members?.length === 0 && <p className="text-sm text-gray-400">No members found.</p>}
+              {proj.team_members?.map((tm, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0"
+                    style={{ background: ["#14b8a6", "#3b82f6", "#8b5cf6", "#f59e0b", "#ef4444"][i % 5] }}>
+                    {tm.profiles?.full_name?.[0] || "?"}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-800 truncate">{tm.profiles?.full_name || "—"}</p>
+                    <p className="text-xs text-gray-400">{tm.profiles?.roll_number || tm.profiles?.department || "—"}</p>
+                  </div>
+                  <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full capitalize">
+                    {tm.role || "member"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Score Analytics */}
+          <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
+            <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4">Score Analytics</p>
+            {evs.length === 0 ? (
+              <div className="text-center py-4">
+                <div className="w-16 h-16 mx-auto rounded-full bg-amber-50 border-4 border-amber-100 flex items-center justify-center mb-3">
+                  <span className="text-2xl">📋</span>
+                </div>
+                <p className="text-sm font-semibold text-gray-700">No evaluations yet</p>
+                <p className="text-xs text-gray-400 mt-1">Submit the first review</p>
+                <button onClick={() => setReviewProject(proj)}
+                  className="mt-3 w-full bg-teal-400 hover:bg-teal-500 text-white text-xs font-bold py-2.5 rounded-xl transition-all">
+                  Add Review
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Avg score ring */}
+                <div className="flex items-center gap-4">
+                  <div className="relative flex-shrink-0">
+                    <ProgressRing pct={avg || 0} size={72} stroke={6} />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className={`text-sm font-extrabold ${scoreClr(avg || 0)}`}>{avg}</span>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-400">Average Score</p>
+                    <p className={`text-lg font-extrabold ${scoreClr(avg || 0)}`}>{avg}/100</p>
+                    <p className="text-xs text-gray-400">{evs.length} evaluation{evs.length !== 1 ? "s" : ""}</p>
+                  </div>
+                </div>
+                {/* Score per phase */}
+                <div className="space-y-2.5">
+                  {scoreHistory.map((ev, i) => (
+                    <div key={i}>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="text-gray-500 font-medium">{ev.phase}</span>
+                        <span className={`font-bold ${scoreClr(ev.score)}`}>{ev.score}</span>
+                      </div>
+                      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full transition-all duration-700"
+                          style={{ width: `${ev.score}%`, background: ev.score >= 90 ? "#10b981" : ev.score >= 70 ? "#f59e0b" : "#ef4444" }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Review Modal */}
+      {reviewProject && (
+        <ReviewModal project={reviewProject} onClose={() => setReviewProject(null)}
+          onSubmit={async (d) => { await onStartReview(d); setReviewProject(null); }} />
+      )}
+    </div>
+  );
+}
+
+function TeamsTab({ projects, evaluations, loading, onStartReview, mentorId, mentorName }) {
+  const [sel, setSel] = useState(null);
+  const [documents, setDocuments] = useState([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!sel) return;
+    setDocsLoading(true);
+    supabase
+      .from("documents")
+      .select(`
+        id, project_id, uploaded_by, document_type,
+        file_name, file_url, file_size, version,
+        status, uploaded_at, feedback,
+        profiles:uploaded_by ( full_name, email, roll_number )
+      `)
+      .eq("project_id", sel)
+      .order("uploaded_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (error) console.error("Documents fetch error:", error);
+        setDocuments(data || []);
+        setDocsLoading(false);
+      });
+  }, [sel]);
+
+  if (loading) return <Spinner />;
+
+  if (sel) {
+    const proj = projects.find(p => p.id === sel);
+    return (
+      <TeamWorkspace
+        proj={proj}
+        mentorId={mentorId}
+        mentorName={mentorName}
+        onBack={() => { setSel(null); setDocuments([]); }}
+      />
+    );
+  }
+
+  // ── Project Cards Grid ──
+  return projects.length === 0 ? (
+    <div className="bg-white rounded-2xl p-10 border border-gray-100 shadow-sm text-center">
+      <div className="w-16 h-16 mx-auto rounded-full bg-teal-50 flex items-center justify-center mb-3">
+        <svg width="28" height="28" fill="none" stroke="#14b8a6" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /></svg>
+      </div>
+      <p className="text-gray-700 font-semibold">No projects assigned</p>
+      <p className="text-gray-400 text-sm mt-1">Contact admin to get assigned to a project.</p>
+    </div>
+  ) : (
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+      {projects.map(proj => {
+        const evs = evaluations.filter(e => e.project_id === proj.id);
+        const avg = evs.length ? Math.round(evs.reduce((s, e) => s + Number(e.score), 0) / evs.length) : null;
+        const isPending = evs.length === 0;
+        const memberColors = ["#14b8a6", "#3b82f6", "#8b5cf6", "#f59e0b", "#ef4444"];
+
+        return (
+          <div key={proj.id}
+            className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 overflow-hidden group cursor-pointer"
+            onClick={() => setSel(proj.id)}>
+
+            {/* Card top accent */}
+            <div className="h-1 w-full bg-gradient-to-r from-teal-400 to-emerald-400" />
+
+            <div className="p-5">
+              {/* Header */}
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-start gap-3 flex-1 min-w-0">
+                  <div className="w-11 h-11 rounded-xl bg-teal-50 border border-teal-100 flex items-center justify-center flex-shrink-0">
+                    <svg width="20" height="20" fill="none" stroke="#14b8a6" strokeWidth="1.8" viewBox="0 0 24 24">
+                      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" />
+                    </svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-extrabold text-gray-900 leading-tight">{proj.title}</h3>
+                    {proj.abstract && <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{proj.abstract}</p>}
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Members */}
+              {proj.team_members?.length > 0 && (
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="flex">
+                    {proj.team_members.slice(0, 4).map((tm, i) => (
+                      <div key={i} className="w-7 h-7 rounded-full border-2 border-white flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                        style={{ background: memberColors[i % 5], marginLeft: i > 0 ? "-6px" : "0" }}>
+                        {tm.profiles?.full_name?.[0] || "?"}
+                      </div>
+                    ))}
+                  </div>
+                  <span className="text-xs text-gray-400">
+                    {proj.team_members.map(m => m.profiles?.full_name?.split(" ")[0]).filter(Boolean).join(", ")}
+                    {proj.team_members.length > 3 ? ` +${proj.team_members.length - 3}` : ""}
+                  </span>
+                </div>
+              )}
+
+              {/* Progress bar */}
+              <div className="mb-4">
+                <div className="flex justify-between text-xs mb-1.5">
+                  <span className="text-gray-400 font-medium">Project Progress</span>
+                  <span className="text-teal-600 font-bold">{avg ? `Score: ${avg}/100` : ""}</span>
+                </div>
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full rounded-full bg-gradient-to-r from-teal-400 to-emerald-400 transition-all duration-700"
+                    style={{ width: avg ? `${avg}%` : "0%" }} />
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-between pt-3 border-t border-gray-50">
+                <div className="flex items-center gap-2">
+                  {isPending ? (
+                    <>
+                      <StatusBadge status={proj.status} />
+                      <span className="flex items-center gap-1 text-amber-600 text-xs font-semibold">
+                        <Icon.Clock /> Not evaluated
+                      </span>
+                    </>
+                  ) : (
+                    <span className={"flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full border " + (
+                      avg >= 90 ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        : avg >= 70 ? "bg-amber-50 text-amber-700 border-amber-200"
+                          : "bg-red-50 text-red-600 border-red-200"
+                    )}>
+                      <span className={"w-1.5 h-1.5 rounded-full " + (avg >= 90 ? "bg-emerald-500" : avg >= 70 ? "bg-amber-400" : "bg-red-400")} />
+                      Avg {avg}/100
+                    </span>
+                  )}
+                </div>
+                <span className="flex items-center gap-1.5 text-teal-600 font-semibold text-xs group-hover:gap-2.5 transition-all">
+                  View Details <Icon.ArrowRight />
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── EVALUATION TAB ─────────────────────────────────────────────────────────
+function EvaluationTab({ projects, evaluations, setEvaluations, mentorId, loading }) {
+  const [form, setForm] = useState({ projectId: "", phase: "Phase 1", score: "", feedback: "" });
+  const [ok, setOk] = useState(false);
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [filterProj, setFilterProj] = useState("all");
+
+  if (loading) return <Spinner />;
+
+  const submit = async () => {
+    if (!form.projectId || !form.score || !form.feedback) { setErr("Please fill all fields."); return; }
+    setSaving(true); setErr("");
+    try {
+      const { data, error } = await supabase.from("evaluations").insert([{
+        project_id: form.projectId, guide_id: mentorId,
+        phase: form.phase, score: Number(form.score), feedback: form.feedback,
+      }]).select().single();
+      if (error) throw error;
+      setEvaluations(p => [data, ...p]);
+      setForm({ projectId: "", phase: "Phase 1", score: "", feedback: "" });
+      setOk(true); setTimeout(() => setOk(false), 2500);
+    } catch (e) { setErr(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const filtered = filterProj === "all" ? evaluations : evaluations.filter(e => e.project_id === filterProj);
+  const cls = "w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-gray-50 text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-400";
+
+  return (
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      {/* Form */}
+      <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+        <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-5">Submit Evaluation</p>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Project</label>
+            <select className={cls} value={form.projectId} onChange={e => setForm({ ...form, projectId: e.target.value })}>
+              <option value="">— Choose a project —</option>
+              {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Phase</label>
+            <select className={cls} value={form.phase} onChange={e => setForm({ ...form, phase: e.target.value })}>
+              {["Phase 1", "Phase 2", "Phase 3", "Final Review"].map(p => <option key={p}>{p}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Score (0–100)</label>
+            <input type="number" min="0" max="100" placeholder="e.g. 85" className={cls}
+              value={form.score} onChange={e => setForm({ ...form, score: e.target.value })} />
+          </div>
+          {form.score && (
+            <div className={`flex items-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold ${Number(form.score) >= 90 ? "bg-emerald-50 text-emerald-700" : Number(form.score) >= 70 ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"}`}>
+              <div className={`w-2 h-2 rounded-full ${scoreBg(Number(form.score))}`} />
+              {Number(form.score) >= 90 ? "Excellent performance" : Number(form.score) >= 70 ? "Good performance" : "Needs improvement"}
+            </div>
+          )}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Feedback</label>
+            <textarea rows={4} placeholder="Detailed feedback for the team..." className={`${cls} resize-none`}
+              value={form.feedback} onChange={e => setForm({ ...form, feedback: e.target.value })} />
+          </div>
+          {err && <p className="text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2">{err}</p>}
+          <button onClick={submit} disabled={saving}
+            className="w-full bg-teal-400 hover:bg-teal-500 active:scale-95 text-white font-bold py-3 rounded-xl transition-all disabled:opacity-50">
+            {saving ? "Submitting..." : "Submit Evaluation"}
+          </button>
+          {ok && <p className="text-center text-sm font-semibold text-teal-600 flex items-center justify-center gap-1.5"><Icon.Check /> Evaluation submitted!</p>}
+        </div>
+      </div>
+
+      {/* Records */}
+      <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+        <div className="flex justify-between items-center mb-5">
+          <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Evaluation Records</p>
+          <select className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 bg-gray-50 focus:outline-none" value={filterProj} onChange={e => setFilterProj(e.target.value)}>
+            <option value="all">All Projects</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+          </select>
+        </div>
+        <div className="space-y-3 overflow-y-auto max-h-[540px] pr-1">
+          {filtered.length === 0 ? (
+            <p className="text-sm text-gray-400">No evaluations submitted yet.</p>
+          ) : filtered.map(ev => (
+            <div key={ev.id} className="bg-gray-50 border border-gray-100 rounded-xl p-4">
+              <div className="flex justify-between items-center">
+                <div>
+                  <span className="font-bold text-gray-800 text-sm">{projects.find(p => p.id === ev.project_id)?.title || "—"}</span>
+                  <span className="ml-2 text-xs bg-teal-50 text-teal-700 font-semibold px-2 py-0.5 rounded-full">{ev.phase}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className={`w-2 h-2 rounded-full ${scoreBg(ev.score)}`} />
+                  <span className={`font-extrabold text-xl ${scoreClr(ev.score)}`}>{ev.score}</span>
+                </div>
+              </div>
+              {ev.feedback && <p className="text-xs text-gray-500 mt-2 leading-relaxed">{ev.feedback}</p>}
+              <p className="text-xs text-gray-400 mt-1.5">{ev.created_at?.split("T")[0]}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── MAIN ──────────────────────────────────────────────────────────────────
+export default function MentorDashboard() {
+  const [active, setActive] = useState("overview");
+  const [projects, setProjects] = useState([]);
+  const [evaluations, setEvaluations] = useState([]);
+  const [milestones, setMilestones] = useState([]);
+  const [recentActivity, setRecentActivity] = useState([]);
+  const [mentorProfile, setMentorProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [showProfile, setShowProfile] = useState(false);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const init = async () => {
+      setLoading(true);
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) { navigate("/"); return; }
+
+        const { data: profile } = await supabase
+          .from("profiles").select("*").eq("id", user.id).single();
+        setMentorProfile(profile);
+
+        if (profile) {
+          // Projects assigned to this mentor + team members joined with profiles
+          const { data: projData } = await supabase
+            .from("projects")
+            .select(`*, team_members(id, student_id, role, profiles:student_id(full_name, email, roll_number, department))`)
+            .eq("guide_id", profile.id)
+            .order("created_at", { ascending: false });
+          setProjects(projData || []);
+
+          // Evaluations by this mentor
+          const { data: evalData } = await supabase
+            .from("evaluations").select("*")
+            .eq("guide_id", profile.id)
+            .order("created_at", { ascending: false });
+          setEvaluations(evalData || []);
+
+          // Milestones (system_settings table) — read admin-controlled deadlines
+          const { data: msData } = await supabase
+            .from("system_settings")
+            .select("*")
+            .order("created_at", { ascending: true });
+          // Map to milestone shape — adjust column names if needed
+          setMilestones((msData || []).map(m => ({
+            title: m.key || m.title || m.name,
+            due_date: m.value || m.due_date || "—",
+            status: m.status || "upcoming",
+          })).filter(m => m.due_date !== "—" && m.due_date?.includes("-")));
+
+          // Build recent activity from evaluations
+          const activity = (evalData || []).slice(0, 5).map(ev => {
+            const proj = (projData || []).find(p => p.id === ev.project_id);
+            const ago = getTimeAgo(ev.created_at);
+            return { text: `Evaluation submitted for ${proj?.title || "a project"} (${ev.phase})`, time: ago };
+          });
+          setRecentActivity(activity);
+        }
+      } catch (e) { console.error(e); }
+      finally { setLoading(false); }
+    };
+    init();
+  }, []);
+
+  // Time ago helper
+  function getTimeAgo(ts) {
+    if (!ts) return "—";
+    const diff = Date.now() - new Date(ts).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  }
+
+  // Submit review from any tab
+  const handleSubmitReview = async ({ projectId, phase, score, feedback }) => {
+    try {
+      const { data, error } = await supabase.from("evaluations").insert([{
+        project_id: projectId, guide_id: mentorProfile?.id,
+        phase, score: Number(score), feedback,
+      }]).select().single();
+      if (error) throw error;
+      setEvaluations(p => [data, ...p]);
+      // Update recent activity
+      const proj = projects.find(p => p.id === projectId);
+      setRecentActivity(prev => [
+        { text: `Evaluation submitted for ${proj?.title || "a project"} (${phase})`, time: "Just now" },
+        ...prev.slice(0, 4),
+      ]);
+    } catch (e) { console.error(e); }
+  };
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    navigate("/");
+  };
+
+  return (
+    <div className="flex min-h-screen bg-gray-50">
+      <Sidebar active={active} setActive={setActive} onSignOut={handleSignOut} />
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <Topbar active={active} mentorName={mentorProfile?.full_name} onProfileClick={() => setShowProfile(true)} />
+        <main className="flex-1 overflow-y-auto p-8">
+          {active === "overview" && (
+            <OverviewTab
+              projects={projects}
+              evaluations={evaluations}
+              milestones={milestones}
+              recentActivity={recentActivity}
+              loading={loading}
+              onNavigate={setActive}
+              onSubmitReview={handleSubmitReview}
+            />
+          )}
+          {active === "teams" && (
+            <TeamsTab
+              projects={projects}
+              evaluations={evaluations}
+              loading={loading}
+              onStartReview={handleSubmitReview}
+              mentorId={mentorProfile?.id}
+              mentorName={mentorProfile?.full_name}
+            />
+          )}
+          {active === "evaluation" && (
+            <EvaluationTab
+              projects={projects}
+              evaluations={evaluations}
+              setEvaluations={setEvaluations}
+              mentorId={mentorProfile?.id}
+              loading={loading}
+            />
+          )}
+        </main>
+      </div>
+
+      {/* ── Mentor Profile Modal ── */}
+      {showProfile && mentorProfile && (
+        <MentorProfileModal
+          profile={mentorProfile}
+          onClose={() => setShowProfile(false)}
+          onSave={(updated) => {
+            setMentorProfile(updated);
+            setShowProfile(false);
+          }}
+        />
+      )}
+    </div>
+  );
 }

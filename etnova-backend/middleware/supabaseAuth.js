@@ -13,18 +13,19 @@ export const authenticateUser = async (req, res, next) => {
 
     // Verify token with Supabase
     const { data: { user }, error } = await supabase.auth.getUser(token);
+    console.log('DEBUG AUTH: User ID:', user.id);
 
     if (error || !user) {
       return res.status(401).json({ message: 'Invalid or expired token' });
     }
 
     // Get user profile with role information
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
+    const { data: profile, error: profileError } = await supabaseAdmin.from('profiles')
       .select('*')
       .eq('id', user.id)
       .single();
 
+        if (profileError) console.log('DEBUG AUTH: Profile fetch failed for ID:', user.id, profileError);
     if (profileError) {
       console.error('Profile fetch error:', profileError);
       // Continue with basic user info if profile fetch fails
@@ -154,7 +155,8 @@ export const canAccessProject = (options = {}) => async (req, res, next) => {
       }
     } else if (userRole === 'mentor') {
       // Mentors can access if they are assigned as mentor or coordinator
-      hasAccess = project.mentor_id === userId || project.coordinator_id === userId;
+      const assignedGuideId = project.guide_id ?? project.mentor_id;
+      hasAccess = assignedGuideId === userId || project.coordinator_id === userId;
       if (!hasAccess && allowCoordinatorBatchScope) {
         hasAccess = await isProjectInCoordinatorScope(projectId, req);
       }

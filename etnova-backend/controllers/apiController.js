@@ -8,10 +8,70 @@ const safeProfileName = (profile, fallback = 'Student') => {
 
 const LOCKED_PROJECT_STATUSES = new Set(['approved', 'completed']);
 const isProjectLocked = (status) => LOCKED_PROJECT_STATUSES.has((status || '').toLowerCase());
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const isUuid = (value) => typeof value === 'string' && UUID_REGEX.test(value);
+
+const enrichProjectsWithAllocations = async (projects) => {
+  if (!projects?.length) return projects || [];
+
+  const projectIds = [...new Set(projects.map((project) => project?.id).filter(isUuid))];
+  if (projectIds.length === 0) return projects;
+
+  const { data: allocations, error: allocError } = await supabase
+    .from('guide_allocations')
+    .select(`
+      id,
+      project_id,
+      guide_id,
+      status,
+      assigned_at,
+      comment,
+      guide:profiles!guide_allocations_guide_id_fkey(
+        id,
+        full_name,
+        email,
+        department
+      )
+    `)
+    .eq('status', 'active')
+    .in('project_id', projectIds)
+    .order('assigned_at', { ascending: false });
+
+  if (allocError) {
+    throw allocError;
+  }
+
+  const allocationMap = new Map();
+  (allocations || []).forEach((row) => {
+    if (!row?.project_id) return;
+    if (!allocationMap.has(row.project_id)) {
+      allocationMap.set(row.project_id, row);
+    }
+  });
+
+  return projects.map((project) => {
+    const activeAllocation = allocationMap.get(project.id) || null;
+    const allocatedGuide = activeAllocation?.guide || null;
+
+    return {
+      ...project,
+      mentor: allocatedGuide || project.mentor || null,
+      guide_allocation: activeAllocation
+        ? {
+          id: activeAllocation.id,
+          guide_id: activeAllocation.guide_id,
+          status: activeAllocation.status,
+          assigned_at: activeAllocation.assigned_at,
+          comment: activeAllocation.comment || null,
+        }
+        : null,
+    };
+  });
+};
 const STUDENT_PROJECT_SELECT = `
   *,
   mentor:profiles!projects_mentor_id_fkey(id, full_name, email, department),
-  coordinator:profiles!projects_coordinator_id_fkey(id, full_name, email, department),
+  guide:profiles!projects_guide_id_fkey(id, full_name, email, department),
   team_members(
     id,
     student_id,
@@ -30,7 +90,6 @@ const STUDENT_PROJECT_SELECT = `
   documents(id, document_type, status, uploaded_at, file_name, file_url, version, feedback),
   evaluations(id, evaluation_type, obtained_marks, max_marks, feedback, created_at)
 `;
-
 const createNotifications = async (rows) => {
   if (!rows?.length) return;
   const validRows = rows.filter((r) => r?.user_id && r?.title && r?.message && r?.type);
@@ -153,7 +212,7 @@ export const getDashboardData = async (req, res) => {
         .order('created_at', { ascending: false });
 
       if (projectsError) throw projectsError;
-      projects = projectRows || [];
+      projects = await enrichProjectsWithAllocations(projectRows || []);
     }
 
     const notifications = notificationsResult.data || [];
@@ -246,10 +305,12 @@ export const getProjects = async (req, res) => {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return res.json(data || []);
+      return res.json(await enrichProjectsWithAllocations(data || []));
     } else if (req.userRole === 'mentor') {
       const mentorProjectsSelect = `
         *,
+        mentor:profiles!projects_mentor_id_fkey(id, full_name, email, department),
+        guide:profiles!projects_guide_id_fkey(id, full_name, email, department),
         team_members(
           id, student_id, role,
           profiles!team_members_student_id_fkey(full_name, email, roll_number)
@@ -310,7 +371,8 @@ export const getProjects = async (req, res) => {
 
       if (extraError) throw extraError;
 
-      return res.json([...(assignedProjects || []), ...(extraProjects || [])]);
+      const combined = [...(assignedProjects || []), ...(extraProjects || [])];
+      return res.json(await enrichProjectsWithAllocations(combined));
     } else if (req.userRole === 'admin') {
       // Admins see all projects
       query = query
@@ -318,14 +380,13 @@ export const getProjects = async (req, res) => {
           *,
           team_members(count),
           evaluations(count),
-          profiles!projects_mentor_id_fkey(full_name, email)
+          mentor:profiles!projects_mentor_id_fkey(full_name, email),
+          guide:profiles!projects_guide_id_fkey(full_name, email)
         `);
     }
 
-    const { data, error } = await query;
-
     if (error) throw error;
-    res.json(data || []);
+    res.json(await enrichProjectsWithAllocations(data || []));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -338,7 +399,7 @@ export const getProjectById = async (req, res) => {
       .select(`
         *,
         mentor:profiles!projects_mentor_id_fkey(id, full_name, email, department),
-        coordinator:profiles!projects_coordinator_id_fkey(id, full_name, email, department),
+        guide:profiles!projects_guide_id_fkey(id, full_name, email, department),
         team_members(
           id, student_id, role, joined_at,
           profiles!team_members_student_id_fkey(id, full_name, email, roll_number, department)
@@ -354,7 +415,8 @@ export const getProjectById = async (req, res) => {
       .single();
 
     if (error) throw error;
-    res.json(data);
+    const [enriched] = await enrichProjectsWithAllocations([data]);
+    res.json(enriched || null);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -745,17 +807,54 @@ export const getDocuments = async (req, res) => {
 
 export const approveDocument = async (req, res) => {
   try {
-    const { status, feedback } = req.body; // status: 'approved' or 'needs_revision'
+    const { status, feedback } = req.body;
+    const updates = {};
+    if (status) updates.status = status;
+    if (feedback !== undefined) updates.feedback = feedback;
 
-    const { data, error } = await supabase
+    const { data: doc, error } = await supabase
       .from('documents')
-      .update({ status })
+      .update(updates)
       .eq('id', req.params.id)
-      .select()
+      .select('*, projects(id, title)')
       .single();
 
     if (error) throw error;
-    res.json(data);
+
+    // Notify team members
+    const { data: members } = await supabase
+      .from('team_members')
+      .select('student_id')
+      .eq('project_id', doc.project_id);
+
+    if (members?.length) {
+      const actorName = safeProfileName(req.userProfile, 'Mentor');
+      const projectTitle = doc.projects?.title || 'your project';
+
+      const getNotifType = (s) => {
+        if (s === 'approved') return 'document_approved';
+        if (s === 'rejected') return 'document_rejected';
+        return 'document_comment';
+      };
+
+      const getNotifTitle = (s) => {
+        if (s === 'approved') return 'Document Approved';
+        if (s === 'rejected') return 'Submission Rejected';
+        return 'Feedback Received';
+      };
+
+      const rows = members.map(m => ({
+        user_id: m.student_id,
+        type: getNotifType(status),
+        title: getNotifTitle(status),
+        message: status
+          ? `Submission "${doc.file_name}" in ${projectTitle} has been ${status} by ${actorName}.`
+          : `New feedback received for "${doc.file_name}" in ${projectTitle}.`,
+      }));
+      await createNotifications(rows);
+    }
+
+    res.json(doc);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
