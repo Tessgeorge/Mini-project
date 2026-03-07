@@ -570,10 +570,10 @@ export default function MyTeam() {
       sub: "Administrative assignment",
       time: project.updated_at || project.created_at,
     });
-    if (project?.coordinator) items.push({
-      id: "coord-assigned",
+    if (project?.guide) items.push({
+      id: "guide-assigned",
       icon: "admin_panel_settings",
-      text: `Coordinator linked: ${project.coordinator.full_name}`,
+      text: `Guide linked: ${project.guide.full_name}`,
       sub: "Administrative assignment",
       time: project.updated_at || project.created_at,
     });
@@ -837,43 +837,18 @@ export default function MyTeam() {
               <SectionHead icon="admin_panel_settings" title="Administrative Contacts" />
             </div>
             <div className="divide-y divide-slate-50">
-              {/* Mentor */}
-              <div className="p-5 flex items-start gap-4">
-                <div className="size-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                  style={{ backgroundColor: "rgba(0,210,196,0.1)" }}>
-                  <span className="material-symbols-outlined text-base" style={{ color: "#00D2C4" }}>school</span>
-                </div>
-                <div className="flex-1">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Assigned Mentor</p>
-                  {project.mentor ? (
-                    <>
-                      <p className="font-black text-slate-900 text-sm">{project.mentor.full_name}</p>
-                      <p className="text-xs text-slate-500 mt-0.5">{project.mentor.department || "Faculty"}</p>
-                      <p className="text-xs text-slate-400 mt-0.5">{project.mentor.email}</p>
-                    </>
-                  ) : (
-                    <p className="text-sm text-slate-400 italic">Pending assignment</p>
-                  )}
-                </div>
-                {project.mentor && (
-                  <span className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700">
-                    <span className="material-symbols-outlined text-xs">verified</span>Assigned
-                  </span>
-                )}
-              </div>
-
-              {/* Coordinator */}
+              {/* Guide */}
               <div className="p-5 flex items-start gap-4">
                 <div className="size-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-slate-100">
                   <span className="material-symbols-outlined text-base text-slate-500">manage_accounts</span>
                 </div>
                 <div className="flex-1">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Project Coordinator</p>
-                  {project.coordinator ? (
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Project Guide</p>
+                  {project.guide ? (
                     <>
-                      <p className="font-black text-slate-900 text-sm">{project.coordinator.full_name}</p>
-                      <p className="text-xs text-slate-500 mt-0.5">{project.coordinator.department || "Administration"}</p>
-                      <p className="text-xs text-slate-400 mt-0.5">{project.coordinator.email}</p>
+                      <p className="font-black text-slate-900 text-sm">{project.guide.full_name}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">{project.guide.department || "Faculty"}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{project.guide.email}</p>
                     </>
                   ) : (
                     <p className="text-sm text-slate-400 italic">Not assigned</p>

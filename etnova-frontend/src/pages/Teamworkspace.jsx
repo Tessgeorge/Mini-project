@@ -208,7 +208,7 @@ function MilestoneTimeline({ phaseIdx, onTabSwitch, milestoneDates }) {
         <p className="font-bold text-gray-800 flex items-center gap-2 text-sm">
           <Ic.Activity /> Milestone Timeline
         </p>
-        <p className="text-xs text-gray-400 hidden sm:block">Click active milestones to jump to related tab</p>
+
       </div>
 
       <div className="relative flex items-start justify-between">
@@ -874,18 +874,11 @@ function TabSubmissions({ projId, members, mentorName }) {
                         className="p-2 text-gray-400 hover:text-teal-600 hover:bg-teal-50 rounded-xl transition-all">
                         <Ic.Eye />
                       </button>
-                      {doc.status !== "approved" && (
-                        <button onClick={() => setStatus(doc, "approved")} title="Approve"
-                          className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all">
-                          <Ic.Check />
-                        </button>
-                      )}
-                      {doc.status !== "rejected" && (
-                        <button onClick={() => setStatus(doc, "rejected")} title="Reject"
-                          className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all">
-                          <Ic.X />
-                        </button>
-                      )}
+                      <a href={doc.file_url} download={doc.file_name} target="_blank" rel="noopener noreferrer"
+                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all inline-flex items-center justify-center"
+                        title="Download">
+                        <Ic.Download />
+                      </a>
                       <button onClick={() => setDeleting(doc)} title="Delete"
                         className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all">
                         <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4h6v2" /></svg>
