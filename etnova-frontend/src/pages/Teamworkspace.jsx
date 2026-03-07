@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../config/supabaseClient";
+import { apiRequest } from "../config/apiClient";
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 const Ic = {
@@ -407,8 +408,8 @@ function MentorAnnouncements({ projId, mentorId, mentorName }) {
         <button
           onClick={() => { setComposing(c => !c); setErr(""); }}
           className={`flex items-center gap-1.5 text-xs font-bold px-3.5 py-1.5 rounded-xl transition-all active:scale-95 ${composing
-              ? "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              : "bg-teal-500 hover:bg-teal-600 text-white shadow-sm shadow-teal-200"
+            ? "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            : "bg-teal-500 hover:bg-teal-600 text-white shadow-sm shadow-teal-200"
             }`}>
           {composing
             ? <><Ic.X /> Cancel</>
@@ -424,8 +425,8 @@ function MentorAnnouncements({ projId, mentorId, mentorName }) {
             {ANNOUNCE_TYPES.map(t => (
               <button key={t.key} onClick={() => setForm(f => ({ ...f, type: t.key }))}
                 className={`text-xs font-bold px-3 py-1 rounded-full border transition-all ${form.type === t.key
-                    ? `${t.badge} border-current`
-                    : "bg-white text-gray-400 border-gray-200 hover:border-gray-300"
+                  ? `${t.badge} border-current`
+                  : "bg-white text-gray-400 border-gray-200 hover:border-gray-300"
                   }`}>
                 {TYPE_ICONS[t.key]} {t.label}
               </button>
@@ -711,7 +712,7 @@ function TabOverview({ proj, evaluations, members, documents, onAddReview, onNav
 // ══════════════════════════════════════════════════════════════════
 // TAB 2 — SUBMISSIONS (unchanged)
 // ══════════════════════════════════════════════════════════════════
-function TabSubmissions({ projId }) {
+function TabSubmissions({ projId, members, mentorName }) {
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
@@ -719,6 +720,21 @@ function TabSubmissions({ projId }) {
   const [deleting, setDeleting] = useState(null);
   const [feedback, setFeedback] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const notifyTeam = async (type, title, message) => {
+    const students = members.map(m => m.student_id).filter(Boolean);
+    if (students.length === 0) return;
+    const notifications = students.map(uid => ({
+      user_id: uid,
+      type,
+      title,
+      message,
+      read: false,
+      created_at: new Date().toISOString()
+    }));
+    await supabase.from("notifications").insert(notifications);
+  };
+
 
   useEffect(() => {
     setLoading(true);
@@ -737,26 +753,35 @@ function TabSubmissions({ projId }) {
   const saveFeedback = async () => {
     if (!viewing) return;
     setSaving(true);
-    const updates = {
-      feedback: feedback.trim(),
-    };
-    const { data, error } = await supabase.from("documents")
-      .update(updates)
-      .eq("id", viewing.id)
-      .select()
-      .single();
-    if (!error && data) {
-      setDocs(d => d.map(x => x.id === data.id ? { ...x, ...data } : x));
-      setViewing(v => (v && v.id === data.id ? { ...v, ...data } : v));
+    try {
+      const data = await apiRequest(`/documents/${viewing.id}/approve`, {
+        method: "PUT",
+        body: { feedback: feedback.trim() }
+      });
+      if (data) {
+        setDocs(d => d.map(x => x.id === data.id ? { ...x, ...data } : x));
+        setViewing(v => (v && v.id === data.id ? { ...v, ...data } : v));
+      }
+    } catch (err) {
+      console.error("Feedback error:", err);
+      alert("Failed to save feedback: " + err.message);
     }
     setSaving(false);
   };
 
   const setStatus = async (doc, status) => {
-    const { error } = await supabase.from("documents").update({ status }).eq("id", doc.id);
-    if (!error) {
-      setDocs(d => d.map(x => x.id === doc.id ? { ...x, status } : x));
-      if (viewing?.id === doc.id) setViewing(v => ({ ...v, status }));
+    try {
+      const data = await apiRequest(`/documents/${doc.id}/approve`, {
+        method: "PUT",
+        body: { status }
+      });
+      if (data) {
+        setDocs(d => d.map(x => x.id === data.id ? { ...x, status: data.status } : x));
+        if (viewing?.id === data.id) setViewing(v => ({ ...v, status: data.status }));
+      }
+    } catch (err) {
+      console.error("Status update error:", err);
+      alert("Failed to update status: " + err.message);
     }
   };
 
@@ -908,16 +933,16 @@ function TabSubmissions({ projId }) {
               <div className="flex items-center gap-2 flex-shrink-0">
                 <button onClick={() => setStatus(viewing, "approved")}
                   className={`flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-xl border transition-all active:scale-95 ${viewing.status === "approved"
-                      ? "bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-200"
-                      : "bg-white text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                    ? "bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-200"
+                    : "bg-white text-emerald-600 border-emerald-200 hover:bg-emerald-50"
                     }`}>
                   <Ic.Check />
                   {viewing.status === "approved" ? "Approved ✓" : "Approve"}
                 </button>
                 <button onClick={() => setStatus(viewing, "rejected")}
                   className={`flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-xl border transition-all active:scale-95 ${viewing.status === "rejected"
-                      ? "bg-red-500 text-white border-red-500 shadow-md shadow-red-200"
-                      : "bg-white text-red-500 border-red-200 hover:bg-red-50"
+                    ? "bg-red-500 text-white border-red-500 shadow-md shadow-red-200"
+                    : "bg-white text-red-500 border-red-200 hover:bg-red-50"
                     }`}>
                   <Ic.X />
                   {viewing.status === "rejected" ? "Rejected ✗" : "Reject"}
@@ -1146,7 +1171,7 @@ function TabFeedback({ projId, mentorId }) {
 // ══════════════════════════════════════════════════════════════════
 // TAB 4 — EVALUATION (unchanged)
 // ══════════════════════════════════════════════════════════════════
-function TabEvaluation({ projId, mentorId, evaluations, setEvaluations, markingEnabled }) {
+function TabEvaluation({ projId, mentorId, mentorName, members, evaluations, setEvaluations, markingEnabled }) {
   const [showForm, setShowForm] = useState(false);
   const [phase, setPhase] = useState(PHASES[0]);
   const [sc, setSc] = useState({ problem_definition: 0, technical_approach: 0, implementation: 0, presentation: 0, viva: 0 });
@@ -1165,7 +1190,25 @@ function TabEvaluation({ projId, mentorId, evaluations, setEvaluations, markingE
   const submit = async () => {
     setSaving(true);
     const { data, error } = await supabase.from("evaluations").insert([{ project_id: projId, guide_id: mentorId, phase, score: total, feedback: fb }]).select().single();
-    if (!error && data) { setEvaluations(p => [data, ...p]); setShowForm(false); setFb(""); setSc({ problem_definition: 0, technical_approach: 0, implementation: 0, presentation: 0, viva: 0 }); }
+    if (!error && data) {
+      setEvaluations(p => [data, ...p]);
+      setShowForm(false);
+      setFb("");
+      setSc({ problem_definition: 0, technical_approach: 0, implementation: 0, presentation: 0, viva: 0 });
+
+      // Send notification to team
+      const students = (members || []).map(m => m.student_id).filter(Boolean);
+      if (students.length > 0) {
+        await supabase.from("notifications").insert(students.map(uid => ({
+          user_id: uid,
+          type: "evaluation",
+          title: "New Evaluation Recorded",
+          message: `Phase "${phase}" evaluation is complete. Your score is ${total}/${MAX_SCORE}. Evaluated by ${mentorName || "Mentor"}.`,
+          read: false,
+          created_at: new Date().toISOString()
+        })));
+      }
+    }
     setSaving(false);
   };
 
@@ -1311,7 +1354,23 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
 
   const submitReview = async ({ phase, scores, total, feedback }) => {
     const { data, error } = await supabase.from("evaluations").insert([{ project_id: proj.id, guide_id: mentorId, phase, score: total, feedback }]).select().single();
-    if (!error && data) { setEvaluations(p => [data, ...p]); setShowReview(false); }
+    if (!error && data) {
+      setEvaluations(p => [data, ...p]);
+      setShowReview(false);
+
+      // Notify team
+      const students = members.map(m => m.student_id).filter(Boolean);
+      if (students.length > 0) {
+        await supabase.from("notifications").insert(students.map(uid => ({
+          user_id: uid,
+          type: "evaluation",
+          title: "New Review Posted",
+          message: `${mentorName || "Mentor"} posted a new review for ${phase}. Total: ${total}/${MAX_SCORE}.`,
+          read: false,
+          created_at: new Date().toISOString()
+        })));
+      }
+    }
   };
 
   const avg = evaluations.length ? Math.round(evaluations.reduce((s, e) => s + Number(e.score || 0), 0) / evaluations.length) : null;
@@ -1408,9 +1467,9 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
       {loading ? <Spin /> : (
         <>
           {tab === "overview" && <TabOverview proj={proj} evaluations={evaluations} members={members} documents={documents} onAddReview={() => setShowReview(true)} onNavigateTab={setTab} mentorId={mentorId} mentorName={mentorName} milestoneDates={milestoneDates} />}
-          {tab === "submissions" && <TabSubmissions projId={proj.id} />}
+          {tab === "submissions" && <TabSubmissions projId={proj.id} members={members} mentorName={mentorName} />}
           {tab === "feedback" && <TabFeedback projId={proj.id} mentorId={mentorId} />}
-          {tab === "evaluation" && <TabEvaluation projId={proj.id} mentorId={mentorId} evaluations={evaluations} setEvaluations={setEvaluations} markingEnabled={markingEnabled} />}
+          {tab === "evaluation" && <TabEvaluation projId={proj.id} mentorId={mentorId} mentorName={mentorName} members={members} evaluations={evaluations} setEvaluations={setEvaluations} markingEnabled={markingEnabled} />}
           {tab === "activity" && <TabActivity evaluations={evaluations} documents={documents} />}
         </>
       )}

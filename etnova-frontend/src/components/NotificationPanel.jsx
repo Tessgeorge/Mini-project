@@ -39,6 +39,8 @@ export default function NotificationPanel({
                 return 'check_circle';
             case 'document_rejected':
                 return 'cancel';
+            case 'document_comment':
+                return 'chat';
             case 'evaluation':
                 return 'star';
             case 'team_member':
@@ -64,6 +66,8 @@ export default function NotificationPanel({
                 return '#10b981'; // green
             case 'document_rejected':
                 return '#ef4444'; // red
+            case 'document_comment':
+                return '#3b82f6'; // blue
             case 'evaluation':
                 return '#f59e0b'; // amber
             case 'team_member':
