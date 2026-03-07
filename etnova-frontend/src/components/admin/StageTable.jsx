@@ -22,11 +22,14 @@ export default function StageTable({
   loading,
   stages,
   selectedClass,
+  deadlineLabel = "Deadline",
+  simplifiedActions = false,
   onEditDeadline,
   onActivateStage,
   onCompleteStage,
-  onLockStage,
-  onUnlockStage,
+  onToggleLockStage,
+  onRenameStage,
+  onDeleteStage,
   actionBusyId,
 }) {
   return (
@@ -36,7 +39,7 @@ export default function StageTable({
           <thead className="bg-gray-50 text-gray-600">
             <tr>
               <th className="px-6 py-3 text-left font-semibold">Stage Name</th>
-              <th className="px-6 py-3 text-left font-semibold">{`Deadline (${selectedClass || "-"})`}</th>
+              <th className="px-6 py-3 text-left font-semibold">{`${deadlineLabel} (${selectedClass || "-"})`}</th>
               <th className="px-6 py-3 text-left font-semibold">Status</th>
               <th className="px-6 py-3 text-left font-semibold">Submissions</th>
               <th className="px-6 py-3 text-left font-semibold">Actions</th>
@@ -57,6 +60,10 @@ export default function StageTable({
               const isActive = stage.status === "Active";
               const isCompleted = stage.status === "Completed";
               const isInactive = stage.status === "Inactive";
+              const canToggleActive = isInactive || isActive;
+              const canToggleComplete = simplifiedActions
+                ? (!isLocked || isCompleted)
+                : (isActive || isCompleted);
 
               return (
                 <tr key={stage.id} className="hover:bg-gray-50">
@@ -74,41 +81,65 @@ export default function StageTable({
                         type="button"
                         onClick={() => onEditDeadline(stage)}
                         disabled={isBusy}
+                        title={simplifiedActions ? "Set Mentor Evaluation Deadline" : "Edit Deadline"}
+                        aria-label={simplifiedActions ? "Set Mentor Evaluation Deadline" : "Edit Deadline"}
                         className="px-3 py-2 rounded-lg bg-white border border-gray-200 text-gray-700 text-xs font-semibold hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        Edit Deadline
+                        🕒
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => onActivateStage(stage.id)}
-                        disabled={isBusy || !isInactive}
-                        className="px-3 py-2 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        Activate
-                      </button>
+                      {!simplifiedActions ? (
+                        <button
+                          type="button"
+                          onClick={() => onActivateStage(stage.id)}
+                          disabled={isBusy || !canToggleActive}
+                          title={isActive ? "Deactivate Stage" : "Activate Stage"}
+                          aria-label={isActive ? "Deactivate Stage" : "Activate Stage"}
+                          className="px-3 py-2 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isActive ? "Off" : "On"}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => onCompleteStage(stage.id)}
-                        disabled={isBusy || !isActive || isCompleted}
+                        disabled={isBusy || !canToggleComplete}
+                        title={isCompleted ? "Mark Incomplete" : "Complete Stage"}
+                        aria-label={isCompleted ? "Mark Incomplete" : "Complete Stage"}
                         className="px-3 py-2 rounded-lg border border-emerald-200 text-emerald-700 bg-white text-xs font-semibold hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        Complete
+                        {isCompleted ? "Undo" : (simplifiedActions ? "Complete" : "Done")}
                       </button>
                       <button
                         type="button"
-                        onClick={() => onLockStage(stage.id)}
-                        disabled={isBusy || isLocked || isCompleted}
+                        onClick={() => onToggleLockStage(stage.id)}
+                        disabled={isBusy || (!simplifiedActions && isCompleted)}
+                        title={isLocked ? "Unlock Stage" : "Lock Stage"}
+                        aria-label={isLocked ? "Unlock Stage" : "Lock Stage"}
                         className="px-3 py-2 rounded-lg border border-rose-200 text-rose-700 bg-white text-xs font-semibold hover:bg-rose-50 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        Lock
+                        {isLocked ? "Unlock" : "Lock"}
                       </button>
+                      {!simplifiedActions ? (
+                        <button
+                          type="button"
+                          onClick={() => onRenameStage(stage.id)}
+                          disabled={isBusy}
+                          title="Rename Stage"
+                          aria-label="Rename Stage"
+                          className="px-3 py-2 rounded-lg border border-blue-200 text-blue-700 bg-white text-xs font-semibold hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          ✎
+                        </button>
+                      ) : null}
                       <button
                         type="button"
-                        onClick={() => onUnlockStage(stage.id)}
-                        disabled={isBusy || !isLocked}
-                        className="px-3 py-2 rounded-lg border border-amber-200 text-amber-700 bg-white text-xs font-semibold hover:bg-amber-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={() => onDeleteStage(stage.id)}
+                        disabled={isBusy}
+                        title="Remove Stage"
+                        aria-label="Remove Stage"
+                        className="px-3 py-2 rounded-lg border border-gray-300 text-gray-700 bg-white text-xs font-semibold hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        Unlock
+                        🗑
                       </button>
                     </div>
                   </td>

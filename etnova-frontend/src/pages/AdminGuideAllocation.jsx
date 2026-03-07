@@ -23,6 +23,8 @@ function isMentorProfile(row) {
 
 export default function AdminGuideAllocation() {
   const navigate = useNavigate();
+  const [classes, setClasses] = useState([]);
+  const [selectedClassId, setSelectedClassId] = useState("");
   const [mentors, setMentors] = useState([]);
   const [projects, setProjects] = useState([]);
   const [selectedGuides, setSelectedGuides] = useState({});
@@ -32,6 +34,7 @@ export default function AdminGuideAllocation() {
   const [notice, setNotice] = useState("");
 
   const mentorById = useMemo(() => new Map(mentors.map((mentor) => [mentor.id, mentor])), [mentors]);
+  const classNameById = useMemo(() => new Map(classes.map((item) => [item.id, item.class_name])), [classes]);
 
   const getGuideWorkload = useCallback((mentorId, sourceProjects = projects) => {
     return sourceProjects.filter((project) => project.guide_id === mentorId).length;
@@ -59,30 +62,88 @@ export default function AdminGuideAllocation() {
     return normalized;
   }, []);
 
+  const fetchClasses = useCallback(async () => {
+    const { data, error: classesError } = await supabase
+      .from("profiles")
+      .select("class_section")
+      .eq("role", "student")
+      .not("class_section", "is", null)
+      .order("class_section", { ascending: true });
+
+    if (classesError) throw classesError;
+    const unique = [...new Set((data || []).map((row) => String(row.class_section || "").trim()).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b))
+      .map((value) => ({ id: value, class_name: value }));
+    setClasses(unique);
+    return unique;
+  }, []);
+
   const fetchProjects = useCallback(async () => {
-    const { data, error: projectsError } = await supabase
+    const { data: projectsData, error: projectsError } = await supabase
       .from("projects")
       .select(`
         id,
         title,
         guide_id,
-        class_id,
-        classes:class_id (
-          class_name
+        team_members (
+          project_id,
+          student_id,
+          profiles:student_id (
+            class_section
+          )
         )
       `)
       .order("title", { ascending: true });
 
     if (projectsError) throw projectsError;
 
-    const normalized = (data || []).map((project) => ({
-      id: project.id,
-      title: project.title || "Untitled Project",
-      guide_id: project.guide_id || null,
-      class_name: Array.isArray(project.classes)
-        ? (project.classes[0]?.class_name || "Unknown Class")
-        : (project.classes?.class_name || "Unknown Class"),
-    }));
+    const projectRows = projectsData || [];
+    const projectIds = projectRows.map((row) => row.id).filter(Boolean);
+
+    const { data: allocationRows, error: allocationsError } = projectIds.length > 0
+      ? await supabase
+        .from("guide_allocations")
+        .select("project_id, guide_id")
+        .in("project_id", projectIds)
+      : { data: [], error: null };
+    if (allocationsError) throw allocationsError;
+
+    const guideIds = [...new Set((allocationRows || []).map((row) => row.guide_id).filter(Boolean))];
+    const { data: guideRows, error: guidesError } = guideIds.length > 0
+      ? await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", guideIds)
+      : { data: [], error: null };
+    if (guidesError) throw guidesError;
+
+    const guideNameById = new Map((guideRows || []).map((row) => [row.id, row.full_name || ""]));
+    const allocationByProject = new Map();
+    (allocationRows || []).forEach((row) => {
+      if (!row?.project_id || allocationByProject.has(row.project_id)) return;
+      allocationByProject.set(row.project_id, row);
+    });
+
+    const normalized = projectRows.map((project) => {
+      const allocation = allocationByProject.get(project.id) || null;
+      const members = Array.isArray(project.team_members) ? project.team_members : [];
+      const classSection = members
+        .map((member) => {
+          const profile = Array.isArray(member?.profiles) ? member.profiles[0] : member?.profiles;
+          return String(profile?.class_section || "").trim();
+        })
+        .find(Boolean) || "";
+
+      return {
+        id: project.id,
+        title: project.title || "Untitled Project",
+        guide_id: project.guide_id || null,
+        class_id: classSection || null,
+        class_name: classSection,
+        allocated_guide_id: allocation?.guide_id || null,
+        allocated_guide_name: guideNameById.get(allocation?.guide_id) || "",
+      };
+    });
 
     setProjects(normalized);
     return normalized;
@@ -92,13 +153,13 @@ export default function AdminGuideAllocation() {
     setLoading(true);
     setError("");
     try {
-      await Promise.all([fetchMentors(), fetchProjects()]);
+      await Promise.all([fetchMentors(), fetchProjects(), fetchClasses()]);
     } catch (err) {
       setError(err.message || "Failed to load guide allocation data.");
     } finally {
       setLoading(false);
     }
-  }, [fetchMentors, fetchProjects]);
+  }, [fetchClasses, fetchMentors, fetchProjects]);
 
   useEffect(() => {
     fetchData();
@@ -116,6 +177,8 @@ export default function AdminGuideAllocation() {
     const channel = supabase
       .channel("guide-allocation-projects-live")
       .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, fetchProjects)
+      .on("postgres_changes", { event: "*", schema: "public", table: "guide_allocations" }, fetchProjects)
+      .on("postgres_changes", { event: "*", schema: "public", table: "team_members" }, fetchProjects)
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, fetchMentors)
       .subscribe();
 
@@ -300,6 +363,12 @@ export default function AdminGuideAllocation() {
     };
   }, [mentors, projects, getGuideWorkload]);
 
+  const filteredProjects = useMemo(() => {
+    if (!selectedClassId) return projects;
+    const selected = String(selectedClassId).trim().toLowerCase();
+    return projects.filter((project) => String(project.class_name || "").trim().toLowerCase() === selected);
+  }, [projects, selectedClassId]);
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Sidebar
@@ -353,6 +422,20 @@ export default function AdminGuideAllocation() {
           <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100">
               <h2 className="text-lg font-semibold text-gray-800">Project Allocation Table</h2>
+              <div className="mt-3 flex items-center gap-3">
+                <label className="text-sm text-gray-600 font-medium" htmlFor="class-filter">Class Filter</label>
+                <select
+                  id="class-filter"
+                  value={selectedClassId}
+                  onChange={(event) => setSelectedClassId(event.target.value)}
+                  className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/40 min-w-[200px]"
+                >
+                  <option value="">All Classes</option>
+                  {classes.map((item) => (
+                    <option key={item.id} value={item.id}>{item.class_name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[920px] text-sm">
@@ -365,19 +448,20 @@ export default function AdminGuideAllocation() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {projects.map((project) => {
-                    const guide = mentors.find((mentor) => mentor.id === project.guide_id);
-                    const assignedGuide = guide?.full_name || "-";
+                  {filteredProjects.map((project) => {
+                    const currentGuideId = project.allocated_guide_id || project.guide_id || "";
+                    const fallbackGuide = mentorById.get(currentGuideId);
+                    const assignedGuide = project.allocated_guide_name || fallbackGuide?.full_name || "Unassigned";
                     const selection = selectedGuides[project.id] ?? "";
-                    const candidate = selection || project.guide_id || "";
+                    const candidate = selection || currentGuideId || "";
                     const allowed = candidate ? canAssignMentor(project, candidate) : false;
-                    const isAssigned = Boolean(project.guide_id);
+                    const isAssigned = Boolean(currentGuideId);
 
                     return (
                       <tr key={project.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4">
                           <p className="font-medium text-gray-800">{project.title}</p>
-                          <p className="text-xs text-gray-500 mt-0.5">{project.class_name}</p>
+                          <p className="text-xs text-gray-500 mt-0.5">{project.class_name || classNameById.get(project.class_id) || "-"}</p>
                         </td>
                         <td className="px-6 py-4 text-gray-700">{assignedGuide}</td>
                         <td className="px-6 py-4">
@@ -419,7 +503,7 @@ export default function AdminGuideAllocation() {
                       </tr>
                     );
                   })}
-                  {projects.length === 0 && !loading ? (
+                  {filteredProjects.length === 0 && !loading ? (
                     <tr>
                       <td colSpan={4} className="px-6 py-8 text-center text-sm text-gray-500">No projects found.</td>
                     </tr>

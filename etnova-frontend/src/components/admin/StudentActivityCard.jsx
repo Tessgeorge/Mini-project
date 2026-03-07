@@ -36,7 +36,7 @@ export default function StudentActivityCard({ activity, onViewAllTeams }) {
 
       <div className="space-y-2">
         <p className="text-xs font-semibold text-gray-700">Top Pending Teams</p>
-        {activity.teams.slice(0, 5).map((team) => (
+        {activity.teams.slice(0, 2).map((team) => (
           <div key={`${team.name}-${team.class}`} className="rounded-lg border border-gray-100 px-3 py-2">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-medium text-gray-800">{team.name}</p>

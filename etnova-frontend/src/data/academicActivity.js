@@ -1,5 +1,7 @@
 import { DEFAULT_GUIDES } from "./adminStorage";
 
+const PENDING_TEAM_LIMIT = 2;
+
 function uniqueClassesFromTeams(teams) {
   return Array.from(new Set(teams.map((team) => team.class)));
 }
@@ -65,7 +67,7 @@ export function getAcademicActivity({ reviewStages, teams, selectedClass = "All"
       total: stageTeams.length,
       submitted,
       late,
-      teams: pendingTeams.slice(0, 8),
+      teams: pendingTeams.slice(0, PENDING_TEAM_LIMIT),
     },
     mentor: {
       totalAssigned,
