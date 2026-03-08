@@ -16,24 +16,6 @@ function BellIcon() {
   );
 }
 
-function SearchIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="size-4"
-      aria-hidden="true"
-    >
-      <circle cx="11" cy="11" r="7" />
-      <path d="m20 20-3.5-3.5" />
-    </svg>
-  );
-}
-
 export default function TopNavbar({ adminName, academicYearLabel, pageTitle = "Admin Dashboard", onProfileClick }) {
   const initial = adminName?.charAt(0)?.toUpperCase() || "A";
 
@@ -47,17 +29,6 @@ export default function TopNavbar({ adminName, academicYearLabel, pageTitle = "A
         <span className="hidden md:inline-flex px-3 py-1 rounded-full text-xs font-semibold badge-teal">
           {academicYearLabel}
         </span>
-
-        <div className="relative hidden sm:block">
-          <input
-            type="text"
-            placeholder="Search..."
-            className="glass-input pl-9 pr-3 py-2 w-44 md:w-56 text-sm text-gray-700 placeholder:text-gray-400"
-          />
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
-            <SearchIcon />
-          </span>
-        </div>
 
         <button
           type="button"

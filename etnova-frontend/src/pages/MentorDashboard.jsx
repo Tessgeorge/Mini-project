@@ -53,6 +53,11 @@ function Spinner() {
   return <div className="flex justify-center py-20"><div className="w-8 h-8 border-4 border-teal-400 border-t-transparent rounded-full animate-spin" /></div>;
 }
 
+function formatClassScore(value) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  return Number(value).toFixed(1);
+}
+
 // ─── Mini Bar Chart (pure CSS/SVG, no library needed) ──────────────────────
 function WeeklyChart({ projects, evaluations }) {
   // Build last-7-days evaluation count per day
@@ -721,11 +726,12 @@ function MentorProfileMenu({ profile, isOpen, onClose, onLogout, onEditProfile }
 }
 
 // ─── Sidebar ────────────────────────────────────────────────────────────────
-function Sidebar({ active, setActive, onSignOut }) {
+function Sidebar({ active, setActive, onSignOut, showMyClass }) {
   const items = [
     { key: "overview", label: "Dashboard", I: Icon.Dashboard },
     { key: "teams", label: "My Teams", I: Icon.Teams },
     { key: "evaluation", label: "Evaluation", I: Icon.Evaluation },
+    ...(showMyClass ? [{ key: "my-class", label: "My Class", I: Icon.Building }] : []),
   ];
   return (
     <aside className="w-64 min-h-screen bg-white border-r border-gray-100 flex flex-col shadow-sm flex-shrink-0">
@@ -759,8 +765,13 @@ function Sidebar({ active, setActive, onSignOut }) {
   );
 }
 
-function Topbar({ active, mentorName, onProfileClick }) {
-  const labels = { overview: "Dashboard", teams: "My Teams", evaluation: "Evaluation" };
+function Topbar({ active, mentorName, onProfileClick, showMyClass }) {
+  const labels = {
+    overview: "Dashboard",
+    teams: "My Teams",
+    evaluation: "Evaluation",
+    ...(showMyClass ? { "my-class": "My Class" } : {}),
+  };
   return (
     <header className="bg-white border-b border-gray-100 px-8 py-4 flex items-center justify-between">
       <div className="flex items-center gap-2 text-sm text-gray-400">
@@ -784,6 +795,81 @@ function Topbar({ active, mentorName, onProfileClick }) {
         </div>
       </button>
     </header>
+  );
+}
+
+function MyClassTab({ classData, loading }) {
+  if (loading) return <Spinner />;
+  if (!classData) {
+    return (
+      <div className="bg-white rounded-2xl p-10 border border-gray-100 shadow-sm text-center">
+        <p className="text-gray-700 font-semibold">No coordinator class assigned.</p>
+      </div>
+    );
+  }
+
+  const {
+    classTitle,
+    totalProjects,
+    evaluatedProjects,
+    pendingEvaluations,
+    classAverageScore,
+    projects,
+  } = classData;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+        {[
+          { label: "Class Title", value: classTitle || "—" },
+          { label: "Total Projects", value: totalProjects },
+          { label: "Evaluated Projects", value: evaluatedProjects },
+          { label: "Pending Evaluations", value: pendingEvaluations },
+          { label: "Class Average Score", value: classAverageScore != null ? `${formatClassScore(classAverageScore)}/100` : "—" },
+        ].map((item) => (
+          <div key={item.label} className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+            <p className="text-xs font-bold uppercase tracking-widest text-gray-400">{item.label}</p>
+            <p className="text-2xl font-extrabold text-gray-900 mt-2 break-words">{item.value}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-100">
+          <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Class Projects</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-gray-400">Title</th>
+                <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-gray-400">Guide</th>
+                <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-gray-400">Team Size</th>
+                <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-gray-400">Evaluations</th>
+                <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-gray-400">Avg Score</th>
+                <th className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-gray-400">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {projects.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-5 py-8 text-center text-gray-400">No projects in this class.</td>
+                </tr>
+              ) : projects.map((project) => (
+                <tr key={project.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-5 py-3 font-semibold text-gray-800">{project.title || "Untitled Project"}</td>
+                  <td className="px-5 py-3 text-gray-600">{project.guideName || "Unassigned"}</td>
+                  <td className="px-5 py-3 text-gray-600">{project.teamSize}</td>
+                  <td className="px-5 py-3 text-gray-600">{project.evaluationCount}</td>
+                  <td className="px-5 py-3 text-gray-600">{project.avgScore != null ? `${formatClassScore(project.avgScore)}/100` : "—"}</td>
+                  <td className="px-5 py-3"><StatusBadge status={project.status || "pending"} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1613,6 +1699,8 @@ export default function MentorDashboard() {
   const [loading, setLoading] = useState(true);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showProfileEditor, setShowProfileEditor] = useState(false);
+  const [myClassData, setMyClassData] = useState(null);
+  const [myClassLoading, setMyClassLoading] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -1662,11 +1750,93 @@ export default function MentorDashboard() {
           });
           setRecentActivity(activity);
         }
-      } catch (e) { console.error(e); }
+
+        if (profile?.is_coordinator && profile?.class_id) {
+          setMyClassLoading(true);
+          const [{ data: classRow }, { data: classProjects }] = await Promise.all([
+            supabase.from("classes").select("id, class_name").eq("id", profile.class_id).single(),
+            supabase.from("projects").select("id, title, guide_id, status").eq("class_id", profile.class_id),
+          ]);
+
+          const projectsInClass = classProjects || [];
+          const projectIds = projectsInClass.map((project) => project.id);
+          const guideIds = Array.from(new Set(projectsInClass.map((project) => project.guide_id).filter(Boolean)));
+
+          const [membersRes, evalRes, guidesRes] = await Promise.all([
+            projectIds.length
+              ? supabase.from("team_members").select("id, project_id").in("project_id", projectIds)
+              : Promise.resolve({ data: [] }),
+            projectIds.length
+              ? supabase.from("evaluations").select("id, project_id, score").in("project_id", projectIds)
+              : Promise.resolve({ data: [] }),
+            guideIds.length
+              ? supabase.from("profiles").select("id, full_name").in("id", guideIds)
+              : Promise.resolve({ data: [] }),
+          ]);
+
+          const members = membersRes.data || [];
+          const classEvals = evalRes.data || [];
+          const guides = guidesRes.data || [];
+          const guideMap = new Map(guides.map((guide) => [guide.id, guide.full_name || "Unassigned"]));
+          const memberCountByProject = members.reduce((acc, item) => {
+            acc[item.project_id] = (acc[item.project_id] || 0) + 1;
+            return acc;
+          }, {});
+          const evalByProject = classEvals.reduce((acc, item) => {
+            if (!acc[item.project_id]) acc[item.project_id] = [];
+            acc[item.project_id].push(Number(item.score) || 0);
+            return acc;
+          }, {});
+
+          const projectRows = projectsInClass.map((project) => {
+            const scores = evalByProject[project.id] || [];
+            const avgScore = scores.length
+              ? scores.reduce((sum, score) => sum + score, 0) / scores.length
+              : null;
+            return {
+              ...project,
+              teamSize: memberCountByProject[project.id] || 0,
+              evaluationCount: scores.length,
+              avgScore,
+              guideName: guideMap.get(project.guide_id) || "Unassigned",
+            };
+          });
+
+          const evaluatedCount = projectRows.filter((item) => item.evaluationCount > 0).length;
+          const allScores = classEvals.map((item) => Number(item.score)).filter((score) => !Number.isNaN(score));
+          const classAverageScore = allScores.length
+            ? allScores.reduce((sum, score) => sum + score, 0) / allScores.length
+            : null;
+
+          setMyClassData({
+            classTitle: classRow?.class_name || "Untitled Class",
+            totalProjects: projectRows.length,
+            evaluatedProjects: evaluatedCount,
+            pendingEvaluations: projectRows.length - evaluatedCount,
+            classAverageScore,
+            projects: projectRows,
+          });
+          setMyClassLoading(false);
+        } else {
+          setMyClassData(null);
+          setMyClassLoading(false);
+        }
+      } catch (e) {
+        console.error(e);
+        setMyClassLoading(false);
+      }
       finally { setLoading(false); }
     };
     init();
   }, []);
+
+  const isCoordinatorWithClass = Boolean(mentorProfile?.is_coordinator && mentorProfile?.class_id);
+
+  useEffect(() => {
+    if (!isCoordinatorWithClass && active === "my-class") {
+      setActive("overview");
+    }
+  }, [active, isCoordinatorWithClass]);
 
   // Time ago helper
   function getTimeAgo(ts) {
@@ -1704,12 +1874,13 @@ export default function MentorDashboard() {
 
   return (
     <div className="flex min-h-screen bg-gray-50">
-      <Sidebar active={active} setActive={setActive} onSignOut={handleSignOut} />
+      <Sidebar active={active} setActive={setActive} onSignOut={handleSignOut} showMyClass={isCoordinatorWithClass} />
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="relative">
           <Topbar
             active={active}
             mentorName={mentorProfile?.full_name}
+            showMyClass={isCoordinatorWithClass}
             onProfileClick={() => {
               setShowProfileMenu((value) => !value);
             }}
@@ -1766,6 +1937,12 @@ export default function MentorDashboard() {
               setEvaluations={setEvaluations}
               mentorId={mentorProfile?.id}
               loading={loading}
+            />
+          )}
+          {active === "my-class" && isCoordinatorWithClass && (
+            <MyClassTab
+              classData={myClassData}
+              loading={myClassLoading}
             />
           )}
         </main>

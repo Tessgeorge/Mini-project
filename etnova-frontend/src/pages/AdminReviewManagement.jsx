@@ -137,7 +137,7 @@ export default function AdminReviewManagement() {
   const [classes, setClasses] = useState([]);
   const [selectedClassName, setSelectedClassName] = useState("");
   const [selectedClassId, setSelectedClassId] = useState("");
-  const [deadlineFilter, setDeadlineFilter] = useState(DEADLINE_FILTER.STAGE);
+  const [deadlineFilter] = useState(DEADLINE_FILTER.STAGE);
   const [hasMentorEvalDeadlineColumn, setHasMentorEvalDeadlineColumn] = useState(true);
   const [stages, setStages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -425,10 +425,6 @@ export default function AdminReviewManagement() {
 
   useEffect(() => {
     const classParam = searchParams.get("class");
-    const typeParam = String(searchParams.get("type") || "").toLowerCase();
-    if (typeParam === "evaluations") {
-      setDeadlineFilter(DEADLINE_FILTER.MENTOR_EVAL);
-    }
     refreshData(classParam || "");
   }, [refreshData, searchParams]);
 
@@ -876,7 +872,6 @@ export default function AdminReviewManagement() {
                   setSelectedClassName(nextClassName);
                   refreshData(nextClassName);
                 }}
-                disabled={deadlineFilter === DEADLINE_FILTER.MENTOR_EVAL}
                 className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/40 min-w-[180px]"
               >
                 {classes.length === 0 ? <option value="">No classes</option> : null}
@@ -884,24 +879,8 @@ export default function AdminReviewManagement() {
                   <option key={classItem.id} value={classItem.name}>{classItem.name}</option>
                 ))}
               </select>
-              <label className="text-sm text-gray-600 font-medium" htmlFor="deadline-filter">Filter</label>
-              <select
-                id="deadline-filter"
-                value={deadlineFilter}
-                onChange={(event) => setDeadlineFilter(event.target.value)}
-                className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/40 min-w-[220px]"
-              >
-                <option value={DEADLINE_FILTER.STAGE}>Stage Deadline</option>
-                <option value={DEADLINE_FILTER.MENTOR_EVAL}>Mentor Evaluation Deadline</option>
-              </select>
             </div>
           </section>
-
-          {deadlineFilter === DEADLINE_FILTER.MENTOR_EVAL ? (
-            <section className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-800">
-              Mentor evaluation deadline is coordinator-managed per stage for guide/evaluator review windows.
-            </section>
-          ) : null}
 
           {error ? (
             <section className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -911,15 +890,15 @@ export default function AdminReviewManagement() {
 
           <section className="bg-white rounded-xl shadow-md border border-gray-100 p-6">
             <h2 className="text-lg font-semibold text-gray-800 mb-4">Review Timeline Overview</h2>
-            <ReviewTimeline stages={stages} selectedClass={deadlineFilter === DEADLINE_FILTER.MENTOR_EVAL ? "All Mentors" : selectedClassName} />
+            <ReviewTimeline stages={stages} selectedClass={selectedClassName} />
           </section>
 
           <StageTable
             loading={loading}
             stages={stages}
-            selectedClass={deadlineFilter === DEADLINE_FILTER.MENTOR_EVAL ? "All Mentors" : selectedClassName}
-            deadlineLabel={deadlineFilter === DEADLINE_FILTER.MENTOR_EVAL ? "Mentor Eval Deadline" : "Deadline"}
-            simplifiedActions={deadlineFilter === DEADLINE_FILTER.MENTOR_EVAL}
+            selectedClass={selectedClassName}
+            deadlineLabel="Deadline"
+            simplifiedActions={false}
             actionBusyId={actionBusyId}
             onEditDeadline={handleOpenDeadlineModal}
             onActivateStage={activateStage}

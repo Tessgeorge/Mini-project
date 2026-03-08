@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import StudentActivityCard from "./StudentActivityCard";
 import MentorActivityCard from "./MentorActivityCard";
@@ -21,14 +21,19 @@ function PanelToggleIcon({ open }) {
   );
 }
 
-export default function AcademicActivityPanel({ reviewStages = [], teams = [] }) {
+export default function AcademicActivityPanel({ reviewStages = [], teams = [], classActiveStageMap = {}, defaultSelectedClass = "All" }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(true);
-  const [selectedClass, setSelectedClass] = useState("All");
+  const [selectedClass, setSelectedClass] = useState(defaultSelectedClass || "All");
+
+  useEffect(() => {
+    if (!defaultSelectedClass) return;
+    setSelectedClass((prev) => (prev === "All" ? defaultSelectedClass : prev));
+  }, [defaultSelectedClass]);
 
   const activity = useMemo(
-    () => getAcademicActivity({ reviewStages, teams, selectedClass }),
-    [reviewStages, selectedClass, teams]
+    () => getAcademicActivity({ reviewStages, teams, selectedClass, classActiveStageMap }),
+    [classActiveStageMap, reviewStages, selectedClass, teams]
   );
 
   const goToReviewPage = (type) => {

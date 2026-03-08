@@ -2,8 +2,10 @@ import { DEFAULT_GUIDES } from "./adminStorage";
 
 const PENDING_TEAM_LIMIT = 2;
 
-function uniqueClassesFromTeams(teams) {
-  return Array.from(new Set(teams.map((team) => team.class)));
+function uniqueClassesFromTeams(teams, classActiveStageMap = {}) {
+  const teamClasses = teams.map((team) => team.class).filter(Boolean);
+  const stageClasses = Object.keys(classActiveStageMap || {});
+  return Array.from(new Set([...teamClasses, ...stageClasses]));
 }
 
 function mentorPendingReason(pending) {
@@ -12,12 +14,26 @@ function mentorPendingReason(pending) {
   return "Pending verification";
 }
 
-export function getAcademicActivity({ reviewStages, teams, selectedClass = "All" }) {
-  const activeStage = reviewStages.find((stage) => stage.status === "Active")?.name || "-";
-  const classList = uniqueClassesFromTeams(teams);
+function resolveActiveStage({ selectedClass, classList, classActiveStageMap, reviewStages }) {
+  if (selectedClass !== "All") {
+    return classActiveStageMap?.[selectedClass] || "-";
+  }
+
+  const allStages = classList.map((className) => classActiveStageMap?.[className]).filter(Boolean);
+
+  if (allStages.length === 0) {
+    return reviewStages.find((stage) => stage.status === "Active")?.name || "-";
+  }
+
+  return new Set(allStages).size === 1 ? allStages[0] : "Multiple";
+}
+
+export function getAcademicActivity({ reviewStages, teams, selectedClass = "All", classActiveStageMap = {} }) {
+  const classList = uniqueClassesFromTeams(teams, classActiveStageMap);
+  const activeStage = resolveActiveStage({ selectedClass, classList, classActiveStageMap, reviewStages });
   const scopeTeams = selectedClass === "All" ? teams : teams.filter((team) => team.class === selectedClass);
 
-  const stageTeams = activeStage === "-"
+  const stageTeams = selectedClass === "All" || activeStage === "-" || activeStage === "Multiple"
     ? scopeTeams
     : scopeTeams.filter((team) => team.stage === activeStage);
 
@@ -67,7 +83,12 @@ export function getAcademicActivity({ reviewStages, teams, selectedClass = "All"
       total: stageTeams.length,
       submitted,
       late,
-      teams: pendingTeams.slice(0, PENDING_TEAM_LIMIT),
+      teams: pendingTeams
+        .map((team) => ({
+          ...team,
+          status: team.submissionStatus || "Pending",
+        }))
+        .slice(0, PENDING_TEAM_LIMIT),
     },
     mentor: {
       totalAssigned,

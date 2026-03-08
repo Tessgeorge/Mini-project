@@ -3,9 +3,7 @@ const NAV_ITEMS = [
   { id: "mentor-management", label: "Mentor Management", icon: "users" },
   { id: "guide-allocation", label: "Guide Allocation", icon: "shuffle" },
   { id: "review-management", label: "Review Management", icon: "clipboard-list" },
-  { id: "project-monitoring", label: "Project Monitoring", icon: "chart-donut" },
   { id: "results-reports", label: "Results & Reports", icon: "report" },
-  { id: "audit-logs", label: "Audit Logs", icon: "clock" },
 ];
 
 function Icon({ name, className = "size-5" }) {

@@ -26,26 +26,31 @@ export default function AdminReviewStages() {
     setLoading(true);
     setError("");
     try {
+      const { data: classRows, error: classError } = await supabase
+        .from("classes")
+        .select("id, class_name");
+      if (classError) {
+        console.error("Error fetching classes:", classError);
+        throw classError;
+      }
+
+      const classNameById = new Map((classRows || []).map((row) => [row.id, row.class_name]));
+
       const { data, error: fetchError } = await supabase
         .from("review_stages")
-        .select(`
-          class_id,
-          stage_name,
-          deadline,
-          is_active,
-          is_completed,
-          is_locked,
-          classes:class_id (
-            class_name
-          )
-        `)
+        .select("class_id, stage_name, deadline, is_active, is_completed, is_locked")
         .order("class_id", { ascending: true })
         .order("stage_name", { ascending: true });
       if (fetchError) {
         console.error("Error fetching stages:", fetchError);
         throw fetchError;
       }
-      setStages(data || []);
+
+      const rows = (data || []).map((row) => ({
+        ...row,
+        classes: { class_name: classNameById.get(row.class_id) || null },
+      }));
+      setStages(rows);
     } catch (err) {
       setError(err.message || "Failed to fetch review stages.");
     } finally {

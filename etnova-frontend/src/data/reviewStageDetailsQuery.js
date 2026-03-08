@@ -2,6 +2,13 @@ import supabase from "../lib/supabase";
 
 export async function fetchReviewStageDetails() {
   try {
+    const { data: classRows, error: classError } = await supabase
+      .from("classes")
+      .select("id, class_name, department");
+    if (classError) throw classError;
+
+    const classById = new Map((classRows || []).map((row) => [row.id, row]));
+
     const { data, error } = await supabase
       .from("review_stages")
       .select(`
@@ -11,11 +18,7 @@ export async function fetchReviewStageDetails() {
         is_active,
         is_completed,
         is_locked,
-        classes:class_id (
-          id,
-          class_name,
-          department
-        ),
+        class_id,
         projects (
           id,
           title,
@@ -37,7 +40,7 @@ export async function fetchReviewStageDetails() {
     return {
       data: (data || []).map((stage) => ({
         ...stage,
-        class: Array.isArray(stage.classes) ? stage.classes[0] || null : stage.classes || null,
+        class: classById.get(stage.class_id) || null,
       })),
       error: null,
     };

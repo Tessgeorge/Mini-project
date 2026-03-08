@@ -8,6 +8,7 @@ import SectionCard from "../components/admin/SectionCard";
 import PublishPanel from "../components/admin/PublishPanel";
 import AcademicActivityPanel from "../components/admin/AcademicActivityPanel";
 import AdminProfileSettingsModal from "../components/admin/AdminProfileSettingsModal";
+import ProfileMenu from "../components/ProfileMenu";
 
 const ADMIN_NAME = "Meenakshi";
 const KPI_DATA = [
@@ -99,11 +100,15 @@ export default function AdminDashboard() {
   const [reviewStages, setReviewStages] = useState([]);
   const [reviewClasses, setReviewClasses] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [selectedClassName, setSelectedClassName] = useState("S6 CSE A");
   const [selectedClassId, setSelectedClassId] = useState("");
+  const [dashboardClasses, setDashboardClasses] = useState([]);
+  const [classActiveStageMap, setClassActiveStageMap] = useState({});
   const [adminProfile, setAdminProfile] = useState({
     full_name: "",
+    email: "",
     department: "",
   });
 
@@ -113,24 +118,25 @@ export default function AdminDashboard() {
     } = await supabase.auth.getUser();
 
     if (!user?.id) {
-      setAdminProfile({ full_name: "", department: "" });
+      setAdminProfile({ full_name: "", email: "", department: "" });
       return;
     }
 
     const { data, error } = await supabase
       .from("profiles")
-      .select("full_name, department")
+      .select("full_name, email, department")
       .eq("id", user.id)
       .eq("role", "admin")
       .single();
 
     if (error || !data) {
-      setAdminProfile({ full_name: "", department: "" });
+      setAdminProfile({ full_name: "", email: "", department: "" });
       return;
     }
 
     setAdminProfile({
       full_name: data.full_name || "",
+      email: data.email || "",
       department: data.department || "",
     });
   }, []);
@@ -138,16 +144,21 @@ export default function AdminDashboard() {
   const fetchDashboardData = useCallback(async () => {
     setLoading(true);
     try {
-      const [projectsRes, mentorsRes] = await Promise.all([
-        supabase.from("projects").select("id, title, guide_id, status"),
+      const [projectsRes, mentorsRes, classesRes] = await Promise.all([
+        supabase
+          .from("projects")
+          .select("id, title, guide_id, status, class_id, team_members(id, student_id, profiles:student_id(class_section))"),
         supabase.from("profiles").select("id, full_name, role").eq("role", "mentor"),
+        supabase.from("classes").select("id, class_name"),
       ]);
 
       if (projectsRes.error) throw projectsRes.error;
       if (mentorsRes.error) throw mentorsRes.error;
+      if (classesRes.error) throw classesRes.error;
 
       setProjects(projectsRes.data || []);
       setMentors(mentorsRes.data || []);
+      setDashboardClasses(classesRes.data || []);
     } finally {
       setLoading(false);
     }
@@ -197,6 +208,22 @@ export default function AdminDashboard() {
       }));
 
     setReviewStages(mapped);
+
+    const { data: allStageRows, error: allStageError } = await supabase
+      .from("review_stages")
+      .select("class_id, stage_name, is_active");
+
+    if (allStageError) throw allStageError;
+
+    const classNameById = new Map(classes.map((item) => [item.id, item.class_name]));
+    const activeMap = {};
+    (allStageRows || []).forEach((row) => {
+      if (!row?.is_active) return;
+      const className = classNameById.get(row.class_id);
+      if (!className) return;
+      activeMap[className] = normalizeStageName(row.stage_name);
+    });
+    setClassActiveStageMap(activeMap);
   }, [selectedClassName]);
 
   useEffect(() => {
@@ -215,14 +242,13 @@ export default function AdminDashboard() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "review_stages" },
-        async (payload) => {
-          const changedClassId = payload.new?.class_id || payload.old?.class_id || "";
-          if (!selectedClassId || !changedClassId || changedClassId === selectedClassId) {
-            await fetchReviewStages();
-          }
+        async () => {
+          await Promise.all([fetchDashboardData(), fetchReviewStages()]);
         }
       )
-      .on("postgres_changes", { event: "*", schema: "public", table: "classes" }, fetchReviewStages)
+      .on("postgres_changes", { event: "*", schema: "public", table: "classes" }, async () => {
+        await Promise.all([fetchDashboardData(), fetchReviewStages()]);
+      })
       .subscribe();
 
     return () => {
@@ -231,7 +257,7 @@ export default function AdminDashboard() {
   }, [fetchAdminProfile, fetchDashboardData, fetchReviewStages, selectedClassId]);
 
   const teams = useMemo(() => {
-    const activeReviewStage = reviewStages.find((stage) => stage.status === "Active")?.name || "-";
+    const classNameById = new Map(dashboardClasses.map((item) => [item.id, item.class_name]));
     return projects.map((project) => {
       const guide = mentors.find((mentor) => mentor.id === project.guide_id);
       const status = String(project.status || "").toLowerCase();
@@ -240,16 +266,22 @@ export default function AdminDashboard() {
         : status.includes("late")
           ? "Late"
           : "Pending";
+      const fallbackClass = project.team_members
+        ?.map((member) => member?.profiles?.class_section)
+        ?.find(Boolean);
+      const resolvedClass = classNameById.get(project.class_id) || fallbackClass || "Unassigned Class";
+      const activeReviewStage = classActiveStageMap[resolvedClass] || "-";
       return {
         id: project.id,
         name: project.title || "Untitled Project",
-        class: "All Projects",
+        class: resolvedClass,
         stage: activeReviewStage,
         submissionStatus,
+        status: submissionStatus || "Pending",
         guide: guide?.full_name || null,
       };
     });
-  }, [mentors, projects, reviewStages]);
+  }, [classActiveStageMap, dashboardClasses, mentors, projects]);
 
   const activeReviewStage = useMemo(
     () => reviewStages.find((stage) => stage.status === "Active")?.name || "-",
@@ -332,8 +364,30 @@ export default function AdminDashboard() {
           adminName={adminName}
           academicYearLabel="2026 - S6 Mini Project"
           pageTitle="Admin Dashboard"
-          onProfileClick={() => setShowProfileSettings(true)}
+          onProfileClick={() => setShowProfileMenu((value) => !value)}
         />
+        {showProfileMenu && (
+          <div className="fixed top-14 right-2 sm:right-6 md:right-8 z-50">
+            <ProfileMenu
+              profile={adminProfile}
+              isOpen={showProfileMenu}
+              onClose={() => setShowProfileMenu(false)}
+              onLogout={handleSignOut}
+              onEditProfile={() => {
+                setShowProfileMenu(false);
+                setShowProfileSettings(true);
+              }}
+              roleLabel="Administrator"
+              roleIcon="admin_panel_settings"
+              infoItems={[
+                { label: "Full Name", value: adminProfile.full_name || "-" },
+                { label: "Email", value: adminProfile.email || "-" },
+                { label: "Role", value: "Administrator" },
+                { label: "Department", value: adminDepartment || "-" },
+              ]}
+            />
+          </div>
+        )}
 
         <div className="p-4 md:p-6 lg:p-8 space-y-6">
           <section className="rounded-xl shadow-md bg-gradient-to-r from-teal-600 to-teal-500 text-white p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -467,7 +521,12 @@ export default function AdminDashboard() {
         </div>
       </main>
 
-      <AcademicActivityPanel reviewStages={reviewStages} teams={teams} />
+      <AcademicActivityPanel
+        reviewStages={reviewStages}
+        teams={teams}
+        classActiveStageMap={classActiveStageMap}
+        defaultSelectedClass={selectedClassName || "All"}
+      />
       <AdminProfileSettingsModal
         isOpen={showProfileSettings}
         onClose={() => setShowProfileSettings(false)}

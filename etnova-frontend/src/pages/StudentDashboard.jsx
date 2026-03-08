@@ -11,15 +11,6 @@ import supabase from "../config/supabaseClient";
 import { apiRequest } from "../config/apiClient";
 import { fetchStudentBootstrapData, invalidateStudentBootstrapCache } from "../services/studentData";
 
-// Static Deadline Schedule
-const DEADLINES = [
-  { stage: "Abstract", date: "2026-03-01" },
-  { stage: "Proposal", date: "2026-03-15" },
-  { stage: "Report", date: "2026-04-10" },
-  { stage: "Final Report", date: "2026-05-01" },
-  { stage: "Presentation", date: "2026-05-15" },
-];
-
 const QUICK_NAV_ITEMS = [
   { id: "project", icon: "folder_open", label: "My Project", color: "#00D2C4" },
   { id: "team", icon: "group", label: "My Team", color: "#6366f1" },
@@ -52,6 +43,11 @@ function fmtRelative(d) {
   if (diff < 1440) return `${Math.round(diff / 60)}h ago`;
   if (diff < 10080) return `${Math.round(diff / 1440)}d ago`;
   return fmtShort(d);
+}
+
+function toDateKey(value) {
+  if (!value) return "";
+  return String(value).slice(0, 10);
 }
 
 function derivedStage(documents = []) {
@@ -299,6 +295,8 @@ export default function StudentDashboard() {
   const [project, setProject] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [evaluations, setEvaluations] = useState([]);
+  const [deadlines, setDeadlines] = useState([]);
+  const [studentClassId, setStudentClassId] = useState("");
 
   // UI state
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -319,6 +317,32 @@ export default function StudentDashboard() {
     }
   }, []);
 
+  const loadClassDeadlines = useCallback(async (classId) => {
+    if (!classId) {
+      setDeadlines([]);
+      return;
+    }
+
+    const { data, error: deadlineError } = await supabase
+      .from("review_stages")
+      .select("stage_name, deadline, is_active, is_completed, is_locked")
+      .eq("class_id", classId)
+      .order("deadline", { ascending: true });
+
+    if (deadlineError) {
+      throw new Error(deadlineError.message || "Failed to load review deadlines.");
+    }
+
+    const mappedDeadlines = (data || [])
+      .map((row) => ({
+        stage: row.stage_name || "Review Stage",
+        date: toDateKey(row.deadline),
+      }))
+      .filter((row) => row.date);
+
+    setDeadlines(mappedDeadlines);
+  }, []);
+
   // Load data
   const loadData = useCallback(async () => {
     setLoading(true); setError("");
@@ -328,6 +352,20 @@ export default function StudentDashboard() {
 
       setProfile(p);
       setNotifications(initialNotifications);
+
+      let resolvedClassId = p?.class_id || "";
+      if (!resolvedClassId && p?.id) {
+        const { data: profileRow, error: profileError } = await supabase
+          .from("profiles")
+          .select("class_id")
+          .eq("id", p.id)
+          .single();
+        if (!profileError) {
+          resolvedClassId = profileRow?.class_id || "";
+        }
+      }
+      setStudentClassId(resolvedClassId);
+      await loadClassDeadlines(resolvedClassId);
 
       const proj = list?.[0];
       if (!proj?.id) {
@@ -346,9 +384,37 @@ export default function StudentDashboard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadClassDeadlines]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    if (!studentClassId) return undefined;
+
+    const channel = supabase
+      .channel(`student-deadlines-${studentClassId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "review_stages",
+          filter: `class_id=eq.${studentClassId}`,
+        },
+        async () => {
+          try {
+            await loadClassDeadlines(studentClassId);
+          } catch (refreshError) {
+            console.error("Failed to refresh review deadlines:", refreshError);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadClassDeadlines, studentClassId]);
 
   const handleLogout = async () => { await supabase.auth.signOut(); navigate("/signin"); };
 
@@ -357,8 +423,8 @@ export default function StudentDashboard() {
 
   const nextDeadline = useMemo(() => {
     const now = new Date();
-    return DEADLINES.find(d => new Date(d.date) >= now) || null;
-  }, []);
+    return deadlines.find(d => new Date(d.date) >= now) || null;
+  }, [deadlines]);
 
   const daysLeft = nextDeadline ? daysUntil(nextDeadline.date) : null;
 
@@ -403,6 +469,45 @@ export default function StudentDashboard() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [profile?.id, loadNotifications]);
+
+  useEffect(() => {
+    if (!project?.id) return undefined;
+
+    const refreshDocuments = async () => {
+      const { data, error: docsError } = await supabase
+        .from("documents")
+        .select("*")
+        .eq("project_id", project.id)
+        .order("uploaded_at", { ascending: false });
+
+      if (docsError) {
+        console.error("Failed to refresh project documents:", docsError);
+        return;
+      }
+
+      setDocuments(data || []);
+    };
+
+    const channel = supabase
+      .channel(`student-project-documents-${project.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "documents",
+          filter: `project_id=eq.${project.id}`,
+        },
+        async () => {
+          await refreshDocuments();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [project?.id]);
 
   const handleMarkAllNotificationsRead = async () => {
     try {
@@ -485,7 +590,7 @@ export default function StudentDashboard() {
         action: () => goToStudentTab(item.id),
       }));
 
-    const deadlineResults = DEADLINES
+    const deadlineResults = deadlines
       .filter((deadline) => `${deadline.stage} ${deadline.date}`.toLowerCase().includes(normalizedSearch))
       .map((deadline) => ({
         id: `deadline-${deadline.stage}`,
@@ -510,7 +615,7 @@ export default function StudentDashboard() {
       }));
 
     return [...pageResults, ...deadlineResults, ...activityResults].slice(0, 8);
-  }, [normalizedSearch, activityFeed, goToStudentTab]);
+  }, [normalizedSearch, activityFeed, deadlines, goToStudentTab]);
 
   const handleSearchSubmit = useCallback((rawQuery) => {
     const query = (rawQuery || "").trim().toLowerCase();
@@ -788,7 +893,7 @@ export default function StudentDashboard() {
                 <span className="ml-auto text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Read-only</span>
               </div>
               <div className="p-5">
-                <DeadlineCalendar deadlines={DEADLINES} onNavigateTab={goToStudentTab} />
+                <DeadlineCalendar deadlines={deadlines} onNavigateTab={goToStudentTab} />
               </div>
             </div>
           </div>
