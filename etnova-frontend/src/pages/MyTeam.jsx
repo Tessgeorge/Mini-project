@@ -564,6 +564,8 @@ export default function MyTeam() {
   const me = teamMembers.find((m) => m.student_id === profile?.id);
   const myRole = me?.role || "member";
   const locked = isLocked(project?.status);
+  const mentorContact = project?.guide || project?.mentor || null;
+  const coordinatorContact = project?.coordinator || null;
 
   useEffect(() => {
     if (!project?.id || myRole !== "leader") return undefined;
@@ -594,17 +596,17 @@ export default function MyTeam() {
         time: m.joined_at,
       });
     });
-    if (project?.mentor) items.push({
+    if (mentorContact) items.push({
       id: "mentor-assigned",
       icon: "school",
-      text: `Mentor assigned: ${project.mentor.full_name}`,
-      sub: "Administrative assignment",
+      text: `Mentor assigned: ${mentorContact.full_name}`,
+      sub: project?.guide ? "Guide assigned by admin dashboard" : "Administrative assignment",
       time: project.updated_at || project.created_at,
     });
-    if (project?.guide) items.push({
-      id: "guide-assigned",
-      icon: "admin_panel_settings",
-      text: `Guide linked: ${project.guide.full_name}`,
+    if (coordinatorContact) items.push({
+      id: "coordinator-assigned",
+      icon: "hub",
+      text: `Coordinator assigned: ${coordinatorContact.full_name}`,
       sub: "Administrative assignment",
       time: project.updated_at || project.created_at,
     });
@@ -616,7 +618,7 @@ export default function MyTeam() {
       time: project.updated_at,
     });
     return items.sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0)).slice(0, 4);
-  }, [teamMembers, project]);
+  }, [coordinatorContact, mentorContact, project, teamMembers]);
 
   const removeMember = async (studentId, role) => {
     if (role === "leader" || locked) return;
@@ -877,18 +879,35 @@ export default function MyTeam() {
               <SectionHead icon="admin_panel_settings" title="Administrative Contacts" />
             </div>
             <div className="divide-y divide-slate-50">
-              {/* Guide */}
+              {/* Mentor */}
               <div className="p-5 flex items-start gap-4">
                 <div className="size-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-slate-100">
-                  <span className="material-symbols-outlined text-base text-slate-500">manage_accounts</span>
+                  <span className="material-symbols-outlined text-base text-slate-500">school</span>
                 </div>
                 <div className="flex-1">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Project Guide</p>
-                  {project.guide ? (
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Mentor</p>
+                  {mentorContact ? (
                     <>
-                      <p className="font-black text-slate-900 text-sm">{project.guide.full_name}</p>
-                      <p className="text-xs text-slate-500 mt-0.5">{project.guide.department || "Faculty"}</p>
-                      <p className="text-xs text-slate-400 mt-0.5">{project.guide.email}</p>
+                      <p className="font-black text-slate-900 text-sm">{mentorContact.full_name}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">{mentorContact.department || "Faculty"}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{mentorContact.email}</p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-slate-400 italic">Not assigned</p>
+                  )}
+                </div>
+              </div>
+              <div className="p-5 flex items-start gap-4">
+                <div className="size-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-slate-100">
+                  <span className="material-symbols-outlined text-base text-slate-500">hub</span>
+                </div>
+                <div className="flex-1">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Coordinator</p>
+                  {coordinatorContact ? (
+                    <>
+                      <p className="font-black text-slate-900 text-sm">{coordinatorContact.full_name}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">{coordinatorContact.department || "Faculty"}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{coordinatorContact.email}</p>
                     </>
                   ) : (
                     <p className="text-sm text-slate-400 italic">Not assigned</p>

@@ -167,9 +167,14 @@ export default function Discussion() {
       role: m.role === "leader" ? "Leader" : "Member",
     }));
     const extras = [];
-    if (project.mentor) extras.push({ id: project.mentor.id, name: project.mentor.full_name, role: "Mentor" });
-    if (project.guide) extras.push({ id: project.guide.id, name: project.guide.full_name, role: "Guide" });
-    if (project.coordinator) extras.push({ id: project.coordinator.id, name: project.coordinator.full_name, role: "Coordinator" });
+    const discussionFaculty = project.guide || project.mentor || null;
+    if (discussionFaculty) {
+      extras.push({
+        id: discussionFaculty.id,
+        name: discussionFaculty.full_name,
+        role: project.guide ? "Guide" : "Mentor",
+      });
+    }
     const seen = new Set();
     return [...team, ...extras].filter(p => p.id && !seen.has(p.id) && seen.add(p.id));
   }, [project]);

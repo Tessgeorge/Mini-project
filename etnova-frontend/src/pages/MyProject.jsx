@@ -126,6 +126,7 @@ export default function MyProject() {
   }, []);
 
   const teamName = project?.title ? `${project.title} Team` : "My Team";
+  const mentorContact = project?.guide || project?.mentor || null;
   const department =
     profile?.department || project?.team_members?.[0]?.profiles?.department || "-";
 
@@ -362,7 +363,7 @@ export default function MyProject() {
               <SectionHead icon="school" title="Mentor Information" />
             </div>
             <div className="p-5">
-              {!project.mentor ? (
+              {!mentorContact ? (
                 <div className="py-8 flex flex-col items-center text-center gap-3">
                   <div className="size-14 rounded-2xl bg-slate-100 flex items-center justify-center">
                     <span className="material-symbols-outlined text-2xl text-slate-400">person_off</span>
@@ -370,16 +371,16 @@ export default function MyProject() {
                   <div>
                     <p className="text-sm font-black text-slate-700">Pending Assignment</p>
                     <p className="text-xs text-slate-400 mt-1">
-                      A mentor will be assigned by the administrator.
+                      A guide will be assigned by the administrator.
                     </p>
                   </div>
                 </div>
               ) : (
                 <div className="flex items-start gap-4">
-                  <Avatar name={project.mentor.full_name} size={12} />
+                  <Avatar name={mentorContact.full_name} size={12} />
                   <div className="flex-1 space-y-3">
                     <div>
-                      <p className="font-black text-slate-900 text-base">{project.mentor.full_name}</p>
+                      <p className="font-black text-slate-900 text-base">{mentorContact.full_name}</p>
                       <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700">
                         <span className="material-symbols-outlined text-xs">verified</span>
                         Assigned
@@ -387,9 +388,9 @@ export default function MyProject() {
                     </div>
                     <div className="space-y-2 pt-1">
                       {[
-                        { label: "Designation", value: project.mentor.department || "Faculty Mentor" },
-                        { label: "Email", value: project.mentor.email || "-" },
-                        { label: "Department", value: project.mentor.department || "-" },
+                        { label: "Role", value: project?.guide ? "Project Guide" : "Mentor" },
+                        { label: "Email", value: mentorContact.email || "-" },
+                        { label: "Department", value: mentorContact.department || "-" },
                       ].map((row) => (
                         <div key={row.label}>
                           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{row.label}</p>

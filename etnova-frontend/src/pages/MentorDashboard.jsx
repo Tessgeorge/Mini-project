@@ -1,7 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import TeamWorkspace from "./Teamworkspace";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../config/supabaseClient";
+import ProfileMenu from "../components/ProfileMenu";
+import Modal from "../components/Modal";
 
 // ─── Icons ─────────────────────────────────────────────────────────────────
 const Icon = {
@@ -23,6 +25,8 @@ const Icon = {
   Building: () => (<svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg>),
   Hash: () => (<svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><line x1="4" y1="9" x2="20" y2="9" /><line x1="4" y1="15" x2="20" y2="15" /><line x1="10" y1="3" x2="8" y2="21" /><line x1="16" y1="3" x2="14" y2="21" /></svg>),
   Shield: () => (<svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>),
+  Settings: () => (<svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.9" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 .99-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 .99 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51.99H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51.99z" /></svg>),
+  Help: () => (<svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.9" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 1 1 5.82 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>),
 };
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -197,8 +201,8 @@ function ReviewModal({ project, onClose, onSubmit }) {
 }
 
 // ─── Mentor Profile Modal ────────────────────────────────────────────────────
-function MentorProfileModal({ profile, onClose, onSave }) {
-  const [editing, setEditing] = useState(false);
+function MentorProfileModal({ profile, onClose, onSave, onSignOut, startEditing = false }) {
+  const [editing, setEditing] = useState(startEditing);
   const [form, setForm] = useState({
     full_name: profile?.full_name || "",
     email: profile?.email || "",
@@ -213,14 +217,10 @@ function MentorProfileModal({ profile, onClose, onSave }) {
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState("");
 
-  // Gradient avatar colours derived from name
-  const colors = ["#14b8a6", "#3b82f6", "#8b5cf6", "#f59e0b", "#ef4444", "#ec4899"];
-  const colorIdx = [...(form.full_name || "M")].reduce((a, c) => a + c.charCodeAt(0), 0) % colors.length;
-  const avatarColor = colors[colorIdx];
   const initial = (form.full_name || "M")[0].toUpperCase();
 
-  const field = "w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-gray-50 text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-400 transition-all";
-  const fieldRO = "w-full border border-gray-100 rounded-xl px-4 py-2.5 text-sm bg-gray-50 text-gray-500 cursor-not-allowed";
+  const field = "w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-400 transition-all";
+  const fieldRO = "w-full border border-gray-100 rounded-xl px-4 py-2.5 text-sm bg-slate-100 text-gray-500 cursor-not-allowed";
 
   const handleSave = async () => {
     if (!form.full_name.trim()) { setErr("Full name is required."); return; }
@@ -249,63 +249,180 @@ function MentorProfileModal({ profile, onClose, onSave }) {
     }
   };
 
-  // Reusable info row for view mode
-  const InfoRow = ({ icon, label, value, highlight }) => (
-    <div className="flex items-start gap-3 py-3 border-b border-gray-50 last:border-0">
-      <div className="w-8 h-8 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center flex-shrink-0 text-gray-400 mt-0.5">
-        {icon}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">{label}</p>
-        {value
-          ? <p className={"text-sm font-semibold break-words " + (highlight ? "text-teal-700" : "text-gray-800")}>{value}</p>
-          : <p className="text-sm text-gray-300 italic font-normal">Not set</p>
-        }
-      </div>
-    </div>
-  );
-
-  // Field label helper
   const Label = ({ text, required }) => (
     <label className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-1.5">
       {text}{required && <span className="text-red-400 ml-0.5">*</span>}
     </label>
   );
 
+  const infoItems = [
+    { label: "Full Name", value: form.full_name || "Not set" },
+    { label: "Email", value: form.email || "Not set" },
+    { label: "Role", value: "Project Guide" },
+    { label: "Department", value: form.department || "-" },
+  ];
+
+  const openSupport = () => {
+    window.location.href = "mailto:support@etnova.ac.in?subject=Mentor%20Portal%20Support";
+  };
+
+  if (editing) {
+    return (
+      <Modal
+        isOpen
+        onClose={onClose}
+        title="Profile Settings"
+        maxWidth="max-w-2xl"
+      >
+        <div className="p-6 space-y-5">
+          {err && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {err}
+            </div>
+          )}
+
+          {saved && (
+            <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+              Profile updated successfully!
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-bold text-slate-900 mb-2">Email Address</label>
+            <input
+              value={form.email}
+              readOnly
+              className="w-full px-4 py-3 bg-slate-100 border border-slate-200 rounded-xl text-slate-500 cursor-not-allowed"
+            />
+            <p className="text-xs text-slate-500 mt-1">Email cannot be changed</p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-slate-900 mb-2">Full Name *</label>
+            <input
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900"
+              value={form.full_name}
+              onChange={(e) => setForm((prev) => ({ ...prev, full_name: e.target.value }))}
+              placeholder="Enter your full name"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
+              <label className="block text-sm font-bold text-slate-900 mb-2">Employee / Staff ID</label>
+              <input
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900"
+                value={form.employee_id || form.roll_number}
+                onChange={(e) => setForm((prev) => ({ ...prev, employee_id: e.target.value }))}
+                placeholder="e.g., EMP-2024-001"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-bold text-slate-900 mb-2">Specialization</label>
+              <input
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900"
+                value={form.specialization}
+                onChange={(e) => setForm((prev) => ({ ...prev, specialization: e.target.value }))}
+                placeholder="e.g., Machine Learning"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
+              <label className="block text-sm font-bold text-slate-900 mb-2">Department</label>
+              <input
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900"
+                value={form.department}
+                onChange={(e) => setForm((prev) => ({ ...prev, department: e.target.value }))}
+                placeholder="e.g., Computer Science"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-bold text-slate-900 mb-2">Phone Number</label>
+              <input
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900"
+                value={form.phone}
+                onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))}
+                placeholder="e.g., +91 9876543210"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-slate-900 mb-2">Bio</label>
+            <textarea
+              rows={4}
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900 resize-none"
+              value={form.bio}
+              onChange={(e) => setForm((prev) => ({ ...prev, bio: e.target.value }))}
+              placeholder="Short professional bio or research interests..."
+            />
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-3 rounded-xl bg-slate-100 text-slate-700 font-bold text-sm hover:bg-slate-200 transition-all"
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              className="flex-1 px-4 py-3 rounded-xl text-black font-bold text-sm hover:opacity-90 transition-all shadow-md"
+              style={{ backgroundColor: "#00D2C4" }}
+              disabled={saving}
+            >
+              {saving ? "Saving..." : "Save Changes"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#e8edf2]/92 backdrop-blur-sm p-4">
+      <div
+        className="w-full max-w-[380px] overflow-hidden rounded-[20px] bg-white shadow-[0_24px_60px_rgba(15,23,42,0.14)]"
+        style={{ fontFamily: '"Nunito", "Inter", "Segoe UI", sans-serif' }}
+      >
 
         {/* ── Header gradient banner ── */}
-        <div className="relative bg-gradient-to-br from-slate-900 via-slate-800 to-teal-900 px-6 pt-8 pb-14 flex-shrink-0">
-          <button onClick={onClose}
-            className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/10">
+        <div className="relative overflow-hidden bg-gradient-to-br from-[#0a9688] via-[#13b5a4] to-[#2dcfc0] px-6 pb-7 pt-6">
+          <div className="absolute -right-8 -top-10 h-28 w-28 rounded-full bg-white/14" />
+          <div className="absolute right-16 top-9 h-16 w-16 rounded-full bg-white/10" />
+          <div className="absolute -bottom-8 left-8 h-20 w-20 rounded-full bg-white/12" />
+
+          <button
+            onClick={onClose}
+            className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-xl bg-white/14 text-white/90 transition-all hover:bg-white/24"
+          >
             <Icon.X />
           </button>
 
-          <div className="text-center">
-            {/* Avatar circle */}
-            <div className="relative inline-block">
-              <div className="w-20 h-20 rounded-full border-4 border-white/20 flex items-center justify-center text-white text-3xl font-extrabold shadow-2xl mx-auto select-none"
-                style={{ background: `linear-gradient(135deg, ${avatarColor} 0%, #0284c7 100%)` }}>
-                {initial}
-              </div>
-              {/* Online dot */}
-              <span className="absolute bottom-0.5 right-0.5 w-5 h-5 rounded-full bg-emerald-400 border-2 border-white flex items-center justify-center">
-                <svg width="9" height="9" fill="none" stroke="white" strokeWidth="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
-              </span>
+          <div className="relative flex items-start gap-4">
+            <div className="flex h-16 w-16 items-center justify-center rounded-[18px] bg-white/18 text-2xl font-extrabold text-white shadow-[0_12px_24px_rgba(0,0,0,0.12)] ring-1 ring-white/20">
+              {initial}
             </div>
-
-            <h2 className="text-white font-extrabold text-xl mt-3 leading-tight">{form.full_name || "Mentor"}</h2>
-            <p className="text-teal-300 text-sm font-semibold mt-1">Project Guide</p>
-            {form.department && (
-              <p className="text-slate-400 text-xs mt-1">{form.department}</p>
-            )}
+            <div className="min-w-0 flex-1 pr-10">
+              <p className="truncate text-xl font-extrabold leading-tight text-white">{form.full_name || "Mentor"}</p>
+              <p className="mt-1 truncate text-sm font-semibold text-white/80">{form.email || "No email available"}</p>
+              <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-white/18 px-3 py-1 text-[11px] font-black uppercase tracking-[0.12em] text-white ring-1 ring-white/18">
+                <Icon.Shield />
+                Mentor
+              </div>
+            </div>
           </div>
         </div>
 
         {/* ── Floating role badge ── */}
-        <div className="flex justify-center -mt-5 relative z-10 flex-shrink-0">
+        <div className="hidden">
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1.5 bg-white border border-gray-200 shadow-lg text-gray-700 text-xs font-bold px-4 py-1.5 rounded-full">
               <Icon.Shield />
@@ -323,7 +440,7 @@ function MentorProfileModal({ profile, onClose, onSave }) {
         </div>
 
         {/* ── Scrollable body ── */}
-        <div className="flex-1 overflow-y-auto px-6 pb-6 pt-3">
+        <div className="px-5 pb-5 pt-5">
 
           {/* Success toast */}
           {saved && (
@@ -335,25 +452,54 @@ function MentorProfileModal({ profile, onClose, onSave }) {
 
           {!editing ? (
             /* ── View mode ── */
-            <div className="mt-1">
-              <InfoRow icon={<Icon.User />} label="Full Name" value={form.full_name} highlight />
-              <InfoRow icon={<Icon.Mail />} label="Email" value={form.email} />
-              <InfoRow
-                icon={<svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.1 19.79 19.79 0 0 1 1.59 4.5 2 2 0 0 1 3.56 2.34h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 9.91a16 16 0 0 0 6.07 6.07l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.73 17z" /></svg>}
-                label="Phone" value={form.phone}
-              />
-              <InfoRow icon={<Icon.Building />} label="Department" value={form.department} />
-              <InfoRow
-                icon={<svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>}
-                label="Specialization" value={form.specialization}
-              />
-              <InfoRow icon={<Icon.Hash />} label="Employee / Staff ID" value={form.employee_id || form.roll_number} />
-              {form.bio && (
-                <div className="py-3 border-b border-gray-50">
-                  <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-2">Bio</p>
-                  <p className="text-sm text-gray-600 leading-relaxed">{form.bio}</p>
-                </div>
-              )}
+            <div>
+              <div className="grid grid-cols-2 gap-3">
+                {infoItems.map((item) => (
+                  <div key={item.label} className="rounded-2xl border border-slate-200 bg-slate-50/90 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+                    <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">{item.label}</p>
+                    <p className="mt-1 break-words text-sm font-extrabold text-slate-900">{item.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-4 space-y-2">
+                <button
+                  onClick={() => {
+                    setEditing(true);
+                    setErr("");
+                  }}
+                  className="group flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition-all hover:-translate-y-0.5 hover:bg-slate-50 hover:shadow-sm"
+                >
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition-colors group-hover:bg-teal-50 group-hover:text-teal-700">
+                    <Icon.Settings />
+                  </div>
+                  <span className="flex-1 text-sm font-bold text-slate-800">Account Settings</span>
+                  <span className="text-slate-400 transition-transform group-hover:translate-x-0.5 group-hover:text-slate-600">
+                    <Icon.ChevronRight />
+                  </span>
+                </button>
+
+                <button
+                  onClick={openSupport}
+                  className="group flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition-all hover:-translate-y-0.5 hover:bg-slate-50 hover:shadow-sm"
+                >
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition-colors group-hover:bg-teal-50 group-hover:text-teal-700">
+                    <Icon.Help />
+                  </div>
+                  <span className="flex-1 text-sm font-bold text-slate-800">Help &amp; Support</span>
+                  <span className="text-slate-400 transition-transform group-hover:translate-x-0.5 group-hover:text-slate-600">
+                    <Icon.ChevronRight />
+                  </span>
+                </button>
+              </div>
+
+              <button
+                onClick={onSignOut}
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#0a9688] via-[#13b5a4] to-[#2dcfc0] px-4 py-3.5 text-sm font-extrabold text-white shadow-[0_18px_28px_rgba(19,181,164,0.28)] transition-all hover:-translate-y-0.5 hover:shadow-[0_22px_34px_rgba(19,181,164,0.34)]"
+              >
+                <Icon.Logout />
+                Sign Out
+              </button>
             </div>
           ) : (
             /* ── Edit mode ── */
@@ -434,6 +580,141 @@ function MentorProfileModal({ profile, onClose, onSave }) {
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function MentorProfileMenu({ profile, isOpen, onClose, onLogout, onEditProfile }) {
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) onClose();
+    };
+    if (isOpen) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isOpen, onClose]);
+
+  if (!isOpen || !profile) return null;
+
+  const initial = profile.full_name?.charAt(0).toUpperCase() || "M";
+  const infoItems = [
+    { label: "Full Name", value: profile.full_name },
+    { label: "Email", value: profile.email },
+    { label: "Role", value: "Project Guide" },
+    { label: "Department", value: profile.department },
+  ].filter((item) => item.value);
+
+  return (
+    <div
+      ref={menuRef}
+      className="absolute right-0 top-full mt-3 w-[calc(100vw-1rem)] max-w-sm sm:w-80 rounded-2xl border border-slate-100 overflow-hidden z-50"
+      style={{
+        background: "white",
+        boxShadow: "0 20px 60px rgba(0,0,0,0.12), 0 4px 16px rgba(0,0,0,0.07)",
+        animation: "menuFadeIn 0.18s ease",
+      }}
+    >
+      <style>{`
+        @keyframes menuFadeIn {
+          from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+      `}</style>
+
+      <div className="relative overflow-hidden">
+        <div
+          className="absolute inset-0"
+          style={{ background: "linear-gradient(135deg, #00D2C4 0%, #00897B 100%)" }}
+        />
+        <div className="absolute -top-6 -right-6 size-28 rounded-full opacity-10 bg-white" />
+        <div className="absolute -bottom-4 -left-4 size-20 rounded-full opacity-10 bg-white" />
+
+        <div className="relative z-10 px-5 pt-5 pb-4 flex items-center gap-4">
+          <div
+            className="size-14 rounded-2xl flex items-center justify-center font-black text-xl flex-shrink-0 shadow-md"
+            style={{ backgroundColor: "rgba(255,255,255,0.25)", color: "white", backdropFilter: "blur(8px)" }}
+          >
+            {initial}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-black text-white text-base leading-tight truncate">
+              {profile.full_name || "Mentor"}
+            </p>
+            <p className="text-white/70 text-xs mt-0.5 truncate">{profile.email}</p>
+            <span
+              className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
+              style={{ backgroundColor: "rgba(255,255,255,0.2)", color: "white" }}
+            >
+              <span className="material-symbols-outlined text-xs">school</span>
+              Mentor
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {infoItems.length > 0 && (
+        <div className="px-5 py-3 border-b border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-4">
+          {infoItems.map((item) => (
+            <div key={item.label}>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{item.label}</p>
+              <p className="text-sm font-black text-slate-900 mt-0.5 break-words">{item.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="py-1.5">
+        <button
+          onClick={() => {
+            onEditProfile?.();
+            onClose();
+          }}
+          className="w-full px-5 py-3 text-left flex items-center gap-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors group"
+        >
+          <span
+            className="size-8 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors group-hover:bg-teal-50"
+            style={{ backgroundColor: "rgba(0,210,196,0.08)" }}
+          >
+            <span className="material-symbols-outlined text-base" style={{ color: "#00897B" }}>
+              manage_accounts
+            </span>
+          </span>
+          <span className="flex-1">Account Settings</span>
+          <span className="material-symbols-outlined text-sm text-slate-300">chevron_right</span>
+        </button>
+
+        <button
+          onClick={openSupport}
+          className="w-full px-5 py-3 text-left flex items-center gap-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors group"
+        >
+          <span
+            className="size-8 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors group-hover:bg-indigo-50"
+            style={{ backgroundColor: "rgba(99,102,241,0.08)" }}
+          >
+            <span className="material-symbols-outlined text-base" style={{ color: "#6366f1" }}>
+              help
+            </span>
+          </span>
+          <span className="flex-1">Help &amp; Support</span>
+          <span className="material-symbols-outlined text-sm text-slate-300">chevron_right</span>
+        </button>
+      </div>
+
+      <div className="px-4 pb-4 pt-1 border-t border-slate-100">
+        <button
+          onClick={onLogout}
+          className="w-full py-3 rounded-xl font-black text-sm transition-all flex items-center justify-center gap-2 hover:opacity-90 active:scale-95"
+          style={{
+            background: "linear-gradient(135deg, #00D2C4 0%, #00897B 100%)",
+            color: "white",
+            boxShadow: "0 4px 14px rgba(0,210,196,0.35)",
+          }}
+        >
+          <span className="material-symbols-outlined text-base">logout</span>
+          Sign Out
+        </button>
       </div>
     </div>
   );
@@ -1330,7 +1611,8 @@ export default function MentorDashboard() {
   const [recentActivity, setRecentActivity] = useState([]);
   const [mentorProfile, setMentorProfile] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [showProfile, setShowProfile] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showProfileEditor, setShowProfileEditor] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -1424,7 +1706,37 @@ export default function MentorDashboard() {
     <div className="flex min-h-screen bg-gray-50">
       <Sidebar active={active} setActive={setActive} onSignOut={handleSignOut} />
       <div className="flex-1 flex flex-col overflow-hidden">
-        <Topbar active={active} mentorName={mentorProfile?.full_name} onProfileClick={() => setShowProfile(true)} />
+        <div className="relative">
+          <Topbar
+            active={active}
+            mentorName={mentorProfile?.full_name}
+            onProfileClick={() => {
+              setShowProfileMenu((value) => !value);
+            }}
+          />
+          {showProfileMenu && (
+            <div className="fixed top-14 right-2 sm:right-6 md:right-8 z-50">
+              <ProfileMenu
+                profile={mentorProfile}
+                isOpen={showProfileMenu}
+                onClose={() => setShowProfileMenu(false)}
+                onLogout={handleSignOut}
+                onEditProfile={() => {
+                  setShowProfileMenu(false);
+                  setShowProfileEditor(true);
+                }}
+                roleLabel="Mentor"
+                roleIcon="school"
+                infoItems={[
+                  { label: "Full Name", value: mentorProfile?.full_name },
+                  { label: "Email", value: mentorProfile?.email },
+                  { label: "Role", value: "Project Guide" },
+                  { label: "Department", value: mentorProfile?.department || "-" },
+                ]}
+              />
+            </div>
+          )}
+        </div>
         <main className="flex-1 overflow-y-auto p-8">
           {active === "overview" && (
             <OverviewTab
@@ -1460,14 +1772,16 @@ export default function MentorDashboard() {
       </div>
 
       {/* ── Mentor Profile Modal ── */}
-      {showProfile && mentorProfile && (
+      {showProfileEditor && mentorProfile && (
         <MentorProfileModal
           profile={mentorProfile}
-          onClose={() => setShowProfile(false)}
+          onClose={() => setShowProfileEditor(false)}
           onSave={(updated) => {
             setMentorProfile(updated);
-            setShowProfile(false);
+            setShowProfileEditor(false);
           }}
+          onSignOut={handleSignOut}
+          startEditing
         />
       )}
     </div>

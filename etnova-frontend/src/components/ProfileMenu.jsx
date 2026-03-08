@@ -1,6 +1,15 @@
 import { useEffect, useRef } from 'react';
 
-export default function ProfileMenu({ profile, isOpen, onClose, onLogout, onEditProfile }) {
+export default function ProfileMenu({
+    profile,
+    isOpen,
+    onClose,
+    onLogout,
+    onEditProfile,
+    roleLabel = 'Student',
+    roleIcon = 'school',
+    infoItems: customInfoItems = null,
+}) {
     const menuRef = useRef(null);
 
     useEffect(() => {
@@ -15,12 +24,13 @@ export default function ProfileMenu({ profile, isOpen, onClose, onLogout, onEdit
 
     const initial = profile.full_name?.charAt(0).toUpperCase() || 'U';
 
-    const infoItems = [
+    const defaultInfoItems = [
         { label: 'Roll No.', value: profile.roll_number },
         { label: 'Semester', value: profile.semester ? `Sem ${profile.semester}` : null },
         { label: 'Section', value: profile.class_section },
         { label: 'Department', value: profile.department },
     ].filter(i => i.value);
+    const infoItems = (customInfoItems || defaultInfoItems).filter(i => i?.value);
 
     return (
         <div
@@ -67,8 +77,8 @@ export default function ProfileMenu({ profile, isOpen, onClose, onLogout, onEdit
                         {/* Role badge */}
                         <span className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
                             style={{ backgroundColor: 'rgba(255,255,255,0.2)', color: 'white' }}>
-                            <span className="material-symbols-outlined text-xs">school</span>
-                            Student
+                            <span className="material-symbols-outlined text-xs">{roleIcon}</span>
+                            {roleLabel}
                         </span>
                     </div>
                 </div>
