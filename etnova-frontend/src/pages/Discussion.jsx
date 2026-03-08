@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import supabase from "../config/supabaseClient";
-import { fetchStudentBootstrapData } from "../services/studentData";
+import { apiRequest } from "../config/apiClient";
 
 /* ── Topics ───────────────────────────────────────────────────────────── */
 const TOPICS = [
@@ -169,6 +169,7 @@ export default function Discussion() {
     const extras = [];
     if (project.mentor) extras.push({ id: project.mentor.id, name: project.mentor.full_name, role: "Mentor" });
     if (project.guide) extras.push({ id: project.guide.id, name: project.guide.full_name, role: "Guide" });
+    if (project.coordinator) extras.push({ id: project.coordinator.id, name: project.coordinator.full_name, role: "Coordinator" });
     const seen = new Set();
     return [...team, ...extras].filter(p => p.id && !seen.has(p.id) && seen.add(p.id));
   }, [project]);
@@ -255,32 +256,34 @@ export default function Discussion() {
     (async () => {
       setLoading(true); setError("");
       try {
-        const { profile: p, projects } = await fetchStudentBootstrapData();
+        const [p, projects] = await Promise.all([apiRequest("/profile"), apiRequest("/projects")]);
         if (!mounted) return;
         setProfile(p);
         const cur = projects?.[0];
         if (!cur?.id) return;
-        setProject(cur);
-        await loadMessages(cur.id);
-        await loadReadState(cur.id, p.id);
+        const detail = await apiRequest(`/projects/${cur.id}`);
+        if (!mounted) return;
+        setProject(detail);
+        await loadMessages(detail.id);
+        await loadReadState(detail.id, p.id);
 
         const channel = supabase
-          .channel(`discussion-${cur.id}`, {
+          .channel(`discussion-${detail.id}`, {
             config: { presence: { key: p.id } },
           })
           .on(
             "postgres_changes",
-            { event: "INSERT", schema: "public", table: "discussion_messages", filter: `project_id=eq.${cur.id}` },
+            { event: "INSERT", schema: "public", table: "discussion_messages", filter: `project_id=eq.${detail.id}` },
             ({ new: nextRow }) => upsertRealtimeMessage(nextRow)
           )
           .on(
             "postgres_changes",
-            { event: "UPDATE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${cur.id}` },
+            { event: "UPDATE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${detail.id}` },
             ({ new: nextRow }) => upsertRealtimeMessage(nextRow)
           )
           .on(
             "postgres_changes",
-            { event: "DELETE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${cur.id}` },
+            { event: "DELETE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${detail.id}` },
             ({ old }) => removeRealtimeMessage(old?.id)
           )
           .on("presence", { event: "sync" }, () => syncOnlinePresence(channel))
@@ -330,7 +333,7 @@ export default function Discussion() {
     if (!project?.id) return undefined;
     const timer = setInterval(() => {
       if (channelStatusRef.current === "SUBSCRIBED") return;
-      loadMessages(project.id).catch(() => { });
+      loadMessages(project.id).catch(() => {});
     }, 2000);
     return () => clearInterval(timer);
   }, [loadMessages, project?.id]);
@@ -432,376 +435,347 @@ export default function Discussion() {
 
   /* ══════════════════════════════════════════════════════════════════ */
   return (
-    <div className="min-h-[calc(100vh-56px)] md:h-full etnova-bg p-0 md:p-4">
-      <div className="h-full flex flex-col lg:flex-row overflow-hidden rounded-none md:rounded-3xl border-0 md:border border-white/75 shadow-none md:shadow-[0_20px_60px_rgba(15,23,42,0.10)] bg-white/35 backdrop-blur-[6px]">
+    <div className="h-full etnova-bg p-3 md:p-4">
+      <div className="h-full flex overflow-hidden rounded-3xl border border-white/75 shadow-[0_20px_60px_rgba(15,23,42,0.10)] bg-white/35 backdrop-blur-[6px]">
 
-        {/* ─────────────── LEFT SIDEBAR ─────────────── */}
-        <div className="hidden lg:flex w-[300px] flex-shrink-0 flex-col glass-sidebar border-r border-white/70 overflow-hidden">
+      {/* ─────────────── LEFT SIDEBAR ─────────────── */}
+      <div className="w-[300px] flex-shrink-0 flex flex-col glass-sidebar border-r border-white/70 overflow-hidden">
 
-          {/* Project name */}
-          <div className="px-5 py-4 border-b border-white/70"
-            style={{ background: "linear-gradient(135deg,rgba(0,196,180,0.13) 0%,rgba(99,102,241,0.08) 100%)" }}>
-            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Team Discussion</p>
-            <h2 className="text-sm font-black text-slate-900 mt-1 truncate">{project.title}</h2>
-            <p className="text-[11px] text-slate-500 mt-1">{participants.length} participants</p>
-          </div>
+        {/* Project name */}
+        <div className="px-5 py-4 border-b border-white/70"
+          style={{ background: "linear-gradient(135deg,rgba(0,196,180,0.13) 0%,rgba(99,102,241,0.08) 100%)" }}>
+          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Team Discussion</p>
+          <h2 className="text-sm font-black text-slate-900 mt-1 truncate">{project.title}</h2>
+          <p className="text-[11px] text-slate-500 mt-1">{participants.length} participants</p>
+        </div>
 
-          {/* Topics */}
-          <div className="px-3 py-3 border-b border-white/70">
-            <p className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-400 px-2 mb-2">Channels</p>
-            <div className="space-y-1">
-              {TOPICS.map(t => {
-                const active = topic === t.id;
-                const unread = active ? 0 : (unreadByTopic[t.id] || 0);
-                return (
-                  <button key={t.id} onClick={() => setTopic(t.id)}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-left transition-all duration-150 ${active ? "font-bold text-slate-900" : "text-slate-500 hover:bg-white/60 hover:text-slate-800"
-                      }`}
-                    style={active ? {
-                      background: `linear-gradient(135deg, ${t.color}22 0%, ${t.color}0A 100%)`,
-                      border: `1px solid ${t.color}30`,
-                      boxShadow: `0 4px 14px ${t.color}20`,
-                    } : {}}>
-                    <span className="material-symbols-outlined text-[18px] flex-shrink-0"
-                      style={{ color: active ? t.color : "#94a3b8" }}>{t.icon}</span>
-                    <span className="flex-1 truncate text-xs">{t.id}</span>
-                    {unread > 0 && (
-                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full text-white flex-shrink-0 shadow-sm"
-                        style={{ backgroundColor: t.color, minWidth: 18, textAlign: "center" }}>{unread}</span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Participants */}
-          <div className="flex-1 overflow-y-auto px-3 py-3">
-            <p className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-400 px-2 mb-2">
-              Members · {participants.length}
-            </p>
-            <div className="space-y-1">
-              {participants.map(p => (
-                <div key={p.id} className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-white/55 transition-all border border-transparent hover:border-white/50">
-                  <div className="relative flex-shrink-0">
-                    <Avatar name={p.name} size={30} />
-                    {onlineUserIds[p.id] && (
-                      <span className="absolute bottom-0 right-0 size-2 rounded-full bg-emerald-400 ring-1 ring-white" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-bold text-slate-800 truncate">{p.name}</p>
-                    <p className="text-[10px] text-slate-400">{p.role}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+        {/* Topics */}
+        <div className="px-3 py-3 border-b border-white/70">
+          <p className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-400 px-2 mb-2">Channels</p>
+          <div className="space-y-1">
+            {TOPICS.map(t => {
+              const active = topic === t.id;
+              const unread = active ? 0 : (unreadByTopic[t.id] || 0);
+              return (
+                <button key={t.id} onClick={() => setTopic(t.id)}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-left transition-all duration-150 ${active ? "font-bold text-slate-900" : "text-slate-500 hover:bg-white/60 hover:text-slate-800"
+                    }`}
+                  style={active ? {
+                    background: `linear-gradient(135deg, ${t.color}22 0%, ${t.color}0A 100%)`,
+                    border: `1px solid ${t.color}30`,
+                    boxShadow: `0 4px 14px ${t.color}20`,
+                  } : {}}>
+                  <span className="material-symbols-outlined text-[18px] flex-shrink-0"
+                    style={{ color: active ? t.color : "#94a3b8" }}>{t.icon}</span>
+                  <span className="flex-1 truncate text-xs">{t.id}</span>
+                  {unread > 0 && (
+                    <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full text-white flex-shrink-0 shadow-sm"
+                      style={{ backgroundColor: t.color, minWidth: 18, textAlign: "center" }}>{unread}</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {/* ─────────────── CHAT PANEL ─────────────── */}
-        <div className="flex-1 flex flex-col overflow-hidden bg-white/35 min-h-0">
-
-          {/* Chat header */}
-          <div className="flex-shrink-0 flex items-center gap-3 px-3 sm:px-5 py-3.5 border-b border-white/70"
-            style={{ background: "rgba(255,255,255,0.90)", backdropFilter: "blur(20px)" }}>
-            <div className="size-9 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ backgroundColor: `${currentTopic.color}15` }}>
-              <span className="material-symbols-outlined text-[20px]" style={{ color: currentTopic.color }}>{currentTopic.icon}</span>
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-sm font-black text-slate-900 leading-none">{topic}</h1>
-              <p className="text-[11px] text-slate-400 mt-0.5">{participants.length} participants · {visibleMessages.length} messages</p>
-            </div>
+        {/* Participants */}
+        <div className="flex-1 overflow-y-auto px-3 py-3">
+          <p className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-400 px-2 mb-2">
+            Members · {participants.length}
+          </p>
+          <div className="space-y-1">
+            {participants.map(p => (
+              <div key={p.id} className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-white/55 transition-all border border-transparent hover:border-white/50">
+                <div className="relative flex-shrink-0">
+                  <Avatar name={p.name} size={30} />
+                  {onlineUserIds[p.id] && (
+                    <span className="absolute bottom-0 right-0 size-2 rounded-full bg-emerald-400 ring-1 ring-white" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-slate-800 truncate">{p.name}</p>
+                  <p className="text-[10px] text-slate-400">{p.role}</p>
+                </div>
+              </div>
+            ))}
           </div>
+        </div>
+      </div>
 
-          {/* Mobile topic tabs */}
-          <div className="lg:hidden flex-shrink-0 px-2.5 py-2 border-b border-white/70 bg-white/65 overflow-x-auto">
-            <div className="flex items-center gap-2 min-w-max">
-              {TOPICS.map((t) => {
-                const active = topic === t.id;
-                const unread = active ? 0 : (unreadByTopic[t.id] || 0);
-                return (
-                  <button
-                    key={`m-${t.id}`}
-                    onClick={() => setTopic(t.id)}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs whitespace-nowrap border ${active ? "font-bold text-slate-900" : "text-slate-500"}`}
-                    style={active ? {
-                      background: `linear-gradient(135deg, ${t.color}22 0%, ${t.color}0A 100%)`,
-                      borderColor: `${t.color}50`,
-                    } : { borderColor: "#e2e8f0", backgroundColor: "rgba(255,255,255,0.75)" }}
-                  >
-                    <span className="material-symbols-outlined text-sm" style={{ color: active ? t.color : "#94a3b8" }}>{t.icon}</span>
-                    <span>{t.id}</span>
-                    {unread > 0 && (
-                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full text-white" style={{ backgroundColor: t.color }}>
-                        {unread}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+      {/* ─────────────── CHAT PANEL ─────────────── */}
+      <div className="flex-1 flex flex-col overflow-hidden bg-white/35">
+
+        {/* Chat header */}
+        <div className="flex-shrink-0 flex items-center gap-3 px-5 py-3.5 border-b border-white/70"
+          style={{ background: "rgba(255,255,255,0.90)", backdropFilter: "blur(20px)" }}>
+          <div className="size-9 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ backgroundColor: `${currentTopic.color}15` }}>
+            <span className="material-symbols-outlined text-[20px]" style={{ color: currentTopic.color }}>{currentTopic.icon}</span>
           </div>
+          <div className="min-w-0">
+            <h1 className="text-sm font-black text-slate-900 leading-none">{topic}</h1>
+            <p className="text-[11px] text-slate-400 mt-0.5">{participants.length} participants · {visibleMessages.length} messages</p>
+          </div>
+        </div>
 
-          {/* Error banner */}
-          {error && (
-            <div className="px-4 py-2 bg-rose-50 border-b border-rose-100 flex items-center gap-2 text-sm text-rose-700">
-              <span className="material-symbols-outlined text-[16px]">error</span>{error}
-              <button onClick={() => setError("")} className="ml-auto"><span className="material-symbols-outlined text-sm">close</span></button>
-            </div>
-          )}
+        {/* Error banner */}
+        {error && (
+          <div className="px-4 py-2 bg-rose-50 border-b border-rose-100 flex items-center gap-2 text-sm text-rose-700">
+            <span className="material-symbols-outlined text-[16px]">error</span>{error}
+            <button onClick={() => setError("")} className="ml-auto"><span className="material-symbols-outlined text-sm">close</span></button>
+          </div>
+        )}
 
-          {/* ── Messages area ── */}
-          <div className="flex-1 overflow-y-auto"
-            style={{
-              backgroundImage: `
+        {/* ── Messages area ── */}
+        <div className="flex-1 overflow-y-auto"
+          style={{
+            backgroundImage: `
               radial-gradient(ellipse 90% 60% at 0% 0%,   rgba(0,196,180,0.07) 0%, transparent 55%),
               radial-gradient(ellipse 70% 50% at 100% 100%, rgba(99,102,241,0.06) 0%, transparent 50%),
               url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Ccircle cx='30' cy='30' r='1' fill='%23cbd5e1' fill-opacity='0.35'/%3E%3C/svg%3E")
             `,
-              backgroundColor: "#eef2f7",
-            }}>
+            backgroundColor: "#eef2f7",
+          }}>
 
-            {/* Inner wrapper: min-h-full + justify-end pins messages to bottom */}
-            <div className="min-h-full flex flex-col justify-end py-4">
+          {/* Inner wrapper: min-h-full + justify-end pins messages to bottom */}
+          <div className="min-h-full flex flex-col justify-end py-4">
 
-              {visibleMessages.length === 0 ? (
-                <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center select-none py-12">
-                  <div className="size-16 rounded-2xl flex items-center justify-center"
-                    style={{ backgroundColor: `${currentTopic.color}12`, border: `1.5px dashed ${currentTopic.color}40` }}>
-                    <span className="material-symbols-outlined text-3xl" style={{ color: `${currentTopic.color}90` }}>{currentTopic.icon}</span>
-                  </div>
-                  <p className="text-sm font-bold text-slate-600">No messages in #{topic}</p>
-                  <p className="text-xs text-slate-400">Say something to get started!</p>
+            {visibleMessages.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center select-none py-12">
+                <div className="size-16 rounded-2xl flex items-center justify-center"
+                  style={{ backgroundColor: `${currentTopic.color}12`, border: `1.5px dashed ${currentTopic.color}40` }}>
+                  <span className="material-symbols-outlined text-3xl" style={{ color: `${currentTopic.color}90` }}>{currentTopic.icon}</span>
                 </div>
-              ) : (
-                <div className="space-y-0.5 w-full px-3 md:px-4">
-                  {visibleMessages.map((msg, idx) => {
-                    const mine = msg.sender_id === profile?.id;
-                    const sender = participantMap[msg.sender_id];
-                    const prev = visibleMessages[idx - 1];
-                    const next = visibleMessages[idx + 1];
-                    const newDay = !prev || fmtDay(prev.created_at) !== fmtDay(msg.created_at);
-                    const samePrev = !newDay && prev?.sender_id === msg.sender_id;
-                    const sameNext = next?.sender_id === msg.sender_id && fmtDay(next.created_at) === fmtDay(msg.created_at);
-                    const isFirst = !samePrev; // first in sender-group
-                    const isLast = !sameNext; // last in sender-group
-                    const quotedMsg = msg.reply_to ? msgMap[msg.reply_to] : null;
-                    const quotedSender = quotedMsg ? participantMap[quotedMsg.sender_id] : null;
+                <p className="text-sm font-bold text-slate-600">No messages in #{topic}</p>
+                <p className="text-xs text-slate-400">Say something to get started!</p>
+              </div>
+            ) : (
+              <div className="space-y-0.5 w-full px-3 md:px-4">
+                {visibleMessages.map((msg, idx) => {
+                  const mine = msg.sender_id === profile?.id;
+                  const sender = participantMap[msg.sender_id];
+                  const prev = visibleMessages[idx - 1];
+                  const next = visibleMessages[idx + 1];
+                  const newDay = !prev || fmtDay(prev.created_at) !== fmtDay(msg.created_at);
+                  const samePrev = !newDay && prev?.sender_id === msg.sender_id;
+                  const sameNext = next?.sender_id === msg.sender_id && fmtDay(next.created_at) === fmtDay(msg.created_at);
+                  const isFirst = !samePrev; // first in sender-group
+                  const isLast = !sameNext; // last in sender-group
+                  const quotedMsg = msg.reply_to ? msgMap[msg.reply_to] : null;
+                  const quotedSender = quotedMsg ? participantMap[quotedMsg.sender_id] : null;
 
-                    return (
-                      <div key={msg.id}>
-                        {/* Day divider */}
-                        {newDay && (
-                          <div className="flex items-center gap-3 my-5">
-                            <div className="flex-1 h-px" style={{ backgroundColor: "rgba(148,163,184,0.3)" }} />
-                            <span className="px-3 py-1 rounded-full text-[11px] font-semibold text-slate-500 select-none"
-                              style={{ backgroundColor: "rgba(255,255,255,0.75)", border: "1px solid rgba(226,232,240,0.6)" }}>
-                              {fmtDay(msg.created_at)}
-                            </span>
-                            <div className="flex-1 h-px" style={{ backgroundColor: "rgba(148,163,184,0.3)" }} />
+                  return (
+                    <div key={msg.id}>
+                      {/* Day divider */}
+                      {newDay && (
+                        <div className="flex items-center gap-3 my-5">
+                          <div className="flex-1 h-px" style={{ backgroundColor: "rgba(148,163,184,0.3)" }} />
+                          <span className="px-3 py-1 rounded-full text-[11px] font-semibold text-slate-500 select-none"
+                            style={{ backgroundColor: "rgba(255,255,255,0.75)", border: "1px solid rgba(226,232,240,0.6)" }}>
+                            {fmtDay(msg.created_at)}
+                          </span>
+                          <div className="flex-1 h-px" style={{ backgroundColor: "rgba(148,163,184,0.3)" }} />
+                        </div>
+                      )}
+
+                      {/* Message row */}
+                      <div className={`flex items-end gap-2 ${mine ? "flex-row-reverse" : "flex-row"} ${!isFirst ? "mt-0.5" : "mt-3"}`}>
+
+                        {/* Avatar (other, only on last bubble of group) */}
+                        {!mine && (
+                          <div className="w-8 flex-shrink-0 flex items-end">
+                            {isLast ? <Avatar name={sender?.name} size={28} /> : <div className="w-7" />}
                           </div>
                         )}
 
-                        {/* Message row */}
-                        <div className={`flex items-end gap-2 ${mine ? "flex-row-reverse" : "flex-row"} ${!isFirst ? "mt-0.5" : "mt-3"}`}>
+                        <div className={`flex flex-col gap-0.5 max-w-[68%] ${mine ? "items-end" : "items-start"}`}>
 
-                          {/* Avatar (other, only on last bubble of group) */}
-                          {!mine && (
-                            <div className="w-8 flex-shrink-0 flex items-end">
-                              {isLast ? <Avatar name={sender?.name} size={28} /> : <div className="w-7" />}
-                            </div>
+                          {/* Sender name (other, first bubble only) */}
+                          {!mine && isFirst && (
+                            <p className="text-[11px] font-black ml-3 select-none"
+                              style={{ color: avatarColor(sender?.name || "U") }}>
+                              {sender?.name || "Participant"}
+                              <span className="ml-1 font-medium" style={{ color: "#94a3b8" }}>· {sender?.role}</span>
+                            </p>
                           )}
 
-                          <div className={`flex flex-col gap-0.5 max-w-[82%] md:max-w-[68%] ${mine ? "items-end" : "items-start"}`}>
-
-                            {/* Sender name (other, first bubble only) */}
-                            {!mine && isFirst && (
-                              <p className="text-[11px] font-black ml-3 select-none"
-                                style={{ color: avatarColor(sender?.name || "U") }}>
-                                {sender?.name || "Participant"}
-                                <span className="ml-1 font-medium" style={{ color: "#94a3b8" }}>· {sender?.role}</span>
-                              </p>
-                            )}
-
-                            {/* Bubble */}
-                            <div className="group relative">
-                              <div
-                                className="px-3.5 py-2.5 text-sm leading-relaxed relative"
-                                style={{
-                                  ...(mine ? {
-                                    background: "linear-gradient(130deg, #14B8A6 0%, #0F766E 100%)",
-                                    color: "#ffffff",
-                                    borderRadius: isFirst && isLast ? "18px 4px 18px 18px"
-                                      : isFirst ? "18px 4px 14px 18px"
-                                        : isLast ? "18px 4px 18px 18px"
-                                          : "18px 4px 14px 18px",
-                                    boxShadow: "0 1px 8px rgba(20,184,166,0.30), 0 1px 2px rgba(0,0,0,0.06)",
-                                  } : {
-                                    background: "rgba(255,255,255,0.96)",
-                                    color: "#1e293b",
-                                    border: "1px solid rgba(226,232,240,0.7)",
-                                    borderRadius: isFirst && isLast ? "4px 18px 18px 18px"
-                                      : isFirst ? "4px 18px 14px 18px"
-                                        : isLast ? "4px 18px 18px 18px"
-                                          : "4px 18px 14px 18px",
-                                    boxShadow: "0 1px 4px rgba(15,23,42,0.07)",
-                                  }),
-                                }}
-                              >
-                                {/* Quote block */}
-                                {quotedMsg && (
-                                  <div className="mb-2 pl-2.5 py-1.5 pr-2 rounded-lg text-xs leading-snug"
-                                    style={{
-                                      borderLeft: `3px solid ${mine ? "rgba(255,255,255,0.5)" : currentTopic.color}`,
-                                      backgroundColor: mine ? "rgba(255,255,255,0.15)" : `${currentTopic.color}0D`,
-                                    }}>
-                                    <p className="font-bold mb-0.5 truncate"
-                                      style={{ color: mine ? "rgba(255,255,255,0.85)" : currentTopic.color }}>
-                                      {quotedSender?.name || "Participant"}
-                                    </p>
-                                    <p className="truncate" style={{ color: mine ? "rgba(255,255,255,0.75)" : "#64748b" }}>
-                                      {quotedMsg.message}
-                                    </p>
-                                  </div>
-                                )}
-
-                                {/* Message text */}
-                                <p className="whitespace-pre-wrap break-words">{msg.message}</p>
-
-                                {/* Timestamp + tick */}
-                                <div className={`flex items-center gap-1 mt-1 ${mine ? "justify-end" : "justify-end"}`}>
-                                  <span className="text-[10px] select-none" style={{ color: mine ? "rgba(255,255,255,0.65)" : "#94a3b8" }}>
-                                    {fmtTime(msg.created_at)}
-                                  </span>
-                                  {mine && (
-                                    <span className="material-symbols-outlined select-none" style={{ fontSize: 12, color: "rgba(255,255,255,0.70)" }}>done_all</span>
-                                  )}
+                          {/* Bubble */}
+                          <div className="group relative">
+                            <div
+                              className="px-3.5 py-2.5 text-sm leading-relaxed relative"
+                              style={{
+                                ...(mine ? {
+                                  background: "linear-gradient(130deg, #14B8A6 0%, #0F766E 100%)",
+                                  color: "#ffffff",
+                                  borderRadius: isFirst && isLast ? "18px 4px 18px 18px"
+                                    : isFirst ? "18px 4px 14px 18px"
+                                      : isLast ? "18px 4px 18px 18px"
+                                        : "18px 4px 14px 18px",
+                                  boxShadow: "0 1px 8px rgba(20,184,166,0.30), 0 1px 2px rgba(0,0,0,0.06)",
+                                } : {
+                                  background: "rgba(255,255,255,0.96)",
+                                  color: "#1e293b",
+                                  border: "1px solid rgba(226,232,240,0.7)",
+                                  borderRadius: isFirst && isLast ? "4px 18px 18px 18px"
+                                    : isFirst ? "4px 18px 14px 18px"
+                                      : isLast ? "4px 18px 18px 18px"
+                                        : "4px 18px 14px 18px",
+                                  boxShadow: "0 1px 4px rgba(15,23,42,0.07)",
+                                }),
+                              }}
+                            >
+                              {/* Quote block */}
+                              {quotedMsg && (
+                                <div className="mb-2 pl-2.5 py-1.5 pr-2 rounded-lg text-xs leading-snug"
+                                  style={{
+                                    borderLeft: `3px solid ${mine ? "rgba(255,255,255,0.5)" : currentTopic.color}`,
+                                    backgroundColor: mine ? "rgba(255,255,255,0.15)" : `${currentTopic.color}0D`,
+                                  }}>
+                                  <p className="font-bold mb-0.5 truncate"
+                                    style={{ color: mine ? "rgba(255,255,255,0.85)" : currentTopic.color }}>
+                                    {quotedSender?.name || "Participant"}
+                                  </p>
+                                  <p className="truncate" style={{ color: mine ? "rgba(255,255,255,0.75)" : "#64748b" }}>
+                                    {quotedMsg.message}
+                                  </p>
                                 </div>
-                              </div>
+                              )}
 
-                              {/* Message actions on hover */}
-                              <div
-                                className={`absolute top-1/2 -translate-y-1/2 ${mine ? "-left-8" : "-right-8"} opacity-0 group-hover:opacity-100 transition-all flex flex-col gap-1`}
-                              >
-                                <button
-                                  onClick={() => setReplyTo(msg)}
-                                  title="Reply"
-                                  className="size-6 rounded-full flex items-center justify-center"
-                                  style={{ backgroundColor: "rgba(255,255,255,0.90)", border: "1px solid #e2e8f0", color: "#64748b", boxShadow: "0 1px 4px rgba(0,0,0,0.10)" }}
-                                >
-                                  <span className="material-symbols-outlined" style={{ fontSize: 14 }}>reply</span>
-                                </button>
+                              {/* Message text */}
+                              <p className="whitespace-pre-wrap break-words">{msg.message}</p>
 
+                              {/* Timestamp + tick */}
+                              <div className={`flex items-center gap-1 mt-1 ${mine ? "justify-end" : "justify-end"}`}>
+                                <span className="text-[10px] select-none" style={{ color: mine ? "rgba(255,255,255,0.65)" : "#94a3b8" }}>
+                                  {fmtTime(msg.created_at)}
+                                </span>
                                 {mine && (
-                                  <button
-                                    onClick={() => deleteMessage(msg)}
-                                    title={deletingMessageId === msg.id ? "Deleting..." : "Delete message"}
-                                    disabled={deletingMessageId === msg.id}
-                                    className="size-6 rounded-full flex items-center justify-center disabled:opacity-60"
-                                    style={{ backgroundColor: "rgba(255,245,245,0.95)", border: "1px solid #fecaca", color: "#ef4444", boxShadow: "0 1px 4px rgba(0,0,0,0.10)" }}
-                                  >
-                                    {deletingMessageId === msg.id ? (
-                                      <div className="size-3 border-2 border-rose-200 border-t-rose-500 rounded-full animate-spin" />
-                                    ) : (
-                                      <span className="material-symbols-outlined" style={{ fontSize: 14 }}>delete</span>
-                                    )}
-                                  </button>
+                                  <span className="material-symbols-outlined select-none" style={{ fontSize: 12, color: "rgba(255,255,255,0.70)" }}>done_all</span>
                                 )}
                               </div>
+                            </div>
+
+                            {/* Message actions on hover */}
+                            <div
+                              className={`absolute top-1/2 -translate-y-1/2 ${mine ? "-left-8" : "-right-8"} opacity-0 group-hover:opacity-100 transition-all flex flex-col gap-1`}
+                            >
+                              <button
+                                onClick={() => setReplyTo(msg)}
+                                title="Reply"
+                                className="size-6 rounded-full flex items-center justify-center"
+                                style={{ backgroundColor: "rgba(255,255,255,0.90)", border: "1px solid #e2e8f0", color: "#64748b", boxShadow: "0 1px 4px rgba(0,0,0,0.10)" }}
+                              >
+                                <span className="material-symbols-outlined" style={{ fontSize: 14 }}>reply</span>
+                              </button>
+
+                              {mine && (
+                                <button
+                                  onClick={() => deleteMessage(msg)}
+                                  title={deletingMessageId === msg.id ? "Deleting..." : "Delete message"}
+                                  disabled={deletingMessageId === msg.id}
+                                  className="size-6 rounded-full flex items-center justify-center disabled:opacity-60"
+                                  style={{ backgroundColor: "rgba(255,245,245,0.95)", border: "1px solid #fecaca", color: "#ef4444", boxShadow: "0 1px 4px rgba(0,0,0,0.10)" }}
+                                >
+                                  {deletingMessageId === msg.id ? (
+                                    <div className="size-3 border-2 border-rose-200 border-t-rose-500 rounded-full animate-spin" />
+                                  ) : (
+                                    <span className="material-symbols-outlined" style={{ fontSize: 14 }}>delete</span>
+                                  )}
+                                </button>
+                              )}
                             </div>
                           </div>
                         </div>
                       </div>
-                    );
-                  })}
-                  <div ref={endRef} className="h-1" />
-                </div>
-              )}
-            </div>{/* end min-h-full inner wrapper */}
-          </div>{/* end messages scroll area */}
+                    </div>
+                  );
+                })}
+                <div ref={endRef} className="h-1" />
+              </div>
+            )}
+          </div>{/* end min-h-full inner wrapper */}
+        </div>{/* end messages scroll area */}
 
-          {/* ── Input area ── */}
-          <div className="flex-shrink-0 border-t border-white/70 px-4 py-2.5"
-            style={{ background: "rgba(255,255,255,0.94)", backdropFilter: "blur(20px)" }}>
+        {/* ── Input area ── */}
+        <div className="flex-shrink-0 border-t border-white/70 px-4 py-2.5"
+          style={{ background: "rgba(255,255,255,0.94)", backdropFilter: "blur(20px)" }}>
 
-            {/* Typing indicator */}
-            {typingList.length > 0 && (
-              <div className="flex items-center gap-2 mb-2">
-                <div className="flex items-center gap-0.5 h-4">
-                  {[0, 1, 2].map(i => (
-                    <span key={i} className="size-1.5 rounded-full bg-slate-400 inline-block"
-                      style={{ animation: `wa-bounce 1.4s ease-in-out ${i * 0.2}s infinite` }} />
-                  ))}
-                </div>
-                <p className="text-xs text-slate-400">
-                  {typingList.slice(0, 2).join(", ")}{typingList.length > 2 ? ` +${typingList.length - 2}` : ""} {typingList.length > 1 ? "are" : "is"} typing…
+          {/* Typing indicator */}
+          {typingList.length > 0 && (
+            <div className="flex items-center gap-2 mb-2">
+              <div className="flex items-center gap-0.5 h-4">
+                {[0, 1, 2].map(i => (
+                  <span key={i} className="size-1.5 rounded-full bg-slate-400 inline-block"
+                    style={{ animation: `wa-bounce 1.4s ease-in-out ${i * 0.2}s infinite` }} />
+                ))}
+              </div>
+              <p className="text-xs text-slate-400">
+                {typingList.slice(0, 2).join(", ")}{typingList.length > 2 ? ` +${typingList.length - 2}` : ""} {typingList.length > 1 ? "are" : "is"} typing…
+              </p>
+            </div>
+          )}
+
+          {/* Reply preview */}
+          {replyTo && (
+            <div className="flex items-start gap-2 mb-2.5 px-3 py-2 rounded-xl"
+              style={{ borderLeft: `3px solid ${currentTopic.color}`, backgroundColor: `${currentTopic.color}0E` }}>
+              <span className="material-symbols-outlined text-sm flex-shrink-0 mt-0.5" style={{ color: currentTopic.color }}>reply</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-black truncate" style={{ color: currentTopic.color }}>
+                  {participantMap[replyTo.sender_id]?.name || "Participant"}
                 </p>
+                <p className="text-xs text-slate-500 truncate">{replyTo.message}</p>
               </div>
-            )}
-
-            {/* Reply preview */}
-            {replyTo && (
-              <div className="flex items-start gap-2 mb-2.5 px-3 py-2 rounded-xl"
-                style={{ borderLeft: `3px solid ${currentTopic.color}`, backgroundColor: `${currentTopic.color}0E` }}>
-                <span className="material-symbols-outlined text-sm flex-shrink-0 mt-0.5" style={{ color: currentTopic.color }}>reply</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[11px] font-black truncate" style={{ color: currentTopic.color }}>
-                    {participantMap[replyTo.sender_id]?.name || "Participant"}
-                  </p>
-                  <p className="text-xs text-slate-500 truncate">{replyTo.message}</p>
-                </div>
-                <button onClick={() => setReplyTo(null)}
-                  className="flex-shrink-0 size-5 rounded-full flex items-center justify-center hover:bg-white/60 transition-all">
-                  <span className="material-symbols-outlined text-slate-400" style={{ fontSize: 14 }}>close</span>
-                </button>
-              </div>
-            )}
-
-            {/* Compose row */}
-            <div className="flex items-end gap-2.5">
-              {/* Avatar */}
-              <div className="flex-shrink-0 pb-1">
-                <Avatar name={profile?.full_name} size={32} />
-              </div>
-
-              {/* Text input */}
-              <div className="flex-1 flex items-end gap-2 px-4 py-2 rounded-2xl"
-                style={{ background: "rgba(241,245,249,0.80)", border: "1.5px solid rgba(203,213,225,0.60)" }}>
-                <textarea
-                  ref={textareaRef}
-                  value={text}
-                  onChange={e => handleTextChange(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); postMessage(); } }}
-                  rows={1}
-                  placeholder={`Message #${topic}`}
-                  className="flex-1 bg-transparent text-sm text-slate-800 placeholder-slate-400 resize-none focus:outline-none leading-relaxed"
-                  style={{ minHeight: 22, maxHeight: 128 }}
-                />
-              </div>
-
-              {/* Send button */}
-              <button
-                onClick={postMessage}
-                disabled={sending || !text.trim() || !profile}
-                title="Send"
-                className="size-10 rounded-full flex items-center justify-center flex-shrink-0 transition-all disabled:opacity-40"
-                style={{
-                  background: "linear-gradient(135deg, #00C4B4 0%, #00897B 100%)",
-                  boxShadow: text.trim() ? "0 4px 14px rgba(0,196,180,0.40)" : "none",
-                  transform: text.trim() ? "scale(1.05)" : "scale(0.97)",
-                }}>
-                {sending
-                  ? <div className="size-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                  : <span className="material-symbols-outlined text-white" style={{ fontSize: 18, marginLeft: 2 }}>send</span>
-                }
+              <button onClick={() => setReplyTo(null)}
+                className="flex-shrink-0 size-5 rounded-full flex items-center justify-center hover:bg-white/60 transition-all">
+                <span className="material-symbols-outlined text-slate-400" style={{ fontSize: 14 }}>close</span>
               </button>
             </div>
+          )}
 
+          {/* Compose row */}
+          <div className="flex items-end gap-2.5">
+            {/* Avatar */}
+            <div className="flex-shrink-0 pb-1">
+              <Avatar name={profile?.full_name} size={32} />
+            </div>
 
+            {/* Text input */}
+            <div className="flex-1 flex items-end gap-2 px-4 py-2 rounded-2xl"
+              style={{ background: "rgba(241,245,249,0.80)", border: "1.5px solid rgba(203,213,225,0.60)" }}>
+              <textarea
+                ref={textareaRef}
+                value={text}
+                onChange={e => handleTextChange(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); postMessage(); } }}
+                rows={1}
+                placeholder={`Message #${topic}`}
+                className="flex-1 bg-transparent text-sm text-slate-800 placeholder-slate-400 resize-none focus:outline-none leading-relaxed"
+                style={{ minHeight: 22, maxHeight: 128 }}
+              />
+            </div>
+
+            {/* Send button */}
+            <button
+              onClick={postMessage}
+              disabled={sending || !text.trim()}
+              title="Send"
+              className="size-10 rounded-full flex items-center justify-center flex-shrink-0 transition-all disabled:opacity-40"
+              style={{
+                background: "linear-gradient(135deg, #00C4B4 0%, #00897B 100%)",
+                boxShadow: text.trim() ? "0 4px 14px rgba(0,196,180,0.40)" : "none",
+                transform: text.trim() ? "scale(1.05)" : "scale(0.97)",
+              }}>
+              {sending
+                ? <div className="size-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                : <span className="material-symbols-outlined text-white" style={{ fontSize: 18, marginLeft: 2 }}>send</span>
+              }
+            </button>
           </div>
+
+
         </div>
+      </div>
       </div>
 
       {/* Keyframes */}

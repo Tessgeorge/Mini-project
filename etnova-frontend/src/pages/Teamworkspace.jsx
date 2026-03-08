@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../config/supabaseClient";
 import { apiRequest } from "../config/apiClient";
+import MentorDiscussion from "./MentorDiscussion";
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 const Ic = {
@@ -1074,94 +1075,6 @@ function TabSubmissions({ projId, members, mentorName }) {
 
 
 // ══════════════════════════════════════════════════════════════════
-// TAB 3 — FEEDBACK / CHAT with realtime (unchanged)
-// ══════════════════════════════════════════════════════════════════
-function TabFeedback({ projId, mentorId }) {
-  const [msgs, setMsgs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-  const bottomRef = useRef(null);
-
-  useEffect(() => {
-    let channel;
-    const loadMessages = async () => {
-      setLoading(true);
-      const { data } = await supabase
-        .from("discussion_messages")
-        .select("id,project_id,sender_id,message,created_at,profiles:sender_id(full_name,role)")
-        .eq("project_id", projId).order("created_at", { ascending: true });
-      setMsgs(data || []);
-      setLoading(false);
-      channel = supabase.channel(`discussion-${projId}`)
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "discussion_messages", filter: `project_id=eq.${projId}` },
-          async (payload) => {
-            const { data: newMsg } = await supabase
-              .from("discussion_messages")
-              .select("id,project_id,sender_id,message,created_at,profiles:sender_id(full_name,role)")
-              .eq("id", payload.new.id).single();
-            if (newMsg) setMsgs(prev => [...prev, newMsg]);
-          }).subscribe();
-    };
-    loadMessages();
-    return () => { if (channel) supabase.removeChannel(channel); };
-  }, [projId]);
-
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
-
-  const send = async () => {
-    if (!text.trim()) return;
-    setSending(true);
-    await supabase.from("discussion_messages").insert([{ project_id: projId, sender_id: mentorId, message: text.trim() }]);
-    setText("");
-    setSending(false);
-  };
-
-  if (loading) return <Spin />;
-  return (
-    <div className="flex flex-col bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden" style={{ height: "calc(100vh - 340px)", minHeight: "460px" }}>
-      <div className="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-teal-50/30 flex items-center gap-3 flex-shrink-0">
-        <div className="w-9 h-9 rounded-xl bg-teal-100 flex items-center justify-center text-teal-600 flex-shrink-0"><Ic.Feedback /></div>
-        <div>
-          <p className="font-bold text-gray-800 text-sm">Team Discussions</p>
-          <p className="text-xs text-gray-400">Realtime discussions between guide and team</p>
-        </div>
-        <div className="ml-auto">
-        </div>
-      </div>
-      <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-        {msgs.map((msg, i) => {
-          const isMe = msg.sender_id === mentorId;
-          const name = msg.profiles?.full_name || "Unknown";
-          return (
-            <div key={msg.id || i} className={"flex gap-3 " + (isMe ? "flex-row-reverse" : "")}>
-              <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                style={{ background: isMe ? "#14b8a6" : "#3b82f6" }}>{name[0]}</div>
-              <div className={"max-w-[70%] px-4 py-2.5 rounded-2xl text-sm " + (isMe ? "bg-teal-400 text-white" : "bg-gray-100 text-gray-800")}>
-                {msg.message}
-              </div>
-            </div>
-          );
-        })}
-        <div ref={bottomRef} />
-      </div>
-      <div className="px-6 py-4 border-t border-gray-100 bg-gray-50">
-        <div className="flex gap-3">
-          <textarea rows={2} value={text} onChange={e => setText(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-            placeholder="Write a message..."
-            className="flex-1 border border-gray-200 rounded-2xl px-4 py-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-400 resize-none" />
-          <button onClick={send} disabled={sending || !text.trim()}
-            className="w-11 h-11 bg-teal-400 hover:bg-teal-500 disabled:opacity-40 text-white rounded-2xl flex items-center justify-center flex-shrink-0">
-            <Ic.Send />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════
 // TAB 4 — EVALUATION (unchanged)
 // ══════════════════════════════════════════════════════════════════
 function TabEvaluation({ projId, mentorId, mentorName, members, evaluations, setEvaluations, markingEnabled }) {
@@ -1372,14 +1285,15 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
   const logoUrl = getLogoUrl(proj);
   const projInitials = getInitials(proj?.title || "");
   const projGradient = gradFromTitle(proj?.title || "");
+  const isDiscussionTab = tab === "feedback";
 
   return (
     <div className="flex flex-col">
       {/* Hero Banner */}
-      <div className="rounded-2xl overflow-hidden mb-6" style={{ background: "linear-gradient(135deg,#0f172a 0%,#1e293b 55%,#134e4a 100%)" }}>
-        <div className="px-7 pt-6 pb-0">
+      <div className={`rounded-2xl overflow-hidden ${isDiscussionTab ? "mb-3" : "mb-6"}`} style={{ background: "linear-gradient(135deg,#0f172a 0%,#1e293b 55%,#134e4a 100%)" }}>
+        <div className={isDiscussionTab ? "px-5 pt-4 pb-0" : "px-7 pt-6 pb-0"}>
           {/* Breadcrumb */}
-          <nav className="flex items-center gap-2 text-sm mb-5">
+          <nav className={`flex items-center gap-2 ${isDiscussionTab ? "text-xs mb-3" : "text-sm mb-5"}`}>
             <button onClick={onBack} className="text-teal-300 hover:text-teal-200 font-semibold transition-colors">Home</button>
             <span className="text-slate-500">/</span>
             <button onClick={onBack} className="text-teal-300 hover:text-teal-200 font-semibold transition-colors">Projects</button>
@@ -1388,36 +1302,38 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
           </nav>
 
           {/* Project header row */}
-          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-5">
+          <div className={`flex flex-col sm:flex-row sm:items-start justify-between gap-4 ${isDiscussionTab ? "mb-3" : "mb-5"}`}>
             <div className="flex items-start gap-4">
-              <div className="relative w-14 h-14 rounded-2xl border border-white/20 shadow-lg shadow-black/30 overflow-hidden flex items-center justify-center flex-shrink-0">
+              <div className={`relative ${isDiscussionTab ? "w-11 h-11 rounded-xl" : "w-14 h-14 rounded-2xl"} border border-white/20 shadow-lg shadow-black/30 overflow-hidden flex items-center justify-center flex-shrink-0`}>
                 {logoUrl ? (
                   <img src={logoUrl} alt={proj.title || "Project"} className="w-full h-full object-cover" />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center text-white font-black text-sm tracking-wide" style={{ background: projGradient }}>
+                  <div className={`w-full h-full flex items-center justify-center text-white font-black ${isDiscussionTab ? "text-xs" : "text-sm"} tracking-wide`} style={{ background: projGradient }}>
                     {projInitials}
                   </div>
                 )}
-                <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-slate-900/80 border border-teal-300/30 text-[10px] text-teal-200 flex items-center justify-center">AI</span>
+                {!isDiscussionTab && <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-slate-900/80 border border-teal-300/30 text-[10px] text-teal-200 flex items-center justify-center">AI</span>}
               </div>
               <div>
-                <h1 className="text-2xl font-extrabold text-white leading-tight">{proj.title}</h1>
-                {proj.abstract && <p className="text-slate-400 text-sm mt-1 max-w-xl line-clamp-1 leading-relaxed">{proj.abstract}</p>}
-                <div className="flex items-center gap-3 mt-2.5 flex-wrap">
+                <h1 className={`${isDiscussionTab ? "text-xl" : "text-2xl"} font-extrabold text-white leading-tight`}>{proj.title}</h1>
+                {!isDiscussionTab && proj.abstract && <p className="text-slate-400 text-sm mt-1 max-w-xl line-clamp-1 leading-relaxed">{proj.abstract}</p>}
+                <div className={`flex items-center gap-3 ${isDiscussionTab ? "mt-1.5" : "mt-2.5"} flex-wrap`}>
                   <Pill status={proj.status} />
                   <span className="text-xs text-slate-400">Phase: <span className="text-teal-400 font-semibold">{PHASES[phaseIdx]}</span></span>
                   {avg && <span className={"text-xs font-bold " + sClr(avg)}>Avg: {avg}/100</span>}
                 </div>
               </div>
             </div>
-            <button onClick={() => setShowReview(true)}
-              className="flex items-center gap-2 bg-teal-400 hover:bg-teal-300 active:scale-95 text-slate-900 text-sm font-bold px-5 py-2.5 rounded-xl transition-all flex-shrink-0">
-              <Ic.Star /> Add Review
-            </button>
+            {!isDiscussionTab && (
+              <button onClick={() => setShowReview(true)}
+                className="flex items-center gap-2 bg-teal-400 hover:bg-teal-300 active:scale-95 text-slate-900 text-sm font-bold px-5 py-2.5 rounded-xl transition-all flex-shrink-0">
+                <Ic.Star /> Add Review
+              </button>
+            )}
           </div>
 
           {/* Members + progress */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-4 pb-4 border-t border-white/10">
+          {!isDiscussionTab && <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-4 pb-4 border-t border-white/10">
             <div className="flex items-center gap-1.5 flex-wrap">
               <div className="flex">
                 {members.slice(0, 5).map((tm, i) => (
@@ -1435,17 +1351,17 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
             <div className="flex items-center gap-3 min-w-[200px]">
               <span className="text-xs text-slate-400 whitespace-nowrap">Progress</span>
               <div className="flex-1 h-3 bg-white/10 border border-white/10 rounded-full overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-teal-300 via-cyan-400 to-blue-500 rounded-full transition-all duration-1000 ease-out" style={{ width: pct + "%" }} />
-              </div>
-              <span className="text-teal-300 font-bold text-xs whitespace-nowrap">{pct}%</span>
+              <div className="h-full bg-gradient-to-r from-teal-300 via-cyan-400 to-blue-500 rounded-full transition-all duration-1000 ease-out" style={{ width: pct + "%" }} />
             </div>
+            <span className="text-teal-300 font-bold text-xs whitespace-nowrap">{pct}%</span>
           </div>
+          </div>}
 
           {/* Inner tabs */}
           <div className="flex -mb-px overflow-x-auto scrollbar-none">
             {TABS.map(({ key, label, Icon }) => (
               <button key={key} onClick={() => setTab(key)}
-                className={"flex items-center gap-2 px-5 py-3.5 text-sm font-semibold border-b-2 transition-all whitespace-nowrap flex-shrink-0 " + (
+                className={"flex items-center gap-2 " + (isDiscussionTab ? "px-4 py-2.5 text-xs" : "px-5 py-3.5 text-sm") + " font-semibold border-b-2 transition-all whitespace-nowrap flex-shrink-0 " + (
                   tab === key ? "border-teal-400 text-teal-400 bg-white/5" : "border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5"
                 )}>
                 <Icon />{label}
@@ -1461,7 +1377,15 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
         <>
           {tab === "overview" && <TabOverview proj={proj} evaluations={evaluations} members={members} documents={documents} onAddReview={() => setShowReview(true)} onNavigateTab={setTab} mentorId={mentorId} mentorName={mentorName} milestoneDates={milestoneDates} />}
           {tab === "submissions" && <TabSubmissions projId={proj.id} members={members} mentorName={mentorName} />}
-          {tab === "feedback" && <TabFeedback projId={proj.id} mentorId={mentorId} />}
+          {tab === "feedback" && (
+            <MentorDiscussion
+              projId={proj.id}
+              mentorId={mentorId}
+              members={members}
+              mentorName={mentorName}
+              projectTitle={proj.title}
+            />
+          )}
           {tab === "evaluation" && <TabEvaluation projId={proj.id} mentorId={mentorId} mentorName={mentorName} members={members} evaluations={evaluations} setEvaluations={setEvaluations} markingEnabled={markingEnabled} />}
           {tab === "activity" && <TabActivity evaluations={evaluations} documents={documents} />}
         </>

@@ -1349,7 +1349,7 @@ export default function MentorDashboard() {
           const { data: projData } = await supabase
             .from("projects")
             .select(`*, team_members(id, student_id, role, profiles:student_id(full_name, email, roll_number, department))`)
-            .eq("guide_id", profile.id)
+            .or(`guide_id.eq.${profile.id},mentor_id.eq.${profile.id}`)
             .order("created_at", { ascending: false });
           setProjects(projData || []);
 
