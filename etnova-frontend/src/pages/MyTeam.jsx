@@ -438,14 +438,55 @@ function NewTaskModal({ open, onClose, onSave, saving, form, setForm, teamMember
   );
 }
 
-// Main component
+// ─── Helper: fetch coordinator by student's class_section ────────────────────
+// classes table uses names like "S6 CSE A", "S6 CSE B", "S6 CSE C"
+// student profiles store class_section as just "A", "B", "C"
+// So we match with ilike("%A") — ends with the section letter
+// Then find the coordinator whose class_id = that class row's id
+async function fetchCoordinatorBySection(classSection) {
+  if (!classSection) return null;
+  try {
+    // Step 1: find class row where class_name ends with the section letter
+    // e.g. student has "B" → match "S6 CSE B"
+    const { data: classes, error: classErr } = await supabase
+      .from("classes")
+      .select("id, class_name");
 
+    if (classErr || !classes?.length) return null;
+
+    // Match: class_name ends with " <section>" (e.g. " A", " B", " C")
+    const section = classSection.trim().toUpperCase();
+    const classRow = classes.find(c =>
+      c.class_name?.trim().toUpperCase().endsWith(" " + section) ||
+      c.class_name?.trim().toUpperCase() === section
+    );
+
+    if (!classRow?.id) return null;
+
+    // Step 2: find coordinator whose class_id = this class's id
+    const { data: coord, error: coordErr } = await supabase
+      .from("profiles")
+      .select("id, full_name, email, phone, department")
+      .eq("is_coordinator", true)
+      .eq("class_id", classRow.id)
+      .limit(1)
+      .single();
+
+    if (coordErr || !coord) return null;
+    return coord;
+  } catch {
+    return null;
+  }
+}
+
+// Main component
 
 export default function MyTeam() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [project, setProject] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [coordinator, setCoordinator] = useState(null); // ← NEW: fetched directly
   const [showJoinRequests, setShowJoinRequests] = useState(false);
   const [pendingJoinRequestsCount, setPendingJoinRequestsCount] = useState(0);
 
@@ -471,14 +512,32 @@ export default function MyTeam() {
     }
   }, []);
 
-  const loadTeam = async ({ force = false } = {}) => {
-    setLoading(true);
+  const loadTeam = useCallback(async ({ force = false, background = false } = {}) => {
+    if (!background) {
+      setLoading(true);
+    }
     setError("");
     try {
       const { profile: p, projects } = await fetchStudentBootstrapData({ force });
       setProfile(p);
       const current = projects?.[0];
       setProject(current || null);
+
+      // ── COORDINATOR FIX ──────────────────────────────────────────────────
+      // The backend enrichment may not resolve coordinator correctly because
+      // it relies on a 'classes' table chain. We directly query profiles by
+      // is_coordinator=TRUE and class_section matching the student's section.
+      const studentSection = p?.class_section;
+      if (studentSection) {
+        const coord = await fetchCoordinatorBySection(studentSection);
+        // Prefer freshly fetched over whatever backend returned
+        setCoordinator(coord || current?.coordinator || null);
+      } else {
+        // Fallback to whatever backend returned
+        setCoordinator(current?.coordinator || null);
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       const myMembership = (current?.team_members || []).find((member) => member.student_id === p?.id);
       if (myMembership?.role === "leader") {
         await refreshPendingJoinRequestsCount(current.id);
@@ -488,11 +547,13 @@ export default function MyTeam() {
     } catch (e) {
       setError(e.message || "Failed to load team");
     } finally {
-      setLoading(false);
+      if (!background) {
+        setLoading(false);
+      }
     }
-  };
+  }, [refreshPendingJoinRequestsCount]);
 
-  useEffect(() => { loadTeam(); }, []);
+  useEffect(() => { loadTeam(); }, [loadTeam]);
 
   // Load tasks from Supabase
   const loadTasks = async (projectId) => {
@@ -514,6 +575,26 @@ export default function MyTeam() {
   useEffect(() => {
     if (project?.id) loadTasks(project.id);
   }, [project?.id]);
+
+  useEffect(() => {
+    if (!project?.id) return undefined;
+
+    const channel = supabase
+      .channel(`student-team-project-${project.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "projects", filter: `id=eq.${project.id}` },
+        async () => {
+          invalidateStudentBootstrapCache();
+          await loadTeam({ force: true, background: true });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadTeam, project?.id]);
 
   const saveTask = async () => {
     if (!taskForm.title.trim()) return;
@@ -565,7 +646,9 @@ export default function MyTeam() {
   const myRole = me?.role || "member";
   const locked = isLocked(project?.status);
   const mentorContact = project?.guide || project?.mentor || null;
-  const coordinatorContact = project?.coordinator || null;
+
+  // ── Use the freshly-fetched coordinator state instead of project?.coordinator
+  const coordinatorContact = coordinator;
 
   useEffect(() => {
     if (!project?.id || myRole !== "leader") return undefined;
@@ -713,7 +796,6 @@ export default function MyTeam() {
                 <h2 className="text-xl font-black text-slate-900">{teamName}</h2>
                 <div className="flex items-center gap-3 mt-1 flex-wrap">
                   <span className="text-xs font-bold text-slate-400 font-mono tracking-wider">{teamId}</span>
-                  {/*<span className="text-slate-300">.</span>*/}
                   <span className="text-xs text-slate-500">Formed {fmtDate(project.created_at)}</span>
                 </div>
               </div>
@@ -762,18 +844,18 @@ export default function MyTeam() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
-                    <th className="text-left px-4 sm:px-6 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500">Name</th>
-                    <th className="text-left px-4 sm:px-6 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500">Register No.</th>
-                    <th className="text-left px-4 sm:px-6 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500">Department</th>
-                    <th className="text-left px-4 sm:px-6 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500">Role</th>
-                    {myRole === "leader" && (
+                  <th className="text-left px-4 sm:px-6 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500">Name</th>
+                  <th className="text-left px-4 sm:px-6 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500">Register No.</th>
+                  <th className="text-left px-4 sm:px-6 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500">Department</th>
+                  <th className="text-left px-4 sm:px-6 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500">Role</th>
+                  {myRole === "leader" && (
                     <th className="text-left px-4 sm:px-6 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500">Actions</th>
-                    )}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {teamMembers.length === 0 ? (
-                    <tr>
+                  )}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {teamMembers.length === 0 ? (
+                  <tr>
                     <td colSpan={myRole === "leader" ? 5 : 4} className="px-4 sm:px-6 py-10 text-center text-sm text-slate-400">
                       No team members found.
                     </td>
@@ -879,6 +961,7 @@ export default function MyTeam() {
               <SectionHead icon="admin_panel_settings" title="Administrative Contacts" />
             </div>
             <div className="divide-y divide-slate-50">
+
               {/* Mentor */}
               <div className="p-5 flex items-start gap-4">
                 <div className="size-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-slate-100">
@@ -897,6 +980,8 @@ export default function MyTeam() {
                   )}
                 </div>
               </div>
+
+              {/* Coordinator — now populated from is_coordinator + class_section match */}
               <div className="p-5 flex items-start gap-4">
                 <div className="size-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-slate-100">
                   <span className="material-symbols-outlined text-base text-slate-500">hub</span>
@@ -908,12 +993,19 @@ export default function MyTeam() {
                       <p className="font-black text-slate-900 text-sm">{coordinatorContact.full_name}</p>
                       <p className="text-xs text-slate-500 mt-0.5">{coordinatorContact.department || "Faculty"}</p>
                       <p className="text-xs text-slate-400 mt-0.5">{coordinatorContact.email}</p>
+                      {/* show the section this coordinator manages */}
+                      {profile?.class_section && (
+                        <p className="text-[10px] text-slate-300 mt-1">
+                          Section {profile.class_section} Coordinator
+                        </p>
+                      )}
                     </>
                   ) : (
                     <p className="text-sm text-slate-400 italic">Not assigned</p>
                   )}
                 </div>
               </div>
+
             </div>
           </div>
         </div>
@@ -922,7 +1014,7 @@ export default function MyTeam() {
         <div className="rounded-2xl border border-blue-200 bg-blue-50/70 backdrop-blur overflow-hidden">
           <div className="px-4 sm:px-6 py-4 border-b border-blue-100 flex items-center gap-2">
             <span className="material-symbols-outlined text-base text-blue-600">info</span>
-            <h3 className="font-black text-blue-900 text-sm">System Constraints & Rules</h3>
+            <h3 className="font-black text-blue-900 text-sm">System Constraints &amp; Rules</h3>
           </div>
           <div className="p-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
             {[
@@ -1008,8 +1100,6 @@ export default function MyTeam() {
             </div>
           </div>
         </div>
-
-
 
       </div>
 

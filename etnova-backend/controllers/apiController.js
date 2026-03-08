@@ -68,10 +68,109 @@ const enrichProjectsWithAllocations = async (projects) => {
     };
   });
 };
+
+const getProjectAnchorProfile = (project) => {
+  const members = Array.isArray(project?.team_members) ? project.team_members : [];
+  const leader = members.find((member) => member?.role === 'leader');
+  const orderedMembers = leader ? [leader, ...members.filter((member) => member !== leader)] : members;
+
+  for (const member of orderedMembers) {
+    const profile = Array.isArray(member?.profiles) ? member.profiles[0] : member?.profiles;
+    if (profile) return profile;
+  }
+
+  return null;
+};
+
+const enrichProjectsWithCoordinatorFallback = async (projects) => {
+  if (!projects?.length) return projects || [];
+
+  const missingCoordinatorProjects = projects.filter((project) => !project?.coordinator);
+  if (!missingCoordinatorProjects.length) return projects;
+
+  const classNames = [...new Set(
+    missingCoordinatorProjects
+      .map((project) => {
+        const anchor = getProjectAnchorProfile(project);
+        return String(anchor?.batch || anchor?.class_section || '').trim();
+      })
+      .filter(Boolean)
+  )];
+
+  if (!classNames.length) return projects;
+
+  const { data: classes, error: classesError } = await supabase
+    .from('classes')
+    .select('id, class_name')
+    .in('class_name', classNames);
+
+  if (classesError) {
+    throw classesError;
+  }
+
+  const classIdByName = new Map(
+    (classes || []).map((row) => [String(row.class_name || '').trim(), row.id])
+  );
+  const classIds = [...new Set((classes || []).map((row) => row.id).filter(Boolean))];
+  if (!classIds.length) return projects;
+
+  const { data: coordinatorRows, error: coordinatorsError } = await supabase
+    .from('profiles')
+    .select('id, full_name, email, department, class_id')
+    .eq('is_coordinator', true)
+    .in('class_id', classIds)
+    .order('full_name', { ascending: true });
+
+  if (coordinatorsError) {
+    throw coordinatorsError;
+  }
+
+  const coordinatorsByClassId = new Map();
+  (coordinatorRows || []).forEach((row) => {
+    if (!row?.class_id) return;
+    if (!coordinatorsByClassId.has(row.class_id)) {
+      coordinatorsByClassId.set(row.class_id, []);
+    }
+    coordinatorsByClassId.get(row.class_id).push({
+      id: row.id,
+      full_name: row.full_name,
+      email: row.email,
+      department: row.department,
+    });
+  });
+
+  return projects.map((project) => {
+    if (project?.coordinator) return project;
+
+    const anchor = getProjectAnchorProfile(project);
+    const className = String(anchor?.batch || anchor?.class_section || '').trim();
+    const classId = classIdByName.get(className);
+    if (!classId) return project;
+
+    const candidates = coordinatorsByClassId.get(classId) || [];
+    if (!candidates.length) return project;
+
+    const departmentMatch = anchor?.department
+      ? candidates.find((candidate) => candidate.department === anchor.department)
+      : null;
+
+    return {
+      ...project,
+      coordinator: departmentMatch || candidates[0],
+    };
+  });
+};
+
+const enrichStudentProjects = async (projects) => {
+  const withAllocations = await enrichProjectsWithAllocations(projects || []);
+  return enrichProjectsWithCoordinatorFallback(withAllocations);
+};
+
 const STUDENT_PROJECT_SELECT = `
   *,
   mentor:profiles!projects_mentor_id_fkey(id, full_name, email, department),
   guide:profiles!projects_guide_id_fkey(id, full_name, email, department),
+  coordinator:profiles!projects_coordinator_id_fkey(id, full_name, email, department),
   team_members(
     id,
     student_id,
@@ -212,7 +311,7 @@ export const getDashboardData = async (req, res) => {
         .order('created_at', { ascending: false });
 
       if (projectsError) throw projectsError;
-      projects = await enrichProjectsWithAllocations(projectRows || []);
+      projects = await enrichStudentProjects(projectRows || []);
     }
 
     const notifications = notificationsResult.data || [];
@@ -280,8 +379,6 @@ export const createProject = async (req, res) => {
 
 export const getProjects = async (req, res) => {
   try {
-    let query = supabase.from('projects');
-
     // Filter based on user role
     if (req.userRole === 'student') {
       // Students see projects where they are a member.
@@ -305,7 +402,7 @@ export const getProjects = async (req, res) => {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return res.json(await enrichProjectsWithAllocations(data || []));
+      return res.json(await enrichStudentProjects(data || []));
     } else if (req.userRole === 'mentor') {
       const mentorProjectsSelect = `
         *,
@@ -328,7 +425,7 @@ export const getProjects = async (req, res) => {
 
       // Coordinators additionally get projects from their batch scope.
       if (!req.isCoordinator || !req.userBatch) {
-        return res.json(assignedProjects || []);
+        return res.json(await enrichProjectsWithAllocations(assignedProjects || []));
       }
 
       const { data: teamRows, error: teamRowsError } = await supabase
@@ -375,18 +472,22 @@ export const getProjects = async (req, res) => {
       return res.json(await enrichProjectsWithAllocations(combined));
     } else if (req.userRole === 'admin') {
       // Admins see all projects
-      query = query
+      const { data, error } = await supabase
+        .from('projects')
         .select(`
           *,
           team_members(count),
           evaluations(count),
           mentor:profiles!projects_mentor_id_fkey(full_name, email),
           guide:profiles!projects_guide_id_fkey(full_name, email)
-        `);
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return res.json(await enrichProjectsWithAllocations(data || []));
     }
 
-    if (error) throw error;
-    res.json(await enrichProjectsWithAllocations(data || []));
+    return res.json([]);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -400,9 +501,10 @@ export const getProjectById = async (req, res) => {
         *,
         mentor:profiles!projects_mentor_id_fkey(id, full_name, email, department),
         guide:profiles!projects_guide_id_fkey(id, full_name, email, department),
+        coordinator:profiles!projects_coordinator_id_fkey(id, full_name, email, department),
         team_members(
           id, student_id, role, joined_at,
-          profiles!team_members_student_id_fkey(id, full_name, email, roll_number, department)
+          profiles!team_members_student_id_fkey(id, full_name, email, roll_number, department, batch, class_section)
         ),
         documents(id, document_type, status, uploaded_at, file_name, file_url, version, feedback),
         evaluations(id, evaluation_type, obtained_marks, max_marks, feedback, created_at),
@@ -415,7 +517,7 @@ export const getProjectById = async (req, res) => {
       .single();
 
     if (error) throw error;
-    const [enriched] = await enrichProjectsWithAllocations([data]);
+    const [enriched] = await enrichStudentProjects([data]);
     res.json(enriched || null);
   } catch (error) {
     res.status(500).json({ message: error.message });
