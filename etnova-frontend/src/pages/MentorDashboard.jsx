@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import TeamWorkspace from "./Teamworkspace";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../config/supabaseClient";
@@ -54,11 +54,115 @@ function Spinner() {
 }
 
 function formatClassScore(value) {
-  if (value == null || Number.isNaN(Number(value))) return "—";
+  if (value == null || Number.isNaN(Number(value))) return "-";
   return Number(value).toFixed(1);
 }
 
-// ─── Mini Bar Chart (pure CSS/SVG, no library needed) ──────────────────────
+const REVIEW_STAGE_ORDER = ["Idea", "Abstract", "Zeroth Review", "First Review", "Second Review", "Final Review"];
+
+function normalizeReviewStageName(stageName) {
+  const value = String(stageName || "").trim().toLowerCase();
+  if (value === "0th review") return "Zeroth Review";
+  if (value === "1st review") return "First Review";
+  if (value === "2nd review") return "Second Review";
+  if (value === "zeroth review") return "Zeroth Review";
+  if (value === "first review") return "First Review";
+  if (value === "second review") return "Second Review";
+  if (value === "idea") return "Idea";
+  if (value === "abstract") return "Abstract";
+  if (value === "final review") return "Final Review";
+  return String(stageName || "").trim();
+}
+
+function reviewStageOrderIndex(stageName) {
+  const normalized = normalizeReviewStageName(stageName).toLowerCase();
+  const idx = REVIEW_STAGE_ORDER.findIndex((name) => name.toLowerCase() === normalized);
+  return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
+}
+
+function formatDeadlineDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function toDateInputValue(value) {
+  if (!value) return "";
+  return value.slice(0, 10);
+}
+
+function toTimeInputValue(value) {
+  if (!value) return "";
+  return value.slice(11, 16) || "";
+}
+
+function buildDeadlineIso(datePart, timePart) {
+  if (!datePart || !timePart) return "";
+  return datePart + "T" + timePart + ":00";
+}
+
+function sortReviewStages(rows) {
+  const grouped = new Map();
+
+  for (const row of rows || []) {
+    const normalizedName = normalizeReviewStageName(row?.stage_name);
+    const current = grouped.get(normalizedName);
+
+    if (!current) {
+      grouped.set(normalizedName, {
+        ...row,
+        stage_name: normalizedName,
+      });
+      continue;
+    }
+
+    grouped.set(normalizedName, {
+      ...current,
+      ...row,
+      stage_name: normalizedName,
+      coordinator_deadline: row?.coordinator_deadline || current.coordinator_deadline || null,
+      deadline: row?.deadline || current.deadline || null,
+      stage_order: Number.isFinite(Number(current?.stage_order)) ? current.stage_order : row?.stage_order,
+      is_active: Boolean(current?.is_active || row?.is_active),
+      student_deadline_set_by_coordinator: Boolean(current?.student_deadline_set_by_coordinator || row?.student_deadline_set_by_coordinator),
+    });
+  }
+
+  return REVIEW_STAGE_ORDER.map((stageName, index) => {
+    const matched = grouped.get(stageName);
+    if (matched) {
+      return {
+        ...matched,
+        stage_name: stageName,
+        stage_order: Number.isFinite(Number(matched?.stage_order)) ? Number(matched.stage_order) : index,
+        is_active: Boolean(matched?.is_active),
+        student_deadline_set_by_coordinator: Boolean(matched?.student_deadline_set_by_coordinator),
+      };
+    }
+
+    return {
+      id: `canonical-${index}` ,
+      stage_name: stageName,
+      stage_order: index,
+      deadline: null,
+      coordinator_deadline: null,
+      is_active: false,
+      student_deadline_set_by_coordinator: false,
+    };
+  }).sort((a, b) => {
+    const orderA = Number.isFinite(Number(a?.stage_order)) ? Number(a.stage_order) : reviewStageOrderIndex(a?.stage_name);
+    const orderB = Number.isFinite(Number(b?.stage_order)) ? Number(b.stage_order) : reviewStageOrderIndex(b?.stage_name);
+    if (orderA !== orderB) return orderA - orderB;
+    return String(normalizeReviewStageName(a?.stage_name)).localeCompare(String(normalizeReviewStageName(b?.stage_name)));
+  });
+}
 function WeeklyChart({ projects, evaluations }) {
   // Build last-7-days evaluation count per day
   const days = [];
@@ -798,7 +902,32 @@ function Topbar({ active, mentorName, onProfileClick, showMyClass }) {
   );
 }
 
-function MyClassTab({ classData, loading }) {
+function MyClassTab({ classData, loading, onSaveStudentDeadline }) {
+  const [deadlineDrafts, setDeadlineDrafts] = useState({});
+  const [editingDeadlineIds, setEditingDeadlineIds] = useState({});
+  const [savingDeadlineId, setSavingDeadlineId] = useState("");
+  const [deadlineError, setDeadlineError] = useState("");
+  const [deadlineNotice, setDeadlineNotice] = useState("");
+
+  useEffect(() => {
+    const nextDrafts = (classData?.reviewStages || []).reduce((acc, stage) => {
+      acc[stage.id] = {
+        date: toDateInputValue(stage.deadline),
+        time: toTimeInputValue(stage.deadline),
+      };
+      return acc;
+    }, {});
+    const nextEditing = (classData?.reviewStages || []).reduce((acc, stage) => {
+      acc[stage.id] = Boolean(stage.coordinator_deadline && !stage.deadline);
+      return acc;
+    }, {});
+    setDeadlineDrafts(nextDrafts);
+    setEditingDeadlineIds(nextEditing);
+    setSavingDeadlineId("");
+    setDeadlineError("");
+    setDeadlineNotice("");
+  }, [classData]);
+
   if (loading) return <Spinner />;
   if (!classData) {
     return (
@@ -815,7 +944,78 @@ function MyClassTab({ classData, loading }) {
     pendingEvaluations,
     classAverageScore,
     projects,
+    reviewStages = [],
+    deadlineLoadError = "",
   } = classData;
+
+  const handleDraftChange = (stageId, key, value) => {
+    setDeadlineDrafts((prev) => ({
+      ...prev,
+      [stageId]: {
+        date: prev[stageId]?.date || "",
+        time: prev[stageId]?.time || "",
+        [key]: value,
+      },
+    }));
+    setDeadlineError("");
+    setDeadlineNotice("");
+  };
+
+  const handleEditDeadline = (stage) => {
+    if (!stage?.coordinator_deadline) return;
+    setDeadlineDrafts((prev) => ({
+      ...prev,
+      [stage.id]: {
+        date: toDateInputValue(stage.deadline),
+        time: toTimeInputValue(stage.deadline),
+      },
+    }));
+    setEditingDeadlineIds((prev) => ({
+      ...prev,
+      [stage.id]: true,
+    }));
+    setDeadlineError("");
+    setDeadlineNotice("");
+  };
+
+  const handleSaveDeadline = async (stage) => {
+    const draft = deadlineDrafts[stage.id] || { date: "", time: "" };
+    const nextDeadline = buildDeadlineIso(draft.date, draft.time);
+    if (!nextDeadline) {
+      setDeadlineError("Student deadline date and time are required.");
+      return;
+    }
+
+    if (!stage?.coordinator_deadline) {
+      setDeadlineError("Student deadline can be edited only after the admin enables this stage.");
+      return;
+    }
+
+    if (stage.coordinator_deadline) {
+      const studentDate = new Date(nextDeadline);
+      const adminDate = new Date(stage.coordinator_deadline);
+      if (!Number.isNaN(studentDate.getTime()) && !Number.isNaN(adminDate.getTime()) && studentDate >= adminDate) {
+        setDeadlineError("Student deadline must be earlier than admin evaluation deadline.");
+        return;
+      }
+    }
+
+    setSavingDeadlineId(stage.id);
+    setDeadlineError("");
+    setDeadlineNotice("");
+    try {
+      await onSaveStudentDeadline(stage.id, nextDeadline);
+      setDeadlineNotice(`Student deadline updated for ${normalizeReviewStageName(stage.stage_name)}.`);
+      setEditingDeadlineIds((prev) => ({
+        ...prev,
+        [stage.id]: !stage.deadline && false,
+      }));
+    } catch (error) {
+      setDeadlineError(error.message || "Failed to update student deadline.");
+    } finally {
+      setSavingDeadlineId("");
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -832,6 +1032,150 @@ function MyClassTab({ classData, loading }) {
             <p className="text-2xl font-extrabold text-gray-900 mt-2 break-words">{item.value}</p>
           </div>
         ))}
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-100">
+          <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Review Deadlines</p>
+          <p className="text-sm text-gray-500 mt-1">Admin sets evaluation deadlines. Coordinators set student submission deadlines for this class.</p>
+        </div>
+
+        {deadlineLoadError ? (
+          <div className="mx-5 mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {deadlineLoadError}
+          </div>
+        ) : null}
+        {deadlineError ? (
+          <div className="mx-5 mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {deadlineError}
+          </div>
+        ) : null}
+        {deadlineNotice ? (
+          <div className="mx-5 mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            {deadlineNotice}
+          </div>
+        ) : null}
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 p-5">
+          <section className="rounded-2xl border border-gray-100 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+              <p className="text-sm font-bold text-gray-800">Admin Evaluation Schedule</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-white border-b border-gray-100">
+                  <tr>
+                    <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-gray-400">Stage</th>
+                    <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-gray-400">Evaluation Deadline</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {reviewStages.length === 0 ? (
+                    <tr>
+                      <td colSpan={2} className="px-4 py-8 text-center text-gray-400">No review stages found for this class.</td>
+                    </tr>
+                  ) : reviewStages.map((stage) => (
+                    <tr key={`admin-${stage.id}`}>
+                      <td className="px-4 py-3 font-semibold text-gray-800">{normalizeReviewStageName(stage.stage_name)}</td>
+                      <td className="px-4 py-3 text-gray-600">{formatDeadlineDateTime(stage.coordinator_deadline)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-gray-100 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+              <p className="text-sm font-bold text-gray-800">Student Submission Deadlines</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-white border-b border-gray-100">
+                  <tr>
+                    <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-gray-400">Stage</th>
+                    <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-gray-400">Student Deadline</th>
+                    <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-gray-400">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {reviewStages.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="px-4 py-8 text-center text-gray-400">No review stages found for this class.</td>
+                    </tr>
+                  ) : reviewStages.map((stage) => {
+                    const draft = deadlineDrafts[stage.id] || { date: "", time: "" };
+                    const isStageEnabled = Boolean(stage.coordinator_deadline);
+                    const isEditing = editingDeadlineIds[stage.id] ?? Boolean(isStageEnabled && !stage.deadline);
+                    const isSaving = savingDeadlineId === stage.id;
+                    const hasAdminDeadline = Boolean(stage.coordinator_deadline);
+                    const showSavedStudentDeadline = Boolean(isStageEnabled && stage.deadline && stage.student_deadline_set_by_coordinator);
+
+                    return (
+                      <tr key={`student-${stage.id}`}>
+                        <td className="px-4 py-3 font-semibold text-gray-800">{normalizeReviewStageName(stage.stage_name)}</td>
+                        <td className="px-4 py-3">
+                          {isEditing ? (
+                            <div className="flex flex-col sm:flex-row gap-2">
+                              <input
+                                type="date"
+                                value={draft.date}
+                                onChange={(event) => handleDraftChange(stage.id, "date", event.target.value)}
+                                disabled={!isStageEnabled}
+                                className="rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                              />
+                              <input
+                                type="time"
+                                value={draft.time}
+                                onChange={(event) => handleDraftChange(stage.id, "time", event.target.value)}
+                                disabled={!isStageEnabled}
+                                className="rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                              />
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-3">
+                              <span className="text-sm font-medium text-gray-700">
+                                {showSavedStudentDeadline ? formatDeadlineDateTime(stage.deadline) : "-"}
+                              </span>
+                              {showSavedStudentDeadline ? (
+                                <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 border border-emerald-200">
+                                  Saved
+                                </span>
+                              ) : null}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {isEditing ? (
+                            <button
+                              type="button"
+                              onClick={() => handleSaveDeadline(stage)}
+                              disabled={isSaving || !hasAdminDeadline || !isStageEnabled}
+                              className="inline-flex items-center gap-2 rounded-xl bg-teal-500 px-3.5 py-2 text-xs font-bold text-white hover:bg-teal-600 disabled:cursor-not-allowed disabled:bg-gray-300"
+                            >
+                              <Icon.Save />
+                              {isSaving ? "Saving..." : "Save"}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleEditDeadline(stage)}
+                              disabled={isSaving || !hasAdminDeadline || !isStageEnabled}
+                              className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
+                            >
+                              <Icon.Edit />
+                              Edit
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -1703,6 +2047,84 @@ export default function MentorDashboard() {
   const [myClassLoading, setMyClassLoading] = useState(false);
   const navigate = useNavigate();
 
+  const loadCoordinatorClassData = useCallback(async (classId) => {
+    const [{ data: classRow }, { data: classProjects }, { data: reviewStageRows, error: reviewStageError }] = await Promise.all([
+      supabase.from("classes").select("id, class_name").eq("id", classId).single(),
+      supabase.from("projects").select("id, title, guide_id, status").eq("class_id", classId),
+      supabase
+        .from("review_stages")
+        .select("id, stage_name, deadline, coordinator_deadline, stage_order, is_active, student_deadline_set_by_coordinator")
+        .eq("class_id", classId)
+        .order("stage_order", { ascending: true }),
+    ]);
+
+    const projectsInClass = classProjects || [];
+    const projectIds = projectsInClass.map((project) => project.id);
+    const guideIds = Array.from(new Set(projectsInClass.map((project) => project.guide_id).filter(Boolean)));
+
+    const [membersRes, evalRes, guidesRes] = await Promise.all([
+      projectIds.length
+        ? supabase.from("team_members").select("id, project_id").in("project_id", projectIds)
+        : Promise.resolve({ data: [] }),
+      projectIds.length
+        ? supabase.from("evaluations").select("id, project_id, score").in("project_id", projectIds)
+        : Promise.resolve({ data: [] }),
+      guideIds.length
+        ? supabase.from("profiles").select("id, full_name").in("id", guideIds)
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    const members = membersRes.data || [];
+    const classEvals = evalRes.data || [];
+    const guides = guidesRes.data || [];
+    const guideMap = new Map(guides.map((guide) => [guide.id, guide.full_name || "Unassigned"]));
+    const memberCountByProject = members.reduce((acc, item) => {
+      acc[item.project_id] = (acc[item.project_id] || 0) + 1;
+      return acc;
+    }, {});
+    const evalByProject = classEvals.reduce((acc, item) => {
+      if (!acc[item.project_id]) acc[item.project_id] = [];
+      acc[item.project_id].push(Number(item.score) || 0);
+      return acc;
+    }, {});
+
+    const projectRows = projectsInClass.map((project) => {
+      const scores = evalByProject[project.id] || [];
+      const avgScore = scores.length
+        ? scores.reduce((sum, score) => sum + score, 0) / scores.length
+        : null;
+      return {
+        ...project,
+        teamSize: memberCountByProject[project.id] || 0,
+        evaluationCount: scores.length,
+        avgScore,
+        guideName: guideMap.get(project.guide_id) || "Unassigned",
+      };
+    });
+
+    const evaluatedCount = projectRows.filter((item) => item.evaluationCount > 0).length;
+    const allScores = classEvals.map((item) => Number(item.score)).filter((score) => !Number.isNaN(score));
+    const classAverageScore = allScores.length
+      ? allScores.reduce((sum, score) => sum + score, 0) / allScores.length
+      : null;
+
+    return {
+      classId,
+      classTitle: classRow?.class_name || "Untitled Class",
+      totalProjects: projectRows.length,
+      evaluatedProjects: evaluatedCount,
+      pendingEvaluations: projectRows.length - evaluatedCount,
+      classAverageScore,
+      projects: projectRows,
+      reviewStages: sortReviewStages(reviewStageRows || []),
+      deadlineLoadError: reviewStageError
+        ? (/coordinator_deadline/i.test(String(reviewStageError.message || ""))
+          ? 'The "coordinator_deadline" column is missing in "review_stages". Run the Supabase ALTER TABLE migration first.'
+          : (reviewStageError.message || "Failed to load review deadlines."))
+        : "",
+    };
+  }, []);
+
   useEffect(() => {
     const init = async () => {
       setLoading(true);
@@ -1753,69 +2175,7 @@ export default function MentorDashboard() {
 
         if (profile?.is_coordinator && profile?.class_id) {
           setMyClassLoading(true);
-          const [{ data: classRow }, { data: classProjects }] = await Promise.all([
-            supabase.from("classes").select("id, class_name").eq("id", profile.class_id).single(),
-            supabase.from("projects").select("id, title, guide_id, status").eq("class_id", profile.class_id),
-          ]);
-
-          const projectsInClass = classProjects || [];
-          const projectIds = projectsInClass.map((project) => project.id);
-          const guideIds = Array.from(new Set(projectsInClass.map((project) => project.guide_id).filter(Boolean)));
-
-          const [membersRes, evalRes, guidesRes] = await Promise.all([
-            projectIds.length
-              ? supabase.from("team_members").select("id, project_id").in("project_id", projectIds)
-              : Promise.resolve({ data: [] }),
-            projectIds.length
-              ? supabase.from("evaluations").select("id, project_id, score").in("project_id", projectIds)
-              : Promise.resolve({ data: [] }),
-            guideIds.length
-              ? supabase.from("profiles").select("id, full_name").in("id", guideIds)
-              : Promise.resolve({ data: [] }),
-          ]);
-
-          const members = membersRes.data || [];
-          const classEvals = evalRes.data || [];
-          const guides = guidesRes.data || [];
-          const guideMap = new Map(guides.map((guide) => [guide.id, guide.full_name || "Unassigned"]));
-          const memberCountByProject = members.reduce((acc, item) => {
-            acc[item.project_id] = (acc[item.project_id] || 0) + 1;
-            return acc;
-          }, {});
-          const evalByProject = classEvals.reduce((acc, item) => {
-            if (!acc[item.project_id]) acc[item.project_id] = [];
-            acc[item.project_id].push(Number(item.score) || 0);
-            return acc;
-          }, {});
-
-          const projectRows = projectsInClass.map((project) => {
-            const scores = evalByProject[project.id] || [];
-            const avgScore = scores.length
-              ? scores.reduce((sum, score) => sum + score, 0) / scores.length
-              : null;
-            return {
-              ...project,
-              teamSize: memberCountByProject[project.id] || 0,
-              evaluationCount: scores.length,
-              avgScore,
-              guideName: guideMap.get(project.guide_id) || "Unassigned",
-            };
-          });
-
-          const evaluatedCount = projectRows.filter((item) => item.evaluationCount > 0).length;
-          const allScores = classEvals.map((item) => Number(item.score)).filter((score) => !Number.isNaN(score));
-          const classAverageScore = allScores.length
-            ? allScores.reduce((sum, score) => sum + score, 0) / allScores.length
-            : null;
-
-          setMyClassData({
-            classTitle: classRow?.class_name || "Untitled Class",
-            totalProjects: projectRows.length,
-            evaluatedProjects: evaluatedCount,
-            pendingEvaluations: projectRows.length - evaluatedCount,
-            classAverageScore,
-            projects: projectRows,
-          });
+          setMyClassData(await loadCoordinatorClassData(profile.class_id));
           setMyClassLoading(false);
         } else {
           setMyClassData(null);
@@ -1828,7 +2188,7 @@ export default function MentorDashboard() {
       finally { setLoading(false); }
     };
     init();
-  }, []);
+  }, [loadCoordinatorClassData, navigate]);
 
   const isCoordinatorWithClass = Boolean(mentorProfile?.is_coordinator && mentorProfile?.class_id);
 
@@ -1837,6 +2197,38 @@ export default function MentorDashboard() {
       setActive("overview");
     }
   }, [active, isCoordinatorWithClass]);
+
+  useEffect(() => {
+    if (!mentorProfile?.is_coordinator || !mentorProfile?.class_id) return undefined;
+
+    const refreshMyClassData = async () => {
+      try {
+        setMyClassData(await loadCoordinatorClassData(mentorProfile.class_id));
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    const channel = supabase
+      .channel(`mentor-my-class-review-stages-${mentorProfile.class_id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "review_stages",
+          filter: `class_id=eq.${mentorProfile.class_id}`,
+        },
+        async () => {
+          await refreshMyClassData();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadCoordinatorClassData, mentorProfile?.class_id, mentorProfile?.is_coordinator]);
 
   // Time ago helper
   function getTimeAgo(ts) {
@@ -1865,6 +2257,37 @@ export default function MentorDashboard() {
         ...prev.slice(0, 4),
       ]);
     } catch (e) { console.error(e); }
+  };
+
+  const handleSaveStudentDeadline = async (stageId, deadlineIso) => {
+    if (!mentorProfile?.class_id) {
+      throw new Error("No coordinator class assigned.");
+    }
+
+    const targetStage = myClassData?.reviewStages?.find((stage) => stage.id === stageId);
+    if (!targetStage) {
+      throw new Error("Review stage not found.");
+    }
+
+    if (targetStage.coordinator_deadline) {
+      const studentDate = new Date(deadlineIso);
+      const adminDate = new Date(targetStage.coordinator_deadline);
+      if (!Number.isNaN(studentDate.getTime()) && !Number.isNaN(adminDate.getTime()) && studentDate >= adminDate) {
+        throw new Error("Student deadline must be earlier than admin evaluation deadline.");
+      }
+    }
+
+    const { error } = await supabase
+      .from("review_stages")
+      .update({ deadline: deadlineIso, student_deadline_set_by_coordinator: true })
+      .eq("id", stageId)
+      .eq("class_id", mentorProfile.class_id);
+
+    if (error) {
+      throw new Error(error.message || "Failed to update student deadline.");
+    }
+
+    setMyClassData(await loadCoordinatorClassData(mentorProfile.class_id));
   };
 
   const handleSignOut = async () => {
@@ -1943,6 +2366,7 @@ export default function MentorDashboard() {
             <MyClassTab
               classData={myClassData}
               loading={myClassLoading}
+              onSaveStudentDeadline={handleSaveStudentDeadline}
             />
           )}
         </main>

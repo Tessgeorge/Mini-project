@@ -3,6 +3,9 @@ export default function DeadlineModal({
   isOpen,
   deadlineDate,
   deadlineTime,
+  title = "Edit Deadline",
+  dateLabel = "Deadline Date",
+  timeLabel = "Deadline Time",
   onDeadlineDateChange,
   onDeadlineTimeChange,
   onClose,
@@ -12,8 +15,8 @@ export default function DeadlineModal({
   if (!isOpen || !stage) return null;
 
   const handleSave = () => {
-    if (!deadlineDate) return;
-    onSave(stage.id, `${deadlineDate}T${deadlineTime || "09:00"}:00`);
+    if (!deadlineDate || !deadlineTime) return;
+    onSave(stage.id, `${deadlineDate}T${deadlineTime}:00`);
   };
 
   return (
@@ -25,12 +28,12 @@ export default function DeadlineModal({
         aria-label="Close modal"
       />
       <div className="relative w-full max-w-md bg-white rounded-xl shadow-xl border border-gray-100 p-6 animate-scaleIn">
-        <h3 className="text-lg font-semibold text-gray-800">Edit Deadline</h3>
+        <h3 className="text-lg font-semibold text-gray-800">{title}</h3>
         <p className="mt-1 text-sm text-gray-500">{stage.name}</p>
 
         <div className="mt-5 space-y-4">
           <div>
-            <label className="block text-sm text-gray-600 mb-1.5">Deadline Date</label>
+            <label className="block text-sm text-gray-600 mb-1.5">{dateLabel}</label>
               <input
                 type="date"
                 value={deadlineDate}
@@ -39,7 +42,7 @@ export default function DeadlineModal({
               />
           </div>
           <div>
-            <label className="block text-sm text-gray-600 mb-1.5">Deadline Time</label>
+            <label className="block text-sm text-gray-600 mb-1.5">{timeLabel}</label>
               <input
                 type="time"
                 value={deadlineTime}
@@ -60,7 +63,7 @@ export default function DeadlineModal({
           <button
             type="button"
             onClick={handleSave}
-            disabled={!deadlineDate || saving}
+            disabled={!deadlineDate || !deadlineTime || saving}
             className="px-4 py-2 rounded-lg bg-teal-600 text-white font-semibold hover:bg-teal-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {saving ? "Saving..." : "Save"}

@@ -325,7 +325,7 @@ export default function StudentDashboard() {
 
     const { data, error: deadlineError } = await supabase
       .from("review_stages")
-      .select("stage_name, deadline, is_active, is_completed, is_locked")
+      .select("stage_name, deadline, is_active, is_completed, is_locked, student_deadline_set_by_coordinator")
       .eq("class_id", classId)
       .order("deadline", { ascending: true });
 
@@ -334,6 +334,7 @@ export default function StudentDashboard() {
     }
 
     const mappedDeadlines = (data || [])
+      .filter((row) => Boolean(row.student_deadline_set_by_coordinator))
       .map((row) => ({
         stage: row.stage_name || "Review Stage",
         date: toDateKey(row.deadline),

@@ -12,7 +12,11 @@ function statusTone(status) {
   return "bg-gray-100 text-gray-700 border-gray-200";
 }
 
-export default function ReviewTimeline({ stages, selectedClass }) {
+export default function ReviewTimeline({
+  stages,
+  selectedClass,
+  deadlineLabel = "Deadline",
+}) {
   if (!stages.length) {
     return (
       <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-6 text-sm text-gray-500">
@@ -34,7 +38,7 @@ export default function ReviewTimeline({ stages, selectedClass }) {
               }`}
             >
               <p className="text-sm font-semibold text-gray-800">{stage.name}</p>
-              <p className="text-xs text-gray-500 mt-1">Deadline: {formatDeadline(stage.deadline)}</p>
+              <p className="text-xs text-gray-500 mt-1">{deadlineLabel}: {formatDeadline(stage.deadline)}</p>
               <span className={`inline-flex mt-3 px-2.5 py-1 rounded-full text-xs font-semibold border ${statusTone(stage.status)}`}>
                 {stage.status}
               </span>

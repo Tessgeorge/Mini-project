@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import supabase from "../config/supabaseClient";
 import Sidebar from "../components/admin/Sidebar";
@@ -17,10 +17,6 @@ const STATUS = {
   LOCKED: "locked",
 };
 const STAGE_ORDER = ["Idea", "Abstract", "Zeroth Review", "First Review", "Second Review", "Final Review"];
-const DEADLINE_FILTER = {
-  STAGE: "stage_deadline",
-  MENTOR_EVAL: "mentor_evaluation_deadline",
-};
 
 let submissionCountStrategy = null;
 let submissionCountStrategyChecked = false;
@@ -46,14 +42,6 @@ function normalizeStageName(stageName) {
   return String(stageName || "").trim();
 }
 
-function stageAliases(stageName) {
-  const normalized = normalizeStageName(stageName);
-  if (normalized === "Zeroth Review") return ["Zeroth Review", "0th Review"];
-  if (normalized === "First Review") return ["First Review", "1st Review"];
-  if (normalized === "Second Review") return ["Second Review", "2nd Review"];
-  return [normalized];
-}
-
 function stageOrderIndex(stageName) {
   const normalized = normalizeStageName(stageName).toLowerCase();
   const idx = STAGE_ORDER.findIndex((name) => name.toLowerCase() === normalized);
@@ -72,7 +60,7 @@ function toDatePart(iso) {
   return iso.slice(0, 10);
 }
 
-function toTimePart(iso, fallback = "09:00") {
+function toTimePart(iso, fallback = "") {
   if (!iso) return fallback;
   return iso.slice(11, 16) || fallback;
 }
@@ -133,12 +121,11 @@ async function fetchSubmissionCountsByStage(stageIds, selectedClass) {
 export default function AdminReviewManagement() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const latestRefreshTokenRef = useRef(0);
 
   const [classes, setClasses] = useState([]);
   const [selectedClassName, setSelectedClassName] = useState("");
   const [selectedClassId, setSelectedClassId] = useState("");
-  const [deadlineFilter] = useState(DEADLINE_FILTER.STAGE);
-  const [hasMentorEvalDeadlineColumn, setHasMentorEvalDeadlineColumn] = useState(true);
   const [stages, setStages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -146,7 +133,7 @@ export default function AdminReviewManagement() {
 
   const [editingStage, setEditingStage] = useState(null);
   const [deadlineDate, setDeadlineDate] = useState("");
-  const [deadlineTime, setDeadlineTime] = useState("09:00");
+  const [deadlineTime, setDeadlineTime] = useState("");
   const [savingDeadline, setSavingDeadline] = useState(false);
 
   const fetchClasses = useCallback(async () => {
@@ -187,6 +174,7 @@ export default function AdminReviewManagement() {
     const inserts = missing.map((stageName) => ({
       class_id: classId,
       stage_name: stageName,
+      coordinator_deadline: null,
       is_active: false,
       is_completed: false,
       is_locked: false,
@@ -204,99 +192,24 @@ export default function AdminReviewManagement() {
   }, []);
 
   const fetchStages = useCallback(async (classId) => {
-    if (!classId && deadlineFilter !== DEADLINE_FILTER.MENTOR_EVAL) {
+    if (!classId) {
       setStages([]);
       return;
     }
 
-    if (deadlineFilter !== DEADLINE_FILTER.MENTOR_EVAL) {
-      await ensureDefaultStages(classId, { silentRls: true });
-    }
+    await ensureDefaultStages(classId, { silentRls: true });
 
-    let data = null;
-    let fetchError = null;
-
-    const preferred = await supabase
+    const { data, error: fetchError } = await supabase
       .from("review_stages")
-      .select("id, stage_name, class_id, deadline, mentor_evaluation_deadline, is_active, is_completed, is_locked")
+      .select("id, stage_name, class_id, coordinator_deadline, is_active, is_completed, is_locked")
       .eq("class_id", classId)
       .order("stage_name", { ascending: true });
 
-    data = preferred.data;
-    fetchError = preferred.error;
-
     if (fetchError) {
-      const fetchMsg = String(fetchError.message || "").toLowerCase();
-      if (fetchMsg.includes("mentor_evaluation_deadline")) {
-        setHasMentorEvalDeadlineColumn(false);
-        const fallback = await supabase
-          .from("review_stages")
-          .select("id, stage_name, class_id, deadline, is_active, is_completed, is_locked")
-          .eq("class_id", classId)
-          .order("stage_name", { ascending: true });
-        data = fallback.data;
-        fetchError = fallback.error;
+      if (/coordinator_deadline/i.test(String(fetchError.message || ""))) {
+        throw new Error('The "coordinator_deadline" column is missing in "review_stages". Run the Supabase ALTER TABLE migration first.');
       }
-    } else {
-      setHasMentorEvalDeadlineColumn(true);
-    }
-
-    if (fetchError) {
       throw new Error(fetchError.message || "Failed to load review stages.");
-    }
-
-    if (deadlineFilter === DEADLINE_FILTER.MENTOR_EVAL) {
-      let globalRows = null;
-      let globalError = null;
-      const globalPreferred = await supabase
-        .from("review_stages")
-        .select("id, stage_name, class_id, deadline, mentor_evaluation_deadline, is_active, is_completed, is_locked")
-        .order("stage_name", { ascending: true });
-
-      globalRows = globalPreferred.data;
-      globalError = globalPreferred.error;
-
-      if (globalError) {
-        const globalMsg = String(globalError.message || "").toLowerCase();
-        if (globalMsg.includes("mentor_evaluation_deadline")) {
-          setHasMentorEvalDeadlineColumn(false);
-          const globalFallback = await supabase
-            .from("review_stages")
-            .select("id, stage_name, class_id, deadline, is_active, is_completed, is_locked")
-            .order("stage_name", { ascending: true });
-          globalRows = globalFallback.data;
-          globalError = globalFallback.error;
-        }
-      } else {
-        setHasMentorEvalDeadlineColumn(true);
-      }
-
-      if (globalError) {
-        throw new Error(globalError.message || "Failed to load mentor evaluation deadlines.");
-      }
-
-      const grouped = STAGE_ORDER.map((stageName, index) => {
-        const matches = (globalRows || []).filter((row) => stageAliases(row.stage_name).includes(stageName) || normalizeStageName(row.stage_name) === stageName);
-        const first = matches[0] || null;
-        const synthetic = {
-          is_locked: matches.some((row) => Boolean(row.is_locked)),
-          is_completed: matches.some((row) => Boolean(row.is_completed)),
-          is_active: matches.some((row) => Boolean(row.is_active)),
-        };
-
-        return {
-          id: first?.id || `global-${index}`,
-          name: stageName,
-          className: "all",
-          deadline: first?.mentor_evaluation_deadline || first?.deadline || null,
-          status: toDisplayStatus(normalizeStatusFromFlags(synthetic)),
-          statusValue: normalizeStatusFromFlags(synthetic),
-          submissions: 0,
-        };
-      });
-
-      setStages(grouped);
-      return;
     }
 
     const rows = [...(data || [])].sort((a, b) => {
@@ -326,16 +239,14 @@ export default function AdminReviewManagement() {
       id: row.id,
       name: normalizeStageName(row.stage_name),
       className: row.class_id,
-      deadline: deadlineFilter === DEADLINE_FILTER.MENTOR_EVAL
-        ? (row.mentor_evaluation_deadline || row.deadline || null)
-        : (row.deadline || null),
+      deadline: row.coordinator_deadline || null,
       status: toDisplayStatus(normalizeStatusFromFlags(row)),
       statusValue: normalizeStatusFromFlags(row),
       submissions: submissionCounts[row.id] || 0,
     }));
 
     setStages(mappedStages);
-  }, [deadlineFilter, ensureDefaultStages]);
+  }, [ensureDefaultStages]);
 
   const resolveStageId = useCallback(async (stage) => {
     if (!stage || !selectedClassId) {
@@ -374,8 +285,8 @@ export default function AdminReviewManagement() {
       .eq("class_id", classId)
       .eq("is_active", true)
       .eq("is_completed", false)
-      .not("deadline", "is", null)
-      .lt("deadline", nowIso);
+      .not("coordinator_deadline", "is", null)
+      .lt("coordinator_deadline", nowIso);
 
     if (fetchError || !data || data.length === 0) return false;
 
@@ -389,18 +300,25 @@ export default function AdminReviewManagement() {
     return true;
   }, []);
 
-  const refreshData = useCallback(async (className, options = {}) => {
+  const refreshData = useCallback(async (classRef, options = {}) => {
     const { keepLoading = false } = options;
+    const refreshToken = latestRefreshTokenRef.current + 1;
+    latestRefreshTokenRef.current = refreshToken;
     if (!keepLoading) setLoading(true);
     setError("");
 
     try {
       const fetchedClasses = await fetchClasses();
-      const effectiveClassName = className || selectedClassName || fetchedClasses[0]?.name || "";
-      const classRow = fetchedClasses.find((row) => row.name === effectiveClassName) || null;
+      if (latestRefreshTokenRef.current !== refreshToken) return;
+      const effectiveClassRef = classRef || selectedClassId || selectedClassName || fetchedClasses[0]?.id || fetchedClasses[0]?.name || "";
+      const classRow = fetchedClasses.find((row) => row.id === effectiveClassRef)
+        || fetchedClasses.find((row) => row.name === effectiveClassRef)
+        || null;
+      const effectiveClassName = classRow?.name || "";
       const effectiveClassId = classRow?.id || "";
 
       if (!effectiveClassName || !effectiveClassId) {
+        if (latestRefreshTokenRef.current !== refreshToken) return;
         setSelectedClassName("");
         setSelectedClassId("");
         setStages([]);
@@ -411,21 +329,25 @@ export default function AdminReviewManagement() {
       if (effectiveClassId !== selectedClassId) setSelectedClassId(effectiveClassId);
 
       const didAutoLock = await autoLockExpiredStages(effectiveClassId);
+      if (latestRefreshTokenRef.current !== refreshToken) return;
       await fetchStages(effectiveClassId);
+      if (latestRefreshTokenRef.current !== refreshToken) return;
       if (didAutoLock) {
         await fetchStages(effectiveClassId);
+        if (latestRefreshTokenRef.current !== refreshToken) return;
       }
     } catch (err) {
+      if (latestRefreshTokenRef.current !== refreshToken) return;
       setStages([]);
       setError(err.message || "Failed to load review management data.");
     } finally {
-      if (!keepLoading) setLoading(false);
+      if (!keepLoading && latestRefreshTokenRef.current === refreshToken) setLoading(false);
     }
   }, [autoLockExpiredStages, fetchClasses, fetchStages, selectedClassId, selectedClassName]);
 
   useEffect(() => {
     const classParam = searchParams.get("class");
-    refreshData(classParam || "");
+    refreshData(classParam || selectedClassId || selectedClassName || "");
   }, [refreshData, searchParams]);
 
   useEffect(() => {
@@ -436,21 +358,30 @@ export default function AdminReviewManagement() {
     }
 
     const run = async () => {
+      const refreshToken = latestRefreshTokenRef.current + 1;
+      latestRefreshTokenRef.current = refreshToken;
       setLoading(true);
       setError("");
       try {
         await autoLockExpiredStages(selectedClassId);
+        if (latestRefreshTokenRef.current !== refreshToken) return;
         await fetchStages(selectedClassId);
+        if (latestRefreshTokenRef.current !== refreshToken) return;
       } catch (err) {
+        if (latestRefreshTokenRef.current !== refreshToken) return;
         setStages([]);
         setError(err.message || "Failed to load review stages.");
       } finally {
-        setLoading(false);
+        if (latestRefreshTokenRef.current === refreshToken) setLoading(false);
       }
     };
 
     run();
   }, [autoLockExpiredStages, fetchStages, selectedClassId]);
+
+  useEffect(() => {
+    resetDeadlineModal();
+  }, [selectedClassId]);
 
   useEffect(() => {
     if (!selectedClassId) return undefined;
@@ -520,23 +451,6 @@ export default function AdminReviewManagement() {
     }
   }, [resolveStageId, selectedClassId, stages]);
 
-  const setGlobalMentorStageStatus = useCallback(async (stageName, nextStatus) => {
-    const payload = {
-      is_active: nextStatus === STATUS.ACTIVE,
-      is_completed: nextStatus === STATUS.COMPLETED,
-      is_locked: nextStatus === STATUS.LOCKED,
-    };
-
-    const { error: updateError } = await supabase
-      .from("review_stages")
-      .update(payload)
-      .in("stage_name", stageAliases(stageName));
-
-    if (updateError) {
-      throw new Error(updateError.message || "Failed to update mentor evaluation stage.");
-    }
-  }, []);
-
   const activateStage = async (stageId) => {
     const stage = stages.find((item) => item.id === stageId);
     if (!stage || !selectedClassId) return;
@@ -580,25 +494,13 @@ export default function AdminReviewManagement() {
     const currentIndex = stages.findIndex((item) => item.id === stageId);
     const stage = stages[currentIndex];
     if (!stage || !selectedClassId) return;
-    if (deadlineFilter === DEADLINE_FILTER.MENTOR_EVAL) {
-      if (stage.statusValue === STATUS.LOCKED) return;
-    } else if (stage.statusValue !== STATUS.ACTIVE && stage.statusValue !== STATUS.COMPLETED) {
+    if (stage.statusValue !== STATUS.ACTIVE && stage.statusValue !== STATUS.COMPLETED) {
       return;
     }
 
     setActionBusyId(stageId);
     setError("");
     try {
-      if (deadlineFilter === DEADLINE_FILTER.MENTOR_EVAL) {
-        if (stage.statusValue === STATUS.COMPLETED) {
-          await setGlobalMentorStageStatus(stage.name, STATUS.INACTIVE);
-        } else {
-          await setGlobalMentorStageStatus(stage.name, STATUS.COMPLETED);
-        }
-        await fetchStages(selectedClassId);
-        return;
-      }
-
       const effectiveStageId = await resolveStageId(stage);
       if (stage.statusValue === STATUS.COMPLETED) {
         await setSingleStageStatus(effectiveStageId, STATUS.INACTIVE);
@@ -608,26 +510,24 @@ export default function AdminReviewManagement() {
 
       await setSingleStageStatus(effectiveStageId, STATUS.COMPLETED);
 
-      if (deadlineFilter !== DEADLINE_FILTER.MENTOR_EVAL) {
-        const nextStage = stages
-          .slice(currentIndex + 1)
-          .find((item) => item.statusValue === STATUS.INACTIVE);
+      const nextStage = stages
+        .slice(currentIndex + 1)
+        .find((item) => item.statusValue === STATUS.INACTIVE);
 
-        if (nextStage) {
-          const effectiveNextStageId = await resolveStageId(nextStage);
-          const { error: deactivateError } = await supabase
-            .from("review_stages")
-            .update({ is_active: false })
-            .eq("class_id", selectedClassId)
-            .eq("is_active", true)
-            .neq("id", effectiveNextStageId);
+      if (nextStage) {
+        const effectiveNextStageId = await resolveStageId(nextStage);
+        const { error: deactivateError } = await supabase
+          .from("review_stages")
+          .update({ is_active: false })
+          .eq("class_id", selectedClassId)
+          .eq("is_active", true)
+          .neq("id", effectiveNextStageId);
 
-          if (deactivateError) {
-            throw new Error(deactivateError.message || "Failed to reset active stage.");
-          }
-
-          await setSingleStageStatus(effectiveNextStageId, STATUS.ACTIVE);
+        if (deactivateError) {
+          throw new Error(deactivateError.message || "Failed to reset active stage.");
         }
+
+        await setSingleStageStatus(effectiveNextStageId, STATUS.ACTIVE);
       }
 
       await fetchStages(selectedClassId);
@@ -640,17 +540,11 @@ export default function AdminReviewManagement() {
 
   const lockStage = async (stageId) => {
     const stage = stages.find((item) => item.id === stageId);
-    if (!stage || stage.statusValue === STATUS.LOCKED || (deadlineFilter !== DEADLINE_FILTER.MENTOR_EVAL && stage.statusValue === STATUS.COMPLETED)) return;
+    if (!stage || stage.statusValue === STATUS.LOCKED || stage.statusValue === STATUS.COMPLETED) return;
 
     setActionBusyId(stageId);
     setError("");
     try {
-      if (deadlineFilter === DEADLINE_FILTER.MENTOR_EVAL) {
-        await setGlobalMentorStageStatus(stage.name, STATUS.LOCKED);
-        await fetchStages(selectedClassId);
-        return;
-      }
-
       const effectiveStageId = await resolveStageId(stage);
       await setSingleStageStatus(effectiveStageId, STATUS.LOCKED);
       await fetchStages(selectedClassId);
@@ -668,12 +562,6 @@ export default function AdminReviewManagement() {
     setActionBusyId(stageId);
     setError("");
     try {
-      if (deadlineFilter === DEADLINE_FILTER.MENTOR_EVAL) {
-        await setGlobalMentorStageStatus(stage.name, STATUS.INACTIVE);
-        await fetchStages(selectedClassId);
-        return;
-      }
-
       const effectiveStageId = await resolveStageId(stage);
       await setSingleStageStatus(effectiveStageId, STATUS.INACTIVE);
       await fetchStages(selectedClassId);
@@ -687,7 +575,7 @@ export default function AdminReviewManagement() {
   const toggleLockStage = async (stageId) => {
     const stage = stages.find((item) => item.id === stageId);
     if (!stage) return;
-    if (deadlineFilter !== DEADLINE_FILTER.MENTOR_EVAL && stage.statusValue === STATUS.COMPLETED) return;
+    if (stage.statusValue === STATUS.COMPLETED) return;
     if (stage.statusValue === STATUS.LOCKED) {
       await unlockStage(stageId);
       return;
@@ -756,13 +644,13 @@ export default function AdminReviewManagement() {
   const handleOpenDeadlineModal = (stage) => {
     setEditingStage(stage);
     setDeadlineDate(toDatePart(stage.deadline));
-    setDeadlineTime(toTimePart(stage.deadline, "09:00"));
+    setDeadlineTime(toTimePart(stage.deadline));
   };
 
   const resetDeadlineModal = () => {
     setEditingStage(null);
     setDeadlineDate("");
-    setDeadlineTime("09:00");
+    setDeadlineTime("");
     setSavingDeadline(false);
   };
 
@@ -775,10 +663,7 @@ export default function AdminReviewManagement() {
       const stage = stages.find((item) => item.id === stageId) || editingStage;
       const deadlineDate = new Date(deadlineIso);
       const isFutureDeadline = !Number.isNaN(deadlineDate.getTime()) && deadlineDate.getTime() > Date.now();
-      const useMentorEvalColumn = deadlineFilter === DEADLINE_FILTER.MENTOR_EVAL && hasMentorEvalDeadlineColumn;
-      const updatePayload = useMentorEvalColumn
-        ? { mentor_evaluation_deadline: deadlineIso }
-        : { deadline: deadlineIso };
+      const updatePayload = { coordinator_deadline: deadlineIso };
       if (isFutureDeadline) {
         updatePayload.is_locked = false;
         if (stage?.statusValue === STATUS.LOCKED) {
@@ -790,13 +675,14 @@ export default function AdminReviewManagement() {
       const updateQuery = supabase
         .from("review_stages")
         .update(updatePayload);
-      const { error: updateError } = deadlineFilter === DEADLINE_FILTER.MENTOR_EVAL
-        ? await updateQuery.in("stage_name", stageAliases(stage?.name))
-        : await updateQuery
-          .eq("id", await resolveStageId(stage))
-          .eq("class_id", selectedClassId);
+      const { error: updateError } = await updateQuery
+        .eq("id", await resolveStageId(stage))
+        .eq("class_id", selectedClassId);
 
       if (updateError) {
+        if (/coordinator_deadline/i.test(String(updateError.message || ""))) {
+          throw new Error('The "coordinator_deadline" column is missing in "review_stages". Run the Supabase ALTER TABLE migration first.');
+        }
         throw new Error(updateError.message || "Failed to update deadline.");
       }
 
@@ -804,13 +690,7 @@ export default function AdminReviewManagement() {
       await fetchStages(selectedClassId);
       resetDeadlineModal();
     } catch (err) {
-      const errMsg = String(err.message || "");
-      if (deadlineFilter === DEADLINE_FILTER.MENTOR_EVAL && /mentor_evaluation_deadline/i.test(errMsg)) {
-        setHasMentorEvalDeadlineColumn(false);
-        setError("Mentor evaluation deadline column is unavailable; using stage deadline fallback.");
-      } else {
-        setError(err.message || "Failed to save deadline.");
-      }
+      setError(err.message || "Failed to save deadline.");
       setSavingDeadline(false);
     }
   };
@@ -860,23 +740,25 @@ export default function AdminReviewManagement() {
           <section className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
             <div className="flex flex-col gap-2">
               <h1 className="text-2xl font-semibold text-gray-800">Review Management</h1>
-              <p className="text-gray-500">Control review stages and class deadlines in realtime</p>
+              <p className="text-gray-500">Control review stages and coordinator evaluation deadlines in realtime</p>
             </div>
             <div className="flex items-center gap-3">
               <label className="text-sm text-gray-600 font-medium" htmlFor="class-filter">Class</label>
               <select
                 id="class-filter"
-                value={selectedClassName}
+                value={selectedClassId}
                 onChange={(event) => {
-                  const nextClassName = event.target.value;
-                  setSelectedClassName(nextClassName);
-                  refreshData(nextClassName);
+                  const nextClassId = event.target.value;
+                  setSelectedClassId(nextClassId);
+                  const selectedClass = classes.find((classItem) => classItem.id === nextClassId);
+                  setSelectedClassName(selectedClass?.name || "");
+                  refreshData(nextClassId);
                 }}
                 className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/40 min-w-[180px]"
               >
                 {classes.length === 0 ? <option value="">No classes</option> : null}
                 {classes.map((classItem) => (
-                  <option key={classItem.id} value={classItem.name}>{classItem.name}</option>
+                  <option key={classItem.id} value={classItem.id}>{classItem.name}</option>
                 ))}
               </select>
             </div>
@@ -890,14 +772,18 @@ export default function AdminReviewManagement() {
 
           <section className="bg-white rounded-xl shadow-md border border-gray-100 p-6">
             <h2 className="text-lg font-semibold text-gray-800 mb-4">Review Timeline Overview</h2>
-            <ReviewTimeline stages={stages} selectedClass={selectedClassName} />
+            <ReviewTimeline
+              stages={stages}
+              selectedClass={selectedClassName}
+              deadlineLabel="Coordinator evaluation deadline"
+            />
           </section>
 
           <StageTable
             loading={loading}
             stages={stages}
             selectedClass={selectedClassName}
-            deadlineLabel="Deadline"
+            deadlineLabel="Coordinator Evaluation Deadline"
             simplifiedActions={false}
             actionBusyId={actionBusyId}
             onEditDeadline={handleOpenDeadlineModal}
@@ -922,6 +808,9 @@ export default function AdminReviewManagement() {
         isOpen={Boolean(editingStage)}
         deadlineDate={deadlineDate}
         deadlineTime={deadlineTime}
+        title="Edit Coordinator Evaluation Deadline"
+        dateLabel="Evaluation Deadline Date"
+        timeLabel="Evaluation Deadline Time"
         onDeadlineDateChange={setDeadlineDate}
         onDeadlineTimeChange={setDeadlineTime}
         saving={savingDeadline}
