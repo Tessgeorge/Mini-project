@@ -25,6 +25,22 @@ function parseTechnologyStacks(input) {
   )];
 }
 
+function buildProjectUpdatePayload(formData) {
+  const payload = {
+    title: formData.title,
+    technology_stacks: parseTechnologyStacks(formData.technologyStacks),
+    description: formData.description,
+    abstract: formData.abstract,
+  };
+
+  const normalizedDomain = String(formData.domain || "").trim();
+  if (normalizedDomain) {
+    payload.domain = normalizedDomain;
+  }
+
+  return payload;
+}
+
 export default function EditProjectModal({ isOpen, onClose, project, onSaved }) {
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -50,20 +66,31 @@ export default function EditProjectModal({ isOpen, onClose, project, onSaved }) 
     e.preventDefault();
     if (!project?.id) return;
 
+    const normalizedTitle = String(formData.title || "").trim();
+    const normalizedDescription = String(formData.description || "").trim();
+    if (!normalizedTitle) {
+      setError("Project title is required");
+      return;
+    }
+    if (!normalizedDescription) {
+      setError("Project description is required");
+      return;
+    }
+
     setError("");
     setSaving(true);
     try {
+      const payload = buildProjectUpdatePayload(formData);
+
       const updatedProject = await apiRequest(`/projects/${project.id}`, {
         method: "PUT",
-        body: {
-          title: formData.title,
-          domain: formData.domain,
-          technology_stacks: parseTechnologyStacks(formData.technologyStacks),
-          description: formData.description,
-          abstract: formData.abstract,
-        },
+        body: payload,
       });
-      onSaved?.(updatedProject);
+      onSaved?.({
+        ...project,
+        ...payload,
+        ...(updatedProject && typeof updatedProject === "object" ? updatedProject : {}),
+      });
       onClose?.();
     } catch (err) {
       setError(err.message || "Failed to update project");
@@ -74,7 +101,7 @@ export default function EditProjectModal({ isOpen, onClose, project, onSaved }) 
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Edit Project Details">
-      <form onSubmit={handleSubmit} className="p-6 space-y-5">
+      <form onSubmit={handleSubmit} noValidate className="p-6 space-y-5">
         {error && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
@@ -89,7 +116,6 @@ export default function EditProjectModal({ isOpen, onClose, project, onSaved }) 
             id="project-title"
             name="title"
             type="text"
-            required
             value={formData.title}
             onChange={handleChange}
             className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900 placeholder:text-slate-400"
@@ -105,7 +131,6 @@ export default function EditProjectModal({ isOpen, onClose, project, onSaved }) 
             id="project-domain"
             name="domain"
             type="text"
-            required
             value={formData.domain}
             onChange={handleChange}
             className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900 placeholder:text-slate-400"
@@ -136,7 +161,6 @@ export default function EditProjectModal({ isOpen, onClose, project, onSaved }) 
             id="project-description"
             name="description"
             rows={3}
-            required
             value={formData.description}
             onChange={handleChange}
             className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900 placeholder:text-slate-400 resize-none"

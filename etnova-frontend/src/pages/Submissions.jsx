@@ -21,12 +21,13 @@ const GUIDELINES = [
 ];
 
 const DOC_TYPE_LABELS = DOC_TYPES.reduce((acc, item) => { acc[item.value] = item.label; return acc; }, {});
+const isRejectedStatus = (status) => ["rejected", "needs_revision"].includes(String(status || "").toLowerCase());
 
 /* ─── Status badge ──────────────────────────────────────────────────── */
 function StatusBadge({ status }) {
     const s = (status || 'submitted').toLowerCase();
     if (s === 'approved') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"><span className="size-1.5 rounded-full bg-emerald-500 inline-block" /> Approved</span>;
-    if (s === 'needs_revision') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200"><span className="size-1.5 rounded-full bg-rose-500 inline-block" /> Needs Revision</span>;
+    if (isRejectedStatus(s)) return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200"><span className="size-1.5 rounded-full bg-rose-500 inline-block" /> Rejected</span>;
     if (s === 'submitted') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200"><span className="size-1.5 rounded-full bg-amber-400 inline-block" /> Pending</span>;
     return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-50 text-slate-500 border border-slate-200"><span className="size-1.5 rounded-full bg-slate-400 inline-block" /> {status || 'Unknown'}</span>;
 }
@@ -74,7 +75,26 @@ export default function Submissions() {
     const [selectedFile, setSelectedFile] = useState(null);
     const [isDragging, setIsDragging] = useState(false);
 
-    useEffect(() => { loadData(); }, []);
+    useEffect(() => { loadData(true); }, []);
+
+    useEffect(() => {
+        if (!project?.id) return undefined;
+        const channel = supabase
+            .channel(`student-submissions-${project.id}`)
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'documents', filter: `project_id=eq.${project.id}` },
+                async () => {
+                    invalidateStudentBootstrapCache();
+                    await loadData(true);
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [project?.id]);
 
     const loadData = async (isRefresh = false) => {
         if (isRefresh) setRefreshing(true);
@@ -85,7 +105,13 @@ export default function Submissions() {
             const proj = projects?.[0];
             if (!proj?.id) { setLoading(false); return; }
             setProject(proj);
-            const docs = proj.documents || [];
+            let docs = proj.documents || [];
+            try {
+                const latestDocs = await apiRequest(`/projects/${proj.id}/documents`, { skipCache: true });
+                if (Array.isArray(latestDocs)) docs = latestDocs;
+            } catch {
+                // Fallback to bootstrap payload when direct documents endpoint fails.
+            }
             setDocuments(docs.sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at)));
         } catch (e) {
             setError(e.message || 'Failed to load submissions');
@@ -124,6 +150,9 @@ export default function Submissions() {
         .map(t => getLatestDoc(t.value))
         .filter(Boolean)
         .sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
+    const approvalFeedbackEntries = (project?.evaluations || [])
+        .filter((entry) => entry.evaluation_type === 'approval_feedback')
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
     const handleDelete = async (doc) => {
         if (!window.confirm(`Delete "${doc.file_name}"? This cannot be undone.`)) return;
@@ -459,7 +488,7 @@ export default function Submissions() {
                             {[
                                 { label: 'Pending', value: documents.filter(d => d.status === 'submitted').length, style: 'bg-amber-50   text-amber-700   border-amber-100', icon: 'hourglass_top', iconColor: '#d97706' },
                                 { label: 'Approved', value: documents.filter(d => d.status === 'approved').length, style: 'bg-emerald-50 text-emerald-700 border-emerald-100', icon: 'task_alt', iconColor: '#059669' },
-                                { label: 'Revision', value: documents.filter(d => d.status === 'needs_revision').length, style: 'bg-rose-50    text-rose-700    border-rose-100', icon: 'edit_note', iconColor: '#e11d48' },
+                                { label: 'Rejected', value: documents.filter(d => isRejectedStatus(d.status)).length, style: 'bg-rose-50    text-rose-700    border-rose-100', icon: 'edit_note', iconColor: '#e11d48' },
                                 { label: 'Total', value: documents.length, style: 'bg-slate-50   text-slate-700   border-slate-100', icon: 'folder_open', iconColor: '#64748b' },
                             ].map(stat => (
                                 <div key={stat.label} className={`glass-card-strong rounded-xl border p-4 ${stat.style}`}>
@@ -480,10 +509,33 @@ export default function Submissions() {
                                 )}
                             </SectionHeader>
                             <div className="p-4">
-                                {latestByType.length === 0 ? (
+                                {latestByType.length === 0 && approvalFeedbackEntries.length === 0 ? (
                                     <p className="text-xs text-slate-400 text-center py-4">Submit documents to receive mentor feedback.</p>
                                 ) : (
                                     <div className="space-y-2.5 max-h-72 overflow-y-auto pr-0.5">
+                                        {approvalFeedbackEntries.map(entry => {
+                                            const ideaStatus = String(project?.status || 'submitted').toLowerCase();
+                                            const feedbackText = String(entry.feedback || '').trim();
+                                            return (
+                                                <div key={`approval-${entry.id}`}
+                                                    className="rounded-xl border border-white/80 bg-white/50 p-3.5 space-y-2">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <p className="text-xs font-black text-slate-800">Idea Submission</p>
+                                                        <StatusBadge status={ideaStatus} />
+                                                    </div>
+                                                    <p className="text-xs text-slate-500 leading-relaxed">
+                                                        {feedbackText || (ideaStatus === 'approved'
+                                                            ? 'Idea accepted by guide.'
+                                                            : ideaStatus === 'rejected'
+                                                                ? 'Idea rejected by guide.'
+                                                                : 'Guide feedback available.')}
+                                                    </p>
+                                                    <p className="text-[10px] text-slate-300">
+                                                        {entry.created_at ? new Date(entry.created_at).toLocaleString() : '-'}
+                                                    </p>
+                                                </div>
+                                            );
+                                        })}
                                         {latestByType.map(doc => {
                                             const status = (doc.status || 'submitted').toLowerCase();
                                             const nextStage = getNextDocType(doc.document_type);
@@ -497,14 +549,14 @@ export default function Submissions() {
                                                         <StatusBadge status={doc.status} />
                                                     </div>
                                                     <p className="text-xs text-slate-500 leading-relaxed">
-                                                        {status === 'needs_revision' && (feedbackText || 'Revision required. Re-upload with corrections.')}
+                                                        {isRejectedStatus(status) && (feedbackText || 'Rejected by mentor. Re-upload with corrections.')}
                                                         {status === 'approved' && (feedbackText || 'Approved. Proceed to the next stage.')}
                                                         {status === 'submitted' && (feedbackText || 'Pending mentor review.')}
                                                     </p>
                                                     <p className="text-[10px] text-slate-300">
                                                         {doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleString() : '-'}
                                                     </p>
-                                                    {status === 'needs_revision' && (
+                                                    {isRejectedStatus(status) && (
                                                         <button type="button" onClick={() => focusUploadForType(doc.document_type)}
                                                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 text-xs font-bold hover:bg-rose-100 transition-all">
                                                             <span className="material-symbols-outlined text-sm">upload</span> Re-upload

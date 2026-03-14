@@ -39,6 +39,8 @@ export default function NotificationPanel({
                 return 'check_circle';
             case 'document_rejected':
                 return 'cancel';
+            case 'document_comment':
+                return 'chat';
             case 'evaluation':
                 return 'star';
             case 'team_member':
@@ -49,6 +51,10 @@ export default function NotificationPanel({
                 return 'task_alt';
             case 'join_request_rejected':
                 return 'person_cancel';
+            case 'project_approved':
+                return 'check_circle';
+            case 'project_rejected':
+                return 'cancel';
             case 'team_member_removed':
                 return 'person_remove';
             case 'task_assigned':
@@ -64,6 +70,8 @@ export default function NotificationPanel({
                 return '#10b981'; // green
             case 'document_rejected':
                 return '#ef4444'; // red
+            case 'document_comment':
+                return '#3b82f6'; // blue
             case 'evaluation':
                 return '#f59e0b'; // amber
             case 'team_member':
@@ -73,6 +81,10 @@ export default function NotificationPanel({
             case 'join_request_approved':
                 return '#10b981'; // green
             case 'join_request_rejected':
+                return '#ef4444'; // red
+            case 'project_approved':
+                return '#10b981'; // green
+            case 'project_rejected':
                 return '#ef4444'; // red
             case 'team_member_removed':
                 return '#f97316'; // orange
