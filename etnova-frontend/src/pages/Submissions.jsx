@@ -150,6 +150,9 @@ export default function Submissions() {
         .map(t => getLatestDoc(t.value))
         .filter(Boolean)
         .sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
+    const approvalFeedbackEntries = (project?.evaluations || [])
+        .filter((entry) => entry.evaluation_type === 'approval_feedback')
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
     const handleDelete = async (doc) => {
         if (!window.confirm(`Delete "${doc.file_name}"? This cannot be undone.`)) return;
@@ -506,10 +509,33 @@ export default function Submissions() {
                                 )}
                             </SectionHeader>
                             <div className="p-4">
-                                {latestByType.length === 0 ? (
+                                {latestByType.length === 0 && approvalFeedbackEntries.length === 0 ? (
                                     <p className="text-xs text-slate-400 text-center py-4">Submit documents to receive mentor feedback.</p>
                                 ) : (
                                     <div className="space-y-2.5 max-h-72 overflow-y-auto pr-0.5">
+                                        {approvalFeedbackEntries.map(entry => {
+                                            const ideaStatus = String(project?.status || 'submitted').toLowerCase();
+                                            const feedbackText = String(entry.feedback || '').trim();
+                                            return (
+                                                <div key={`approval-${entry.id}`}
+                                                    className="rounded-xl border border-white/80 bg-white/50 p-3.5 space-y-2">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <p className="text-xs font-black text-slate-800">Idea Submission</p>
+                                                        <StatusBadge status={ideaStatus} />
+                                                    </div>
+                                                    <p className="text-xs text-slate-500 leading-relaxed">
+                                                        {feedbackText || (ideaStatus === 'approved'
+                                                            ? 'Idea accepted by guide.'
+                                                            : ideaStatus === 'rejected'
+                                                                ? 'Idea rejected by guide.'
+                                                                : 'Guide feedback available.')}
+                                                    </p>
+                                                    <p className="text-[10px] text-slate-300">
+                                                        {entry.created_at ? new Date(entry.created_at).toLocaleString() : '-'}
+                                                    </p>
+                                                </div>
+                                            );
+                                        })}
                                         {latestByType.map(doc => {
                                             const status = (doc.status || 'submitted').toLowerCase();
                                             const nextStage = getNextDocType(doc.document_type);

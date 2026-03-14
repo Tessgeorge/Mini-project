@@ -612,6 +612,26 @@ export const approveProject = async (req, res) => {
         });
     }
 
+    const { data: members } = await supabase
+      .from('team_members')
+      .select('student_id')
+      .eq('project_id', req.params.id);
+
+    const projectTitle = data?.title || 'your project';
+    const actorName = safeProfileName(req.userProfile, 'Guide');
+    const feedbackText = String(feedback || '').trim();
+    await createNotifications((members || [])
+      .map((member) => member?.student_id)
+      .filter(Boolean)
+      .map((studentId) => ({
+        user_id: studentId,
+        type: status === 'approved' ? 'project_approved' : 'project_rejected',
+        title: status === 'approved' ? 'Idea Accepted' : 'Idea Rejected',
+        message: feedbackText
+          ? `${actorName} ${status === 'approved' ? 'accepted' : 'rejected'} the idea for ${projectTitle}. Feedback: ${feedbackText}`
+          : `${actorName} ${status === 'approved' ? 'accepted' : 'rejected'} the idea for ${projectTitle}.`,
+      })));
+
     res.json(data);
   } catch (error) {
     res.status(500).json({ message: error.message });

@@ -60,6 +60,19 @@ function ago(ts) {
   if (d < 172800) return "Yesterday";
   return new Date(ts).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 }
+function normalizeReviewStageName(stageName) {
+  const value = String(stageName || "").trim().toLowerCase();
+  if (value === "0th review") return "Zeroth Review";
+  if (value === "1st review") return "First Review";
+  if (value === "2nd review") return "Second Review";
+  if (value === "zeroth review") return "Zeroth Review";
+  if (value === "first review") return "First Review";
+  if (value === "second review") return "Second Review";
+  if (value === "idea") return "Idea";
+  if (value === "abstract") return "Abstract";
+  if (value === "final review") return "Final Review";
+  return String(stageName || "").trim();
+}
 function fmtSz(b) {
   if (!b) return "";
   if (b < 1024) return b + "B";
@@ -572,7 +585,141 @@ function MentorAnnouncements({ projId, mentorId, mentorName }) {
 }
 
 // ─── 📅 Upcoming Deadlines ────────────────────────────────────────────────────
-function UpcomingDeadlines({ phaseIdx, milestoneDates }) {
+function UpcomingDeadlines({ phaseIdx, milestoneDates, reviewDeadlines = [] }) {
+  const today = new Date();
+  const [view, setView] = useState({ y: today.getFullYear(), m: today.getMonth() });
+  const [active, setActive] = useState(null);
+  const classDeadlineItems = (reviewDeadlines || [])
+    .filter((item) => Boolean(item?.deadline))
+    .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime())
+    .slice(0, 4);
+
+  if (classDeadlineItems.length > 0) {
+    const firstDOW = new Date(view.y, view.m, 1).getDay();
+    const totalDays = new Date(view.y, view.m + 1, 0).getDate();
+    const monthLabel = new Date(view.y, view.m, 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
+    const todayKey = today.toISOString().slice(0, 10);
+    const deadlineMap = classDeadlineItems.reduce((acc, item) => {
+      const key = item.deadline.slice(0, 10);
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(item);
+      return acc;
+    }, {});
+
+    const keyForDay = (day) => `${view.y}-${String(view.m + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const prev = () => setView((v) => {
+      const d = new Date(v.y, v.m - 1, 1);
+      return { y: d.getFullYear(), m: d.getMonth() };
+    });
+    const next = () => setView((v) => {
+      const d = new Date(v.y, v.m + 1, 1);
+      return { y: d.getFullYear(), m: d.getMonth() };
+    });
+    const activeItems = active ? (deadlineMap[active] || []) : [];
+
+    return (
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="flex items-center gap-2.5 px-5 py-4 border-b border-gray-100">
+          <p className="font-bold text-gray-800 text-sm">Upcoming Deadlines</p>
+          <span className="ml-auto text-xs text-gray-400">{classDeadlineItems.length} shown</span>
+        </div>
+
+        <div className="p-5">
+          <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            <div className="mb-4 flex items-center justify-between">
+              <button type="button" onClick={() => { setActive(null); prev(); }} className="size-8 rounded-xl border border-slate-200 bg-white text-slate-400 hover:bg-slate-100">
+                ‹
+              </button>
+              <p className="text-sm font-black text-slate-800">{monthLabel}</p>
+              <button type="button" onClick={() => { setActive(null); next(); }} className="size-8 rounded-xl border border-slate-200 bg-white text-slate-400 hover:bg-slate-100">
+                ›
+              </button>
+            </div>
+
+            <div className="mb-2 grid grid-cols-7">
+              {["S", "M", "T", "W", "T", "F", "S"].map((d) => (
+                <p key={d} className="text-center text-[10px] font-bold text-slate-400">{d}</p>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-7 gap-y-1">
+              {Array.from({ length: firstDOW }).map((_, i) => <div key={`blank-${i}`} />)}
+              {Array.from({ length: totalDays }).map((_, i) => {
+                const day = i + 1;
+                const key = keyForDay(day);
+                const items = deadlineMap[key] || [];
+                const hasDeadline = items.length > 0;
+                const isPast = key < todayKey;
+                const isToday = key === todayKey;
+                const isActive = active === key;
+
+                return (
+                  <div key={key} className="relative flex flex-col items-center">
+                    <button
+                      type="button"
+                      onClick={() => hasDeadline && setActive(isActive ? null : key)}
+                      className={`size-8 rounded-xl text-[11px] font-bold transition-all ${isToday ? "bg-slate-900 text-white" : "text-slate-600"} ${hasDeadline ? "cursor-pointer" : "hover:bg-white"}`}
+                      style={hasDeadline && !isToday ? {
+                        backgroundColor: isPast ? "rgba(254,226,226,0.9)" : "rgba(204,251,241,0.95)",
+                        color: isPast ? "#dc2626" : "#0f766e",
+                        outline: isActive ? "2px solid #14b8a6" : "1px solid rgba(20,184,166,0.18)",
+                      } : {}}
+                    >
+                      {day}
+                    </button>
+                    {hasDeadline ? (
+                      <div className={`mt-1 h-1.5 rounded-full ${items.length > 1 ? "w-3.5" : "w-1.5"} ${isPast ? "bg-red-400" : "bg-teal-400"}`} />
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-white bg-white p-3">
+              {activeItems.length === 0 ? (
+                <p className="text-xs text-slate-400">Select a marked date to view the coordinator-set student deadlines for this class.</p>
+              ) : (
+                <div className="space-y-2">
+                  {activeItems.map((item) => {
+                    const due = new Date(item.deadline);
+                    const isPast = !Number.isNaN(due.getTime()) && due < new Date();
+                    return (
+                      <div key={item.id} className="flex items-start justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5">
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold text-slate-800">{item.title}</p>
+                          <p className="text-[11px] text-slate-500">
+                            {due.toLocaleString("en-IN", {
+                              day: "2-digit",
+                              month: "short",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </p>
+                        </div>
+                        <span className={`rounded-full border px-2.5 py-1 text-[10px] font-bold whitespace-nowrap ${isPast ? "border-red-200 bg-red-50 text-red-600" : "border-teal-200 bg-teal-50 text-teal-700"}`}>
+                          {isPast ? "Overdue" : "Upcoming"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+        </div>
+
+        <div className="px-5 py-3 bg-gray-50 border-t border-gray-100">
+          <p className="text-xs text-gray-400 flex items-center gap-1.5">
+            <Ic.Info />
+            Coordinator-set student deadlines for this project's class
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   // Show current + next 2 unfinished milestones
   const items = PHASES
     .map((ph, i) => ({ ph, i, meta: MILESTONE_META[i], status: i < phaseIdx ? "done" : i === phaseIdx ? "current" : "upcoming" }))
@@ -651,7 +798,7 @@ function UpcomingDeadlines({ phaseIdx, milestoneDates }) {
 // ══════════════════════════════════════════════════════════════════
 // TAB 1 — OVERVIEW
 // ══════════════════════════════════════════════════════════════════
-function TabOverview({ proj, evaluations, members, documents, onAddReview, onNavigateTab, mentorId, mentorName, milestoneDates }) {
+function TabOverview({ proj, evaluations, members, documents, onAddReview, onNavigateTab, mentorId, mentorName, milestoneDates, reviewDeadlines }) {
   const avg = evaluations.length ? Math.round(evaluations.reduce((s, e) => s + Number(e.score || 0), 0) / evaluations.length) : null;
   const phaseIdx = Math.min([...new Set(evaluations.map(e => e.phase))].length, PHASES.length - 1);
 
@@ -703,7 +850,7 @@ function TabOverview({ proj, evaluations, members, documents, onAddReview, onNav
           </div>
 
           {/* Upcoming Deadlines */}
-          <UpcomingDeadlines phaseIdx={phaseIdx} milestoneDates={milestoneDates} />
+          <UpcomingDeadlines phaseIdx={phaseIdx} milestoneDates={milestoneDates} reviewDeadlines={reviewDeadlines} />
         </div>
       </div>
     </div>
@@ -1235,8 +1382,14 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
   const [evaluations, setEvaluations] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [milestoneDates, setMilestoneDates] = useState([]);
+  const [reviewDeadlines, setReviewDeadlines] = useState([]);
   const [showReview, setShowReview] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [projectStatus, setProjectStatus] = useState(proj.status);
+  const [ideaDecisionBusy, setIdeaDecisionBusy] = useState("");
+  const [ideaFeedback, setIdeaFeedback] = useState("");
+  const [showIdeaFeedback, setShowIdeaFeedback] = useState(false);
+  const [ideaDecisionTarget, setIdeaDecisionTarget] = useState("");
   const members = proj.team_members || [];
   const markingEnabled = true;
 
@@ -1247,15 +1400,39 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
       supabase.from("evaluations").select("*").eq("project_id", proj.id).order("created_at", { ascending: false }),
       supabase.from("documents").select("id,project_id,uploaded_by,document_type,file_name,file_url,file_size,version,status,uploaded_at,feedback,profiles:uploaded_by(full_name,email,roll_number)").eq("project_id", proj.id).order("uploaded_at", { ascending: false }),
       supabase.from("project_milestones").select("phase_index,due_date").eq("project_id", proj.id).order("phase_index", { ascending: true }),
-    ]).then(([ev, doc, ms]) => {
+      proj.class_id
+        ? supabase
+          .from("review_stages")
+          .select("id, stage_name, deadline, student_deadline_set_by_coordinator")
+          .eq("class_id", proj.class_id)
+          .eq("student_deadline_set_by_coordinator", true)
+          .not("deadline", "is", null)
+          .order("deadline", { ascending: true })
+        : Promise.resolve({ data: [] }),
+    ]).then(([ev, doc, ms, stages]) => {
       setEvaluations(ev.data || []);
       setDocuments(doc.data || []);
       // Build flat array indexed by phase_index [0..5]
       const dates = Array(6).fill(null);
       (ms.data || []).forEach(r => { dates[r.phase_index] = r.due_date; });
       setMilestoneDates(dates);
+      setReviewDeadlines((stages.data || []).map((row) => ({
+        id: row.id,
+        title: `${proj.class_name || proj.batch || "Class"} - ${normalizeReviewStageName(row.stage_name)}`,
+        deadline: row.deadline,
+      })));
       setLoading(false);
     });
+  }, [proj.batch, proj.class_id, proj.class_name, proj.id]);
+
+  useEffect(() => {
+    setProjectStatus(proj.status);
+  }, [proj.status]);
+
+  useEffect(() => {
+    setIdeaFeedback("");
+    setShowIdeaFeedback(false);
+    setIdeaDecisionTarget("");
   }, [proj.id]);
 
   const submitReview = async ({ phase, scores, total, feedback }) => {
@@ -1276,6 +1453,28 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
           created_at: new Date().toISOString()
         })));
       }
+    }
+  };
+
+  const handleIdeaDecision = async (status) => {
+    if (!proj?.id || !status) return;
+    if (!showIdeaFeedback || ideaDecisionTarget !== status) {
+      setIdeaDecisionTarget(status);
+      setShowIdeaFeedback(true);
+      return;
+    }
+
+    setIdeaDecisionBusy(status);
+    try {
+      const updated = await apiRequest(`/projects/${proj.id}/approve`, {
+        method: "PUT",
+        body: { status, feedback: ideaFeedback.trim() || null },
+      });
+      setProjectStatus(updated?.status || status);
+      setShowIdeaFeedback(false);
+      setIdeaDecisionTarget("");
+    } finally {
+      setIdeaDecisionBusy("");
     }
   };
 
@@ -1316,19 +1515,68 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
               </div>
               <div>
                 <h1 className={`${isDiscussionTab ? "text-xl" : "text-2xl"} font-extrabold text-white leading-tight`}>{proj.title}</h1>
-                {!isDiscussionTab && proj.abstract && <p className="text-slate-400 text-sm mt-1 max-w-xl line-clamp-1 leading-relaxed">{proj.abstract}</p>}
+                {!isDiscussionTab && proj.description && (
+                  <p className="text-slate-300 text-sm mt-1 max-w-xl line-clamp-2 leading-relaxed">{proj.description}</p>
+                )}
+                {!isDiscussionTab && proj.abstract && proj.abstract !== proj.description && (
+                  <p className="text-slate-400 text-sm mt-1 max-w-xl line-clamp-1 leading-relaxed">{proj.abstract}</p>
+                )}
                 <div className={`flex items-center gap-3 ${isDiscussionTab ? "mt-1.5" : "mt-2.5"} flex-wrap`}>
-                  <Pill status={proj.status} />
+                  <Pill status={projectStatus} />
                   <span className="text-xs text-slate-400">Phase: <span className="text-teal-400 font-semibold">{PHASES[phaseIdx]}</span></span>
                   {avg && <span className={"text-xs font-bold " + sClr(avg)}>Avg: {avg}/100</span>}
                 </div>
+                {!isDiscussionTab && showIdeaFeedback && (
+                  <div className="mt-3 max-w-xl">
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                      Guide Feedback
+                    </label>
+                    <textarea
+                      value={ideaFeedback}
+                      onChange={(e) => setIdeaFeedback(e.target.value)}
+                      rows={3}
+                      placeholder={ideaDecisionTarget === "rejected" ? "Add rejection feedback for the team..." : "Add acceptance feedback for the team..."}
+                      className="w-full rounded-xl border border-white/10 bg-white/10 px-3 py-2.5 text-sm text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-400/40"
+                    />
+                  </div>
+                )}
               </div>
             </div>
             {!isDiscussionTab && (
-              <button onClick={() => setShowReview(true)}
-                className="flex items-center gap-2 bg-teal-400 hover:bg-teal-300 active:scale-95 text-slate-900 text-sm font-bold px-5 py-2.5 rounded-xl transition-all flex-shrink-0">
-                <Ic.Star /> Add Review
-              </button>
+              <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleIdeaDecision("approved")}
+                  disabled={ideaDecisionBusy !== ""}
+                  className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-bold transition-all ${projectStatus === "approved"
+                    ? "border-emerald-300 bg-emerald-100 text-emerald-800"
+                    : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"} disabled:cursor-not-allowed disabled:opacity-70`}
+                >
+                  {ideaDecisionBusy === "approved"
+                    ? "Accepting..."
+                    : showIdeaFeedback && ideaDecisionTarget === "approved"
+                      ? "Confirm Accept"
+                      : "Accept Idea"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleIdeaDecision("rejected")}
+                  disabled={ideaDecisionBusy !== ""}
+                  className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-bold transition-all ${projectStatus === "rejected"
+                    ? "border-rose-300 bg-rose-100 text-rose-800"
+                    : "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"} disabled:cursor-not-allowed disabled:opacity-70`}
+                >
+                  {ideaDecisionBusy === "rejected"
+                    ? "Rejecting..."
+                    : showIdeaFeedback && ideaDecisionTarget === "rejected"
+                      ? "Confirm Reject"
+                      : "Reject Idea"}
+                </button>
+                <button onClick={() => setShowReview(true)}
+                  className="flex items-center justify-center gap-2 bg-teal-400 hover:bg-teal-300 active:scale-95 text-slate-900 text-sm font-bold px-5 py-2.5 rounded-xl transition-all">
+                  <Ic.Star /> Add Review
+                </button>
+              </div>
             )}
           </div>
 
@@ -1375,7 +1623,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
       {/* Tab content */}
       {loading ? <Spin /> : (
         <>
-          {tab === "overview" && <TabOverview proj={proj} evaluations={evaluations} members={members} documents={documents} onAddReview={() => setShowReview(true)} onNavigateTab={setTab} mentorId={mentorId} mentorName={mentorName} milestoneDates={milestoneDates} />}
+          {tab === "overview" && <TabOverview proj={proj} evaluations={evaluations} members={members} documents={documents} onAddReview={() => setShowReview(true)} onNavigateTab={setTab} mentorId={mentorId} mentorName={mentorName} milestoneDates={milestoneDates} reviewDeadlines={reviewDeadlines} />}
           {tab === "submissions" && <TabSubmissions projId={proj.id} members={members} mentorName={mentorName} />}
           {tab === "feedback" && (
             <MentorDiscussion
