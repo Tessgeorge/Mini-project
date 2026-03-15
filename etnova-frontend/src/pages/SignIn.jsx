@@ -26,11 +26,10 @@ export default function SignIn() {
     setIsLoading(true)
 
     try {
-      const normalizedEmail = String(email || '').trim().toLowerCase()
       const {
         data: authData,
         error: signInError,
-      } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password })
+      } = await supabase.auth.signInWithPassword({ email, password })
 
       if (signInError) {
         throw signInError
@@ -61,9 +60,9 @@ export default function SignIn() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col lg:flex-row etnova-bg text-slate-900">
+    <div className="flex min-h-screen flex-col lg:flex-row bg-[#F4F8F8] text-slate-900">
       {/* Left Panel: Branding & Imagery */}
-      <div className="relative hidden lg:flex lg:w-1/2 xl:w-7/12 bg-background-dark items-center justify-center p-12 overflow-hidden">
+      <div className="relative hidden lg:flex lg:w-1/2 xl:w-7/12 bg-[#0F2322] items-center justify-center p-12 overflow-hidden">
         {/* Background Image with Overlay */}
         <div
           className="absolute inset-0 z-0 opacity-25 bg-cover bg-center"
@@ -78,11 +77,11 @@ export default function SignIn() {
 
         {/* Wave Divider */}
         <svg
-          className="absolute right-0 top-0 h-full w-28 z-20 pointer-events-none"
+          className="absolute right-0 top-0 h-full w-28 z-20 text-[#F4F8F8] pointer-events-none"
           viewBox="0 0 100 100"
           preserveAspectRatio="none"
         >
-          <path d="M100 0 C 40 20, 40 80, 100 100 L 100 0 Z" fill="#eef2f7" />
+          <path d="M100 0 C 40 20, 40 80, 100 100 L 100 0 Z" fill="#F4F8F8" />
         </svg>
 
         <div className="relative z-30 max-w-xl text-white">
@@ -123,7 +122,7 @@ export default function SignIn() {
       </div>
 
       {/* Right Panel: Login Form */}
-      <div className="flex flex-1 flex-col items-center justify-center p-6 sm:p-12 lg:p-20">
+      <div className="flex flex-1 flex-col items-center justify-center p-6 sm:p-12 lg:p-20 bg-[#F4F8F8]">
         <div className="w-full max-w-110">
           {/* Mobile Header */}
           <div className="flex lg:hidden items-center gap-3 mb-8">
@@ -133,29 +132,26 @@ export default function SignIn() {
             >
               <span className="material-symbols-outlined font-bold">account_balance</span>
             </div>
-            <h2 className="text-2xl font-bold text-slate-900">Etnova</h2>
+            <h2 className="text-2xl font-bold text-ink">Etnova</h2>
           </div>
 
           <div className="mb-10">
-            <h3 className="text-3xl font-black text-slate-900 mb-2">Welcome back</h3>
-            <p className="text-sm text-slate-500 font-medium">
+            <h3 className="text-3xl font-bold text-ink mb-2">Welcome back</h3>
+            <p className="text-muted">
               Please enter your credentials to access the portal.
             </p>
           </div>
 
           {authError && (
-            <div className="mb-6 glass-alert flex items-center gap-3 px-4 py-3 text-sm font-medium"
-              style={{ background: 'rgba(244,63,94,0.07)', borderColor: 'rgba(244,63,94,0.25)', color: '#be123c' }}
-              role="alert" aria-live="polite">
-              <span className="material-symbols-outlined text-base flex-shrink-0">error</span>
-              <span>{authError}</span>
+            <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert" aria-live="polite">
+              {authError}
             </div>
           )}
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <label htmlFor="username" className="block text-sm font-semibold text-slate-700 mb-2">
+              <label htmlFor="username" className="block text-sm font-semibold text-ink mb-2">
                 Username
               </label>
               <div className="relative">
@@ -168,7 +164,7 @@ export default function SignIn() {
                   name="username"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="glass-input w-full pl-12 pr-4 py-3.5 text-slate-900 placeholder:text-slate-400 outline-none"
+                  className="w-full pl-12 pr-4 py-3.5 bg-white border border-transparent rounded-xl focus:ring-1 focus:ring-muted/50 focus:border-muted outline-none transition-all text-ink placeholder:text-muted"
                   placeholder="Username"
                   autoComplete="username"
                   required
@@ -178,7 +174,7 @@ export default function SignIn() {
 
             <div>
               <div className="flex justify-between items-center mb-2">
-                <label htmlFor="password" className="text-sm font-semibold text-slate-700">
+                <label htmlFor="password" className="text-sm font-semibold text-ink">
                   Password
                 </label>
                 <a href="#" className="text-sm font-medium text-teal-600 hover:underline">
@@ -195,7 +191,7 @@ export default function SignIn() {
                   name="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="glass-input w-full pl-12 pr-12 py-3.5 text-slate-900 placeholder:text-slate-400 outline-none"
+                  className="w-full pl-12 pr-12 py-3.5 bg-white border border-transparent rounded-xl focus:ring-1 focus:ring-muted/50 focus:border-muted outline-none transition-all text-ink placeholder:text-muted"
                   placeholder="••••••••"
                   autoComplete="current-password"
                   required
@@ -220,7 +216,7 @@ export default function SignIn() {
                 onChange={(e) => setRememberMe(e.target.checked)}
                 className="size-4 rounded border-slate-300 text-primary focus:ring-primary cursor-pointer"
               />
-              <label htmlFor="remember" className="text-sm text-slate-500 cursor-pointer select-none">
+              <label htmlFor="remember" className="text-sm text-muted cursor-pointer select-none">
                 Keep me logged in
               </label>
               
@@ -228,26 +224,24 @@ export default function SignIn() {
 
             <button
               type="submit"
-              className="btn-primary w-full py-3.5 text-sm flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full py-4 text-bg-left font-bold rounded-xl border border-transparent focus:ring-1 focus:ring-muted/50 focus:border-muted transition-all shadow-primary flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              style={{ backgroundColor: ACCENT_COLOR }}
               disabled={isLoading}
             >
-              {isLoading ? (
-                <><div className="size-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Signing in...</>
-              ) : (
-                <>Sign In <span className="material-symbols-outlined text-base">arrow_forward</span></>
-              )}
+              {isLoading ? 'Signing in...' : 'Sign In'}
+              {!isLoading && <span className="material-symbols-outlined">arrow_forward</span>}
             </button>
           </form>
 
           {/* Help Link */}
-          <div className="mt-10 pt-8 border-t border-slate-200/60 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <p className="text-sm text-slate-400">Need assistance?</p>
+          <div className="mt-10 pt-8 border-t border-line flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p className="text-sm text-muted">Need assistance?</p>
             <div className="flex gap-6">
-              <a href="#" className="flex items-center gap-1.5 text-sm font-medium text-slate-400 hover:text-[#00897B] transition-colors">
+              <a href="#" className="flex items-center gap-1.5 text-sm font-medium text-muted hover:text-primary transition-colors">
                 <span className="material-symbols-outlined text-base">help_center</span>
                 Support Center
               </a>
-              <a href="#" className="flex items-center gap-1.5 text-sm font-medium text-slate-400 hover:text-[#00897B] transition-colors">
+              <a href="#" className="flex items-center gap-1.5 text-sm font-medium text-muted hover:text-primary transition-colors">
                 <span className="material-symbols-outlined text-base">info</span>
                 About Project
               </a>
