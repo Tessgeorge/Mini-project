@@ -18,7 +18,7 @@ const MyProject = lazy(() => import('./pages/MyProject'))
 const MyTeam = lazy(() => import('./pages/MyTeam'))
 const Submissions = lazy(() => import('./pages/Submissions'))
 const Marks = lazy(() => import('./pages/Marks'))
-const Discussion = lazy(() => import('./pages/Discussion'))
+const StudentDiscussion = lazy(() => import('./pages/StudentDiscussion'))
 
 function StudentRouteWrapper() {
   const navigate = useNavigate();
@@ -58,7 +58,7 @@ function App() {
           >
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<StudentDashboard />} />
-            <Route path="chat" element={<Discussion />} />
+            <Route path="chat" element={<StudentDiscussion />} />
             <Route path="submissions" element={<Submissions />} />
             <Route path="profile" element={<MyProject />} />
 
