@@ -370,14 +370,14 @@ export default function AdminGuideAllocation() {
   }, [projects, selectedClassId]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen etnova-bg">
       <Sidebar
         activeItem="guide-allocation"
         onSignOut={handleSignOut}
         onNavigate={handleNavigate}
       />
 
-      <main className="lg:ml-72 min-h-screen">
+      <main className="flex-1 min-h-0 md:ml-64 h-[100dvh] overflow-y-auto">
         <TopNavbar
           adminName={ADMIN_NAME}
           academicYearLabel="2026 - S6 Mini Project"
@@ -387,15 +387,15 @@ export default function AdminGuideAllocation() {
         <div className="p-4 md:p-6 lg:p-8 space-y-6">
           <section className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-semibold text-gray-800">Guide Allocation</h1>
-              <p className="text-gray-500 mt-1">Interactive guide assignment powered by Supabase</p>
+              <h1 className="text-2xl font-semibold text-slate-800">Guide Allocation</h1>
+              <p className="text-slate-500 mt-1">Interactive guide assignment powered by Supabase</p>
             </div>
             <div className="flex flex-wrap gap-3">
               <button
                 type="button"
                 onClick={runRandomAllocation}
                 disabled={loading || saving}
-                className="px-4 py-2.5 rounded-xl bg-teal-600 text-white font-semibold shadow-md hover:bg-teal-700 transition-colors disabled:opacity-60"
+                className="px-4 py-2.5 rounded-xl btn-primary font-semibold disabled:opacity-60"
               >
                 Run Random Allocation
               </button>
@@ -403,7 +403,7 @@ export default function AdminGuideAllocation() {
                 type="button"
                 onClick={resetAllocation}
                 disabled={loading || saving}
-                className="px-4 py-2.5 rounded-xl border border-teal-200 text-teal-700 font-semibold bg-white hover:bg-teal-50 transition-colors disabled:opacity-60"
+                className="px-4 py-2.5 rounded-xl border border-teal-200 text-teal-700 font-semibold bg-white/90 hover:bg-teal-50 transition-colors disabled:opacity-60"
               >
                 Reset Allocation
               </button>
@@ -411,7 +411,7 @@ export default function AdminGuideAllocation() {
           </section>
 
           {loading ? (
-            <div className="flex items-center gap-3 text-sm text-gray-600">
+            <div className="flex items-center gap-3 text-sm text-slate-600">
               <span className="inline-block h-4 w-4 rounded-full border-2 border-teal-600 border-t-transparent animate-spin" />
               Loading guide allocation data...
             </div>
@@ -419,16 +419,16 @@ export default function AdminGuideAllocation() {
           {error ? <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
           {notice ? <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">{notice}</div> : null}
 
-          <section className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-100">
-              <h2 className="text-lg font-semibold text-gray-800">Project Allocation Table</h2>
+          <section className="bg-white/90 rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200/70">
+              <h2 className="text-lg font-semibold text-slate-800">Project Allocation Table</h2>
               <div className="mt-3 flex items-center gap-3">
-                <label className="text-sm text-gray-600 font-medium" htmlFor="class-filter">Class Filter</label>
+                <label className="text-sm text-slate-600 font-medium" htmlFor="class-filter">Class Filter</label>
                 <select
                   id="class-filter"
                   value={selectedClassId}
                   onChange={(event) => setSelectedClassId(event.target.value)}
-                  className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/40 min-w-[200px]"
+                  className="glass-input rounded-xl px-3 py-2.5 text-sm text-slate-700 min-w-[200px]"
                 >
                   <option value="">All Classes</option>
                   {classes.map((item) => (
@@ -439,7 +439,7 @@ export default function AdminGuideAllocation() {
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[920px] text-sm">
-                <thead className="bg-gray-50 text-gray-600">
+                <thead className="bg-slate-100/70 text-slate-600">
                   <tr>
                     <th className="px-6 py-3 text-left font-semibold">Project Name</th>
                     <th className="px-6 py-3 text-left font-semibold">Assigned Guide</th>
@@ -447,7 +447,7 @@ export default function AdminGuideAllocation() {
                     <th className="px-6 py-3 text-left font-semibold">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-slate-200/70">
                   {filteredProjects.map((project) => {
                     const currentGuideId = project.allocated_guide_id || project.guide_id || "";
                     const fallbackGuide = mentorById.get(currentGuideId);
@@ -458,12 +458,12 @@ export default function AdminGuideAllocation() {
                     const isAssigned = Boolean(currentGuideId);
 
                     return (
-                      <tr key={project.id} className="hover:bg-gray-50">
+                      <tr key={project.id} className="hover:bg-slate-50">
                         <td className="px-6 py-4">
-                          <p className="font-medium text-gray-800">{project.title}</p>
-                          <p className="text-xs text-gray-500 mt-0.5">{project.class_name || classNameById.get(project.class_id) || "-"}</p>
+                          <p className="font-medium text-slate-800">{project.title}</p>
+                          <p className="text-xs text-slate-500 mt-0.5">{project.class_name || classNameById.get(project.class_id) || "-"}</p>
                         </td>
-                        <td className="px-6 py-4 text-gray-700">{assignedGuide}</td>
+                        <td className="px-6 py-4 text-slate-700">{assignedGuide}</td>
                         <td className="px-6 py-4">
                           {isAssigned ? (
                             <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">Assigned</span>
@@ -476,7 +476,7 @@ export default function AdminGuideAllocation() {
                             <select
                               value={selection}
                               onChange={(event) => setSelectedGuides((prev) => ({ ...prev, [project.id]: event.target.value }))}
-                              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/40"
+                              className="glass-input rounded-lg px-3 py-2 text-sm text-slate-700"
                             >
                               <option value="">Select guide</option>
                               <option value={NONE_GUIDE_VALUE}>None (Unassign)</option>
@@ -494,7 +494,7 @@ export default function AdminGuideAllocation() {
                               type="button"
                               onClick={() => assignGuide(project.id, selection)}
                               disabled={loading || saving || !selection || !allowed}
-                              className="px-3 py-2 rounded-lg bg-teal-600 text-white text-sm font-semibold hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              className="px-3 py-2 rounded-lg btn-primary text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               {selection === NONE_GUIDE_VALUE ? "Unassign" : isAssigned ? "Reassign" : "Assign"}
                             </button>
@@ -505,7 +505,7 @@ export default function AdminGuideAllocation() {
                   })}
                   {filteredProjects.length === 0 && !loading ? (
                     <tr>
-                      <td colSpan={4} className="px-6 py-8 text-center text-sm text-gray-500">No projects found.</td>
+                      <td colSpan={4} className="px-6 py-8 text-center text-sm text-slate-500">No projects found.</td>
                     </tr>
                   ) : null}
                 </tbody>
@@ -514,24 +514,24 @@ export default function AdminGuideAllocation() {
           </section>
 
           <section className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <div className="rounded-lg bg-white border border-gray-100 p-3">
-              <p className="text-xs text-gray-500">Total Projects</p>
-              <p className="text-xl font-semibold text-gray-800">{summary.totalProjects}</p>
+            <div className="rounded-lg bg-white/90 border border-slate-200/70 p-3">
+              <p className="text-xs text-slate-500">Total Projects</p>
+              <p className="text-xl font-semibold text-slate-800">{summary.totalProjects}</p>
             </div>
-            <div className="rounded-lg bg-white border border-gray-100 p-3">
-              <p className="text-xs text-gray-500">Assigned Projects</p>
+            <div className="rounded-lg bg-white/90 border border-slate-200/70 p-3">
+              <p className="text-xs text-slate-500">Assigned Projects</p>
               <p className="text-xl font-semibold text-emerald-700">{summary.assignedProjects}</p>
             </div>
-            <div className="rounded-lg bg-white border border-gray-100 p-3">
-              <p className="text-xs text-gray-500">Unassigned Projects</p>
+            <div className="rounded-lg bg-white/90 border border-slate-200/70 p-3">
+              <p className="text-xs text-slate-500">Unassigned Projects</p>
               <p className="text-xl font-semibold text-rose-700">{summary.unassignedProjects}</p>
             </div>
-            <div className="rounded-lg bg-white border border-gray-100 p-3">
-              <p className="text-xs text-gray-500">Total Guides</p>
-              <p className="text-xl font-semibold text-gray-800">{summary.totalGuides}</p>
+            <div className="rounded-lg bg-white/90 border border-slate-200/70 p-3">
+              <p className="text-xs text-slate-500">Total Guides</p>
+              <p className="text-xl font-semibold text-slate-800">{summary.totalGuides}</p>
             </div>
-            <div className="rounded-lg bg-white border border-gray-100 p-3">
-              <p className="text-xs text-gray-500">Fully Occupied</p>
+            <div className="rounded-lg bg-white/90 border border-slate-200/70 p-3">
+              <p className="text-xs text-slate-500">Fully Occupied</p>
               <p className="text-xl font-semibold text-amber-700">{summary.fullGuides}</p>
             </div>
           </section>

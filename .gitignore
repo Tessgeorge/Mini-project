@@ -36,3 +36,6 @@ dist-ssr/
 *.njsproj
 *.sln
 *.sw?
+
+# Local database migration scratch files
+database-migrations/

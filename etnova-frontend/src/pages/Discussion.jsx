@@ -71,6 +71,7 @@ export default function Discussion() {
   const typingTimeout = useRef(null);
   const endRef = useRef(null);
   const textareaRef = useRef(null);
+  const hasInitializedRef = useRef(false);
 
   const getReadsStorageKey = useCallback((projectId, userId) => {
     return `${READS_STORAGE_PREFIX}:${projectId || "none"}:${userId || "none"}`;
@@ -257,6 +258,9 @@ export default function Discussion() {
 
   /* ── Init ── */
   useEffect(() => {
+    if (hasInitializedRef.current) return undefined;
+    hasInitializedRef.current = true;
+
     let mounted = true;
     (async () => {
       setLoading(true); setError("");

@@ -287,8 +287,8 @@ export default function MentorDiscussion({
 
   return (
     <div className="h-[calc(100vh-250px)] min-h-[560px] bg-slate-100 rounded-3xl border border-slate-200 overflow-hidden flex">
-      <aside className="hidden lg:flex w-80 bg-[#f2f6fb] border-r border-slate-200 flex-col">
-        <div className="px-5 py-4 border-b border-slate-200 bg-[#e7eef8]">
+      <aside className="hidden lg:flex w-80 bg-slate-100 border-r border-slate-200 flex-col">
+        <div className="px-5 py-4 border-b border-slate-200 bg-slate-200/60">
           <p className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Team Discussion</p>
           <h3 className="text-xl font-black text-slate-900 leading-snug mt-1.5 whitespace-normal break-words">{projectTitle}</h3>
           <p className="text-slate-500 mt-1 text-xs">{participants.length} participants</p>

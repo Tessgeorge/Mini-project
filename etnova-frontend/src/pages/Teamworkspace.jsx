@@ -51,6 +51,57 @@ const MAX_SCORE = RUBRIC.reduce((s, c) => s + c.max, 0);
 const sClr = s => s >= 90 ? "text-emerald-600" : s >= 70 ? "text-amber-500" : "text-red-500";
 const sBg = s => s >= 90 ? "bg-emerald-500" : s >= 70 ? "bg-amber-400" : "bg-red-400";
 
+let teamEvalInsertStrategy = null;
+
+function normalizeTeamEvaluationRow(row) {
+  if (!row) return row;
+  return {
+    ...row,
+    phase: row.phase || row.evaluation_type || "Phase 1",
+    score: row.score ?? row.obtained_marks ?? 0,
+  };
+}
+
+async function insertTeamEvaluation(mentorId, payload) {
+  const candidates = teamEvalInsertStrategy
+    ? [teamEvalInsertStrategy]
+    : [
+      {
+        evaluatorKey: "evaluator_id",
+        stageKey: "evaluation_type",
+        scoreKeys: { obtained: "obtained_marks", max: "max_marks" },
+      },
+      {
+        evaluatorKey: "guide_id",
+        stageKey: "phase",
+        scoreKeys: { obtained: "score", max: null },
+      },
+    ];
+
+  for (const candidate of candidates) {
+    const insertRow = {
+      project_id: payload.projectId,
+      feedback: payload.feedback,
+      [candidate.evaluatorKey]: mentorId,
+      [candidate.stageKey]: payload.phase,
+    };
+    if (candidate.scoreKeys.obtained) insertRow[candidate.scoreKeys.obtained] = payload.score;
+    if (candidate.scoreKeys.max) insertRow[candidate.scoreKeys.max] = payload.maxScore;
+
+    const { data, error } = await supabase
+      .from("evaluations")
+      .insert([insertRow])
+      .select()
+      .single();
+
+    if (error) continue;
+    teamEvalInsertStrategy = candidate;
+    return normalizeTeamEvaluationRow(data);
+  }
+
+  throw new Error("Failed to submit evaluation.");
+}
+
 function ago(ts) {
   if (!ts) return "—";
   const d = Math.floor((Date.now() - new Date(ts)) / 1000);
@@ -637,8 +688,8 @@ function UpcomingDeadlines({ phaseIdx, milestoneDates, reviewDeadlines = [] }) {
             </div>
 
             <div className="mb-2 grid grid-cols-7">
-              {["S", "M", "T", "W", "T", "F", "S"].map((d) => (
-                <p key={d} className="text-center text-[10px] font-bold text-slate-400">{d}</p>
+              {["S", "M", "T", "W", "T", "F", "S"].map((d, index) => (
+                <p key={`${d}-${index}`} className="text-center text-[10px] font-bold text-slate-400">{d}</p>
               ))}
             </div>
 
@@ -1242,8 +1293,14 @@ function TabEvaluation({ projId, mentorId, mentorName, members, evaluations, set
 
   const submit = async () => {
     setSaving(true);
-    const { data, error } = await supabase.from("evaluations").insert([{ project_id: projId, guide_id: mentorId, phase, score: total, feedback: fb }]).select().single();
-    if (!error && data) {
+    const data = await insertTeamEvaluation(mentorId, {
+      projectId: projId,
+      phase,
+      score: total,
+      maxScore: MAX_SCORE,
+      feedback: fb,
+    }).catch(() => null);
+    if (data) {
       setEvaluations(p => [data, ...p]);
       setShowForm(false);
       setFb("");
@@ -1319,7 +1376,7 @@ function TabEvaluation({ projId, mentorId, mentorName, members, evaluations, set
       )}
       <div className="space-y-3">
         {evaluations.map((ev, i) => (
-          <div key={ev.id || i} className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
+          <div key={ev.id || `${ev.project_id || projId}-${ev.created_at || "time"}-${i}`} className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
             <div className="flex justify-between items-start mb-3">
               <div><span className="font-bold text-gray-900">{ev.phase}</span><span className="ml-2 text-xs text-gray-400">{ago(ev.created_at)}</span></div>
               <div className="flex items-center gap-2"><div className={"w-2 h-2 rounded-full " + sBg(ev.score || 0)} /><span className={"text-2xl font-extrabold " + sClr(ev.score || 0)}>{ev.score || 0}<span className="text-sm text-gray-400 font-normal">/100</span></span></div>
@@ -1397,7 +1454,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
   useEffect(() => {
     setLoading(true);
     Promise.all([
-      supabase.from("evaluations").select("*").eq("project_id", proj.id).order("created_at", { ascending: false }),
+      supabase.from("evaluations").select("*").eq("project_id", proj.id),
       supabase.from("documents").select("id,project_id,uploaded_by,document_type,file_name,file_url,file_size,version,status,uploaded_at,feedback,profiles:uploaded_by(full_name,email,roll_number)").eq("project_id", proj.id).order("uploaded_at", { ascending: false }),
       supabase.from("project_milestones").select("phase_index,due_date").eq("project_id", proj.id).order("phase_index", { ascending: true }),
       proj.class_id
@@ -1410,7 +1467,10 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
           .order("deadline", { ascending: true })
         : Promise.resolve({ data: [] }),
     ]).then(([ev, doc, ms, stages]) => {
-      setEvaluations(ev.data || []);
+      const normalizedEvaluations = (ev.data || [])
+        .map(normalizeTeamEvaluationRow)
+        .sort((a, b) => new Date(b?.created_at || 0) - new Date(a?.created_at || 0));
+      setEvaluations(normalizedEvaluations);
       setDocuments(doc.data || []);
       // Build flat array indexed by phase_index [0..5]
       const dates = Array(6).fill(null);
@@ -1436,8 +1496,14 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
   }, [proj.id]);
 
   const submitReview = async ({ phase, scores, total, feedback }) => {
-    const { data, error } = await supabase.from("evaluations").insert([{ project_id: proj.id, guide_id: mentorId, phase, score: total, feedback }]).select().single();
-    if (!error && data) {
+    const data = await insertTeamEvaluation(mentorId, {
+      projectId: proj.id,
+      phase,
+      score: total,
+      maxScore: MAX_SCORE,
+      feedback,
+    }).catch(() => null);
+    if (data) {
       setEvaluations(p => [data, ...p]);
       setShowReview(false);
 

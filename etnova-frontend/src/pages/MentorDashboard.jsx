@@ -4,6 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../config/supabaseClient";
 import ProfileMenu from "../components/ProfileMenu";
 import Modal from "../components/Modal";
+import AppSidebar from "../components/Sidebar";
+import AppTopBar from "../components/TopBar";
 
 // ─── Icons ─────────────────────────────────────────────────────────────────
 const Icon = {
@@ -33,6 +35,87 @@ const Icon = {
 const scoreClr = s => s >= 90 ? "text-emerald-600" : s >= 70 ? "text-amber-500" : "text-red-500";
 const scoreBg = s => s >= 90 ? "bg-emerald-500" : s >= 70 ? "bg-amber-400" : "bg-red-400";
 
+let mentorEvalFilterStrategy = null;
+let mentorEvalInsertStrategy = null;
+
+function normalizeMentorEvaluationRow(row) {
+  if (!row) return row;
+  return {
+    ...row,
+    phase: row.phase || row.evaluation_type || "Phase 1",
+    score: row.score ?? row.obtained_marks ?? 0,
+  };
+}
+
+async function fetchEvaluationsForMentor(mentorId) {
+  const filters = mentorEvalFilterStrategy ? [mentorEvalFilterStrategy] : ["evaluator_id", "guide_id"];
+  for (const filterColumn of filters) {
+    const { data, error } = await supabase
+      .from("evaluations")
+      .select("*")
+      .eq(filterColumn, mentorId);
+
+    if (error) continue;
+    mentorEvalFilterStrategy = filterColumn;
+    return (data || [])
+      .map(normalizeMentorEvaluationRow)
+      .sort((a, b) => new Date(b?.created_at || 0) - new Date(a?.created_at || 0));
+  }
+  return [];
+}
+
+async function fetchSystemSettingsRows() {
+  const { data } = await supabase
+    .from("system_settings")
+    .select("*");
+
+  return (data || []).sort((a, b) => {
+    const aTs = new Date(a?.created_at || a?.updated_at || 0).getTime();
+    const bTs = new Date(b?.created_at || b?.updated_at || 0).getTime();
+    return aTs - bTs;
+  });
+}
+
+async function insertMentorEvaluation(mentorId, payload) {
+  const candidates = mentorEvalInsertStrategy
+    ? [mentorEvalInsertStrategy]
+    : [
+      {
+        evaluatorKey: "evaluator_id",
+        stageKey: "evaluation_type",
+        scoreKeys: { obtained: "obtained_marks", max: "max_marks" },
+      },
+      {
+        evaluatorKey: "guide_id",
+        stageKey: "phase",
+        scoreKeys: { obtained: "score", max: null },
+      },
+    ];
+
+  for (const candidate of candidates) {
+    const insertRow = {
+      project_id: payload.projectId,
+      feedback: payload.feedback,
+      [candidate.evaluatorKey]: mentorId,
+      [candidate.stageKey]: payload.phase,
+    };
+    if (candidate.scoreKeys.obtained) insertRow[candidate.scoreKeys.obtained] = payload.score;
+    if (candidate.scoreKeys.max) insertRow[candidate.scoreKeys.max] = payload.maxScore;
+
+    const { data, error } = await supabase
+      .from("evaluations")
+      .insert([insertRow])
+      .select()
+      .single();
+
+    if (error) continue;
+    mentorEvalInsertStrategy = candidate;
+    return normalizeMentorEvaluationRow(data);
+  }
+
+  throw new Error("Failed to submit evaluation.");
+}
+
 const STATUS_MAP = {
   active: { pill: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-500", label: "Active" },
   pending: { pill: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-400", label: "Pending" },
@@ -59,6 +142,12 @@ function formatClassScore(value) {
 }
 
 const REVIEW_STAGE_ORDER = ["Idea", "Abstract", "Zeroth Review", "First Review", "Second Review", "Final Review"];
+const MENTOR_NAV_ITEMS = [
+  { id: "overview", label: "Dashboard", icon: "dashboard" },
+  { id: "teams", label: "My Teams", icon: "group" },
+  { id: "evaluation", label: "Evaluation", icon: "grading" },
+  { id: "my-class", label: "My Class", icon: "apartment" },
+];
 
 function normalizeReviewStageName(stageName) {
   const value = String(stageName || "").trim().toLowerCase();
@@ -496,7 +585,7 @@ function MentorProfileModal({ profile, onClose, onSave, onSignOut, startEditing 
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#e8edf2]/92 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-200/92 backdrop-blur-sm p-4">
       <div
         className="w-full max-w-[380px] overflow-hidden rounded-[20px] bg-white shadow-[0_24px_60px_rgba(15,23,42,0.14)]"
         style={{ fontFamily: '"Nunito", "Inter", "Segoe UI", sans-serif' }}
@@ -1939,11 +2028,13 @@ function EvaluationTab({ projects, evaluations, setEvaluations, mentorId, loadin
     if (!form.projectId || !form.score || !form.feedback) { setErr("Please fill all fields."); return; }
     setSaving(true); setErr("");
     try {
-      const { data, error } = await supabase.from("evaluations").insert([{
-        project_id: form.projectId, guide_id: mentorId,
-        phase: form.phase, score: Number(form.score), feedback: form.feedback,
-      }]).select().single();
-      if (error) throw error;
+      const data = await insertMentorEvaluation(mentorId, {
+        projectId: form.projectId,
+        phase: form.phase,
+        score: Number(form.score),
+        maxScore: 100,
+        feedback: form.feedback,
+      });
       setEvaluations(p => [data, ...p]);
       setForm({ projectId: "", phase: "Phase 1", score: "", feedback: "" });
       setOk(true); setTimeout(() => setOk(false), 2500);
@@ -2010,8 +2101,8 @@ function EvaluationTab({ projects, evaluations, setEvaluations, mentorId, loadin
         <div className="space-y-3 overflow-y-auto max-h-[540px] pr-1">
           {filtered.length === 0 ? (
             <p className="text-sm text-gray-400">No evaluations submitted yet.</p>
-          ) : filtered.map(ev => (
-            <div key={ev.id} className="bg-gray-50 border border-gray-100 rounded-xl p-4">
+          ) : filtered.map((ev, index) => (
+            <div key={ev.id || `${ev.project_id || "project"}-${ev.created_at || "time"}-${index}`} className="bg-gray-50 border border-gray-100 rounded-xl p-4">
               <div className="flex justify-between items-center">
                 <div>
                   <span className="font-bold text-gray-800 text-sm">{projects.find(p => p.id === ev.project_id)?.title || "—"}</span>
@@ -2067,7 +2158,7 @@ export default function MentorDashboard() {
         ? supabase.from("team_members").select("id, project_id").in("project_id", projectIds)
         : Promise.resolve({ data: [] }),
       projectIds.length
-        ? supabase.from("evaluations").select("id, project_id, score").in("project_id", projectIds)
+        ? supabase.from("evaluations").select("id, project_id, obtained_marks").in("project_id", projectIds)
         : Promise.resolve({ data: [] }),
       guideIds.length
         ? supabase.from("profiles").select("id, full_name").in("id", guideIds)
@@ -2084,7 +2175,8 @@ export default function MentorDashboard() {
     }, {});
     const evalByProject = classEvals.reduce((acc, item) => {
       if (!acc[item.project_id]) acc[item.project_id] = [];
-      acc[item.project_id].push(Number(item.score) || 0);
+      const normalizedScore = Number(item.score ?? item.obtained_marks) || 0;
+      acc[item.project_id].push(normalizedScore);
       return acc;
     }, {});
 
@@ -2146,21 +2238,15 @@ export default function MentorDashboard() {
           setProjects(projData || []);
 
           // Evaluations by this mentor
-          const { data: evalData } = await supabase
-            .from("evaluations").select("*")
-            .eq("guide_id", profile.id)
-            .order("created_at", { ascending: false });
+          const evalData = await fetchEvaluationsForMentor(profile.id);
           setEvaluations(evalData || []);
 
           // Milestones (system_settings table) — read admin-controlled deadlines
-          const { data: msData } = await supabase
-            .from("system_settings")
-            .select("*")
-            .order("created_at", { ascending: true });
+          const msData = await fetchSystemSettingsRows();
           // Map to milestone shape — adjust column names if needed
           setMilestones((msData || []).map(m => ({
-            title: m.key || m.title || m.name,
-            due_date: m.value || m.due_date || "—",
+            title: m.setting_key || m.key || m.title || m.name,
+            due_date: m.setting_value || m.value || m.due_date || "—",
             status: m.status || "upcoming",
           })).filter(m => m.due_date !== "—" && m.due_date?.includes("-")));
 
@@ -2244,11 +2330,13 @@ export default function MentorDashboard() {
   // Submit review from any tab
   const handleSubmitReview = async ({ projectId, phase, score, feedback }) => {
     try {
-      const { data, error } = await supabase.from("evaluations").insert([{
-        project_id: projectId, guide_id: mentorProfile?.id,
-        phase, score: Number(score), feedback,
-      }]).select().single();
-      if (error) throw error;
+      const data = await insertMentorEvaluation(mentorProfile?.id, {
+        projectId,
+        phase,
+        score: Number(score),
+        maxScore: 100,
+        feedback,
+      });
       setEvaluations(p => [data, ...p]);
       // Update recent activity
       const proj = projects.find(p => p.id === projectId);
@@ -2295,18 +2383,39 @@ export default function MentorDashboard() {
     navigate("/");
   };
 
+  const activeTitle = active === "teams"
+    ? "My Teams"
+    : active === "evaluation"
+      ? "Evaluation"
+      : active === "my-class"
+        ? "My Class"
+        : "Dashboard";
+
+  const mentorNavItems = isCoordinatorWithClass
+    ? MENTOR_NAV_ITEMS
+    : MENTOR_NAV_ITEMS.filter((item) => item.id !== "my-class");
+
   return (
-    <div className="flex min-h-screen bg-gray-50">
-      <Sidebar active={active} setActive={setActive} onSignOut={handleSignOut} showMyClass={isCoordinatorWithClass} />
-      <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="flex min-h-[100dvh] w-full etnova-bg overflow-hidden">
+      <AppSidebar
+        navItems={mentorNavItems}
+        activeItem={active}
+        onNavigate={setActive}
+        onLogout={handleSignOut}
+        portalSubtitle="Mentor Portal"
+        showMobileNav={false}
+      />
+      <div className="flex-1 min-h-0 md:ml-64 flex flex-col overflow-hidden">
         <div className="relative">
-          <Topbar
-            active={active}
-            mentorName={mentorProfile?.full_name}
-            showMyClass={isCoordinatorWithClass}
+          <AppTopBar
+            title={activeTitle}
+            subtitle="Home"
+            profile={{ full_name: mentorProfile?.full_name || "Mentor" }}
             onProfileClick={() => {
               setShowProfileMenu((value) => !value);
             }}
+            showSearch={false}
+            notificationCount={0}
           />
           {showProfileMenu && (
             <div className="fixed top-14 right-2 sm:right-6 md:right-8 z-50">
@@ -2331,7 +2440,7 @@ export default function MentorDashboard() {
             </div>
           )}
         </div>
-        <main className="flex-1 overflow-y-auto p-8">
+        <main className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 lg:p-8">
           {active === "overview" && (
             <OverviewTab
               projects={projects}

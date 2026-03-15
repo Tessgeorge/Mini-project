@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import TopBar from "../components/TopBar";
 import ProfileMenu from "../components/ProfileMenu";
@@ -272,6 +272,7 @@ function Onboarding({ profile, onCreate, onJoin }) {
 // Main Component
 export default function StudentDashboard() {
   const navigate = useNavigate();
+  const hasInitializedRef = useRef(false);
   const goToStudentTab = useCallback(
     (tab) => {
       const routeByTab = {
@@ -387,7 +388,11 @@ export default function StudentDashboard() {
     }
   }, [loadClassDeadlines]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    if (hasInitializedRef.current) return;
+    hasInitializedRef.current = true;
+    loadData();
+  }, [loadData]);
 
   useEffect(() => {
     if (!studentClassId) return undefined;

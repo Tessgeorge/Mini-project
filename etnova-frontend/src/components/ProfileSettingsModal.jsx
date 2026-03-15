@@ -75,14 +75,18 @@ export default function ProfileSettingsModal({ isOpen, onClose, profile, onSucce
         >
             <form onSubmit={handleSubmit} className="p-6 space-y-5">
                 {error && (
-                    <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                        {error}
+                    <div className="glass-alert flex items-center gap-2 px-4 py-3 text-sm font-medium"
+                        style={{ background: 'rgba(244,63,94,0.07)', borderColor: 'rgba(244,63,94,0.25)', color: '#be123c' }}>
+                        <span className="material-symbols-outlined text-base flex-shrink-0">error</span>
+                        <span>{error}</span>
                     </div>
                 )}
 
                 {success && (
-                    <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-                        {success}
+                    <div className="glass-alert flex items-center gap-2 px-4 py-3 text-sm font-medium"
+                        style={{ background: 'rgba(16,185,129,0.07)', borderColor: 'rgba(16,185,129,0.25)', color: '#065f46' }}>
+                        <span className="material-symbols-outlined text-base flex-shrink-0">check_circle</span>
+                        <span>{success}</span>
                     </div>
                 )}
 
@@ -96,7 +100,7 @@ export default function ProfileSettingsModal({ isOpen, onClose, profile, onSucce
                         id="email"
                         value={profile?.email || ''}
                         disabled
-                        className="w-full px-4 py-3 bg-slate-100 border border-slate-200 rounded-xl text-slate-500 cursor-not-allowed"
+                        className="glass-input w-full px-4 py-3 text-slate-400 cursor-not-allowed opacity-70"
                     />
                     <p className="text-xs text-slate-500 mt-1">Email cannot be changed</p>
                 </div>
@@ -113,7 +117,7 @@ export default function ProfileSettingsModal({ isOpen, onClose, profile, onSucce
                         value={formData.full_name}
                         onChange={handleChange}
                         required
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900"
+                        className="glass-input w-full px-4 py-3 text-slate-900 placeholder:text-slate-400 outline-none"
                         placeholder="Enter your full name"
                     />
                 </div>
@@ -131,7 +135,7 @@ export default function ProfileSettingsModal({ isOpen, onClose, profile, onSucce
                             value={formData.roll_number}
                             onChange={handleChange}
                             required
-                            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900"
+                            className="glass-input w-full px-4 py-3 text-slate-900 placeholder:text-slate-400 outline-none"
                             placeholder="e.g., CS21B001"
                         />
                     </div>
@@ -150,7 +154,7 @@ export default function ProfileSettingsModal({ isOpen, onClose, profile, onSucce
                             required
                             min="1"
                             max="8"
-                            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900"
+                            className="glass-input w-full px-4 py-3 text-slate-900 placeholder:text-slate-400 outline-none"
                             placeholder="e.g., 6"
                         />
                     </div>
@@ -168,7 +172,7 @@ export default function ProfileSettingsModal({ isOpen, onClose, profile, onSucce
                             name="department"
                             value={formData.department}
                             onChange={handleChange}
-                            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900"
+                            className="glass-input w-full px-4 py-3 text-slate-900 placeholder:text-slate-400 outline-none"
                             placeholder="e.g., Computer Science"
                         />
                     </div>
@@ -184,7 +188,7 @@ export default function ProfileSettingsModal({ isOpen, onClose, profile, onSucce
                             name="class_section"
                             value={formData.class_section}
                             onChange={handleChange}
-                            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900"
+                            className="glass-input w-full px-4 py-3 text-slate-900 placeholder:text-slate-400 outline-none"
                             placeholder="e.g., A"
                         />
                     </div>
@@ -201,7 +205,7 @@ export default function ProfileSettingsModal({ isOpen, onClose, profile, onSucce
                         name="phone"
                         value={formData.phone}
                         onChange={handleChange}
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900"
+                        className="glass-input w-full px-4 py-3 text-slate-900 placeholder:text-slate-400 outline-none"
                         placeholder="e.g., +91 9876543210"
                     />
                 </div>
@@ -212,7 +216,7 @@ export default function ProfileSettingsModal({ isOpen, onClose, profile, onSucce
                         <button
                             type="button"
                             onClick={onClose}
-                            className="flex-1 px-4 py-3 rounded-xl bg-slate-100 text-slate-700 font-bold text-sm hover:bg-slate-200 transition-all"
+                            className="flex-1 px-4 py-3 rounded-xl bg-white/60 border border-slate-200/70 text-slate-700 font-bold text-sm hover:bg-white/80 transition-all"
                             disabled={loading}
                         >
                             Cancel
@@ -220,11 +224,12 @@ export default function ProfileSettingsModal({ isOpen, onClose, profile, onSucce
                     )}
                     <button
                         type="submit"
-                        className={`${requireCompletion ? 'w-full' : 'flex-1'} px-4 py-3 rounded-xl text-black font-bold text-sm hover:opacity-90 transition-all shadow-md`}
-                        style={{ backgroundColor: '#00D2C4' }}
+                        className={`btn-primary ${requireCompletion ? 'w-full' : 'flex-1'} py-3 text-sm flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed`}
                         disabled={loading}
                     >
-                        {loading ? 'Saving...' : 'Save Changes'}
+                        {loading ? (
+                            <><div className="size-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Saving...</>
+                        ) : 'Save Changes'}
                     </button>
                 </div>
             </form>

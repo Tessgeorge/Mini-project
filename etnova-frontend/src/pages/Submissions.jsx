@@ -63,6 +63,7 @@ function SectionHeader({ icon, iconColor = '#00C4B4', title, children }) {
 export default function Submissions() {
     const fileInputRef = useRef(null);
     const uploadFormRef = useRef(null);
+    const hasInitializedRef = useRef(false);
 
     const [project, setProject] = useState(null);
     const [documents, setDocuments] = useState([]);
@@ -75,7 +76,11 @@ export default function Submissions() {
     const [selectedFile, setSelectedFile] = useState(null);
     const [isDragging, setIsDragging] = useState(false);
 
-    useEffect(() => { loadData(true); }, []);
+    useEffect(() => {
+        if (hasInitializedRef.current) return;
+        hasInitializedRef.current = true;
+        loadData(false);
+    }, []);
 
     useEffect(() => {
         if (!project?.id) return undefined;

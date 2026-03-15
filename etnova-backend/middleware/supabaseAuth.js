@@ -1,5 +1,7 @@
 import { supabase, supabaseAdmin } from '../config/supabase.js';
 
+const isDev = process.env.NODE_ENV !== 'production';
+
 // Middleware to verify Supabase JWT token
 export const authenticateUser = async (req, res, next) => {
   try {
@@ -13,7 +15,10 @@ export const authenticateUser = async (req, res, next) => {
 
     // Verify token with Supabase
     const { data: { user }, error } = await supabase.auth.getUser(token);
-    console.log('DEBUG AUTH: User ID:', user.id);
+
+    if (isDev && user?.id) {
+      console.log('DEBUG AUTH: User ID:', user.id);
+    }
 
     if (error || !user) {
       return res.status(401).json({ message: 'Invalid or expired token' });
@@ -25,7 +30,9 @@ export const authenticateUser = async (req, res, next) => {
       .eq('id', user.id)
       .single();
 
-        if (profileError) console.log('DEBUG AUTH: Profile fetch failed for ID:', user.id, profileError);
+    if (isDev && profileError) {
+      console.log('DEBUG AUTH: Profile fetch failed for ID:', user.id, profileError);
+    }
     if (profileError) {
       console.error('Profile fetch error:', profileError);
       // Continue with basic user info if profile fetch fails

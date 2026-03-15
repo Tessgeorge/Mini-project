@@ -7,12 +7,14 @@ export default function TopBar({
   onProfileClick,
   notificationCount = 0,
   onNotificationClick,
+  badgeLabel,
   searchValue = "",
   onSearchChange,
   onSearchSubmit,
   searchResults = [],
   onSearchResultSelect,
   searchPlaceholder = "Search...",
+  showSearch = true,
 }) {
   const initial = profile?.full_name?.charAt(0).toUpperCase() || "U";
   const searchWrapRef = useRef(null);
@@ -42,6 +44,13 @@ export default function TopBar({
       </div>
 
       <div className="flex items-center gap-2 sm:gap-4">
+        {badgeLabel ? (
+          <span className="hidden md:inline-flex px-3 py-1 rounded-full text-xs font-semibold badge-teal">
+            {badgeLabel}
+          </span>
+        ) : null}
+
+        {showSearch ? (
         <div ref={searchWrapRef} className="relative w-56 hidden sm:block">
           <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-base">search</span>
           <input
@@ -110,10 +119,11 @@ export default function TopBar({
             </div>
           )}
         </div>
+        ) : null}
 
         <button
           className="relative p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-white/60 transition-all"
-          onClick={onNotificationClick}
+          onClick={() => onNotificationClick?.()}
           title="Notifications"
         >
           <span className="material-symbols-outlined text-[22px]">notifications</span>
