@@ -70,52 +70,43 @@ function isUuid(value) {
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-async function fetchSubmissionCountsByStage(stageIds, selectedClass) {
-  if (!Array.isArray(stageIds) || stageIds.length === 0) return {};
+function stageNameFromDocumentType(documentType) {
+  const value = String(documentType || "").trim().toLowerCase();
+  if (value === "abstract") return "Abstract";
+  if (value === "proposal" || value === "srs") return "Zeroth Review";
+  if (value === "report") return "First Review";
+  if (value === "presentation") return "Second Review";
+  if (value === "final_report") return "Final Review";
+  return "";
+}
 
-  const queryOptions = [
-    { table: "stage_submissions", idColumn: "stage_id", classColumn: "class_id" },
-    { table: "stage_submissions", idColumn: "review_stage_id", classColumn: "class_id" },
-    { table: "review_stage_submissions", idColumn: "stage_id", classColumn: "class_id" },
-    { table: "review_stage_submissions", idColumn: "review_stage_id", classColumn: "class_id" },
-    { table: "stage_submissions", idColumn: "stage_id", classColumn: "class" },
-    { table: "stage_submissions", idColumn: "review_stage_id", classColumn: "class" },
-    { table: "review_stage_submissions", idColumn: "stage_id", classColumn: "class" },
-    { table: "review_stage_submissions", idColumn: "review_stage_id", classColumn: "class" },
-    { table: "stage_submissions", idColumn: "stage_id", classColumn: "class_name" },
-    { table: "review_stage_submissions", idColumn: "stage_id", classColumn: "class_name" },
-  ];
+async function fetchSubmissionCountsByStage(stageRows, classId) {
+  if (!Array.isArray(stageRows) || stageRows.length === 0 || !classId) return {};
 
-  const optionsToTry = submissionCountStrategyChecked
-    ? (submissionCountStrategy ? [submissionCountStrategy] : [])
-    : queryOptions;
+  const stageIdByName = new Map(
+    stageRows.map((row) => [normalizeStageName(row?.stage_name).toLowerCase(), row?.id]).filter((item) => item[1])
+  );
+  if (stageIdByName.size === 0) return {};
 
-  for (const option of optionsToTry) {
-    let query = supabase
-      .from(option.table)
-      .select(option.idColumn)
-      .in(option.idColumn, stageIds);
+  const { data, error } = await supabase
+    .from("documents")
+    .select("id, document_type, projects!inner(class_id)")
+    .eq("projects.class_id", classId);
 
-    if (option.classColumn) {
-      query = query.eq(option.classColumn, selectedClass);
-    }
+  if (error) return {};
 
-    const { data, error } = await query;
-    if (error) continue;
+  const counts = {};
+  (data || []).forEach((row) => {
+    const stageName = stageNameFromDocumentType(row?.document_type);
+    if (!stageName) return;
+    const stageId = stageIdByName.get(stageName.toLowerCase());
+    if (!stageId) return;
+    counts[stageId] = (counts[stageId] || 0) + 1;
+  });
 
-    submissionCountStrategy = option;
-    submissionCountStrategyChecked = true;
-
-    return (data || []).reduce((acc, row) => {
-      const key = row?.[option.idColumn];
-      if (!key) return acc;
-      acc[key] = (acc[key] || 0) + 1;
-      return acc;
-    }, {});
-  }
-
+  submissionCountStrategy = { table: "documents", idColumn: "document_type", classColumn: "projects.class_id" };
   submissionCountStrategyChecked = true;
-  return {};
+  return counts;
 }
 
 export default function AdminReviewManagement() {
@@ -232,8 +223,7 @@ export default function AdminReviewManagement() {
       return;
     }
 
-    const stageIds = rows.map((row) => row.id);
-    const submissionCounts = await fetchSubmissionCountsByStage(stageIds, classId);
+    const submissionCounts = await fetchSubmissionCountsByStage(rows, classId);
 
     const mappedStages = rows.map((row) => ({
       id: row.id,
@@ -722,28 +712,28 @@ export default function AdminReviewManagement() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen etnova-bg">
       <Sidebar
         activeItem="review-management"
         onSignOut={handleSignOut}
         onNavigate={handleNavigate}
       />
 
-      <main className="lg:ml-72 min-h-screen">
+      <main className="flex-1 min-h-0 md:ml-64 h-[100dvh] overflow-y-auto">
         <TopNavbar
           adminName={ADMIN_NAME}
           academicYearLabel="2026 - S6 Mini Project"
           pageTitle="Review Management"
         />
 
-        <div className="p-4 md:p-6 lg:p-8 bg-gray-50 space-y-6">
+        <div className="p-4 md:p-6 lg:p-8 space-y-6">
           <section className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
             <div className="flex flex-col gap-2">
-              <h1 className="text-2xl font-semibold text-gray-800">Review Management</h1>
-              <p className="text-gray-500">Control review stages and coordinator evaluation deadlines in realtime</p>
+              <h1 className="text-2xl font-semibold text-slate-800">Review Management</h1>
+              <p className="text-slate-500">Control review stages and coordinator evaluation deadlines in realtime</p>
             </div>
             <div className="flex items-center gap-3">
-              <label className="text-sm text-gray-600 font-medium" htmlFor="class-filter">Class</label>
+              <label className="text-sm text-slate-600 font-medium" htmlFor="class-filter">Class</label>
               <select
                 id="class-filter"
                 value={selectedClassId}
@@ -754,7 +744,7 @@ export default function AdminReviewManagement() {
                   setSelectedClassName(selectedClass?.name || "");
                   refreshData(nextClassId);
                 }}
-                className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/40 min-w-[180px]"
+                className="glass-input rounded-xl px-3 py-2.5 text-sm text-slate-700 min-w-[180px]"
               >
                 {classes.length === 0 ? <option value="">No classes</option> : null}
                 {classes.map((classItem) => (
@@ -770,8 +760,8 @@ export default function AdminReviewManagement() {
             </section>
           ) : null}
 
-          <section className="bg-white rounded-xl shadow-md border border-gray-100 p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">Review Timeline Overview</h2>
+          <section className="bg-white/90 rounded-2xl shadow-sm border border-slate-200/70 p-6">
+            <h2 className="text-lg font-semibold text-slate-800 mb-4">Review Timeline Overview</h2>
             <ReviewTimeline
               stages={stages}
               selectedClass={selectedClassName}

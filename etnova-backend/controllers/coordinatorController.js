@@ -14,6 +14,23 @@ async function getCoordinatorClassId(userId) {
   return data;
 }
 
+async function getScopedDocument(documentId, classId) {
+  const { data, error } = await supabase
+    .from('documents')
+    .select('id, project_id, projects!inner(class_id)')
+    .eq('id', documentId)
+    .single();
+
+  if (error || !data) return null;
+
+  const documentClassId = data.projects?.class_id;
+  if (!documentClassId || documentClassId !== classId) {
+    return null;
+  }
+
+  return data;
+}
+
 // ─── 1. GET /coordinator/class ───────────────────────────────────────────────
 // Overview page KPIs: class info + team count + eval counts + avg score
 export const getClassOverview = async (req, res) => {
@@ -178,6 +195,11 @@ export const verifySubmission = async (req, res) => {
     const coord = await getCoordinatorClassId(req.user.id);
     if (!coord?.class_id) return res.status(403).json({ message: 'Not a coordinator.' });
 
+    const scopedDocument = await getScopedDocument(req.params.id, coord.class_id);
+    if (!scopedDocument) {
+      return res.status(404).json({ message: 'Submission not found for your class.' });
+    }
+
     const { data, error } = await supabase
       .from('documents')
       .update({
@@ -204,6 +226,11 @@ export const returnSubmission = async (req, res) => {
     if (!coord?.class_id) return res.status(403).json({ message: 'Not a coordinator.' });
 
     const { reason } = req.body || {};
+
+    const scopedDocument = await getScopedDocument(req.params.id, coord.class_id);
+    if (!scopedDocument) {
+      return res.status(404).json({ message: 'Submission not found for your class.' });
+    }
 
     const { data, error } = await supabase
       .from('documents')

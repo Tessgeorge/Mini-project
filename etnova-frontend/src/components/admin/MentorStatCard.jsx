@@ -26,13 +26,13 @@ function StatIcon({ type }) {
 
 export default function MentorStatCard({ title, value, icon, borderClass }) {
   return (
-    <article className={`bg-white rounded-xl shadow-md border border-gray-100 border-t-4 ${borderClass} p-5`}>
+    <article className={`bg-white/90 rounded-2xl shadow-sm border border-slate-200/70 border-t-4 ${borderClass} p-5`}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm text-gray-500">{title}</p>
-          <p className="mt-2 text-2xl font-semibold text-gray-800">{value}</p>
+          <p className="text-sm text-slate-500">{title}</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-800">{value}</p>
         </div>
-        <div className="size-9 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center">
+        <div className="size-9 rounded-lg bg-teal-50/80 text-teal-600 flex items-center justify-center">
           <StatIcon type={icon} />
         </div>
       </div>

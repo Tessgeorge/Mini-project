@@ -12,6 +12,12 @@ const TOPICS = [
 ];
 
 const READS_STORAGE_PREFIX = "etnova_discussion_reads";
+const PAGE_SIZE = 30;
+
+const MESSAGE_SELECT_STRATEGIES = [
+  "id, project_id, sender_id, topic, message, reply_to, message_type, file_url, file_name, created_at",
+  "id, project_id, sender_id, topic, message, reply_to, created_at",
+];
 
 /* ── Helpers ───────────────────────────────────────────────────────────── */
 function fmtDay(iso) {
@@ -51,7 +57,14 @@ function Avatar({ name, size = 32 }) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
-export default function Discussion() {
+export default function Discussion({
+  projectId: externalProjectId = null,
+  userId: externalUserId = null,
+  userRole: externalUserRole = "student",
+  userName: externalUserName = "Participant",
+  initialMembers = null,
+  initialTitle = "",
+}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [project, setProject] = useState(null);
@@ -64,13 +77,27 @@ export default function Discussion() {
   const [deletingMessageId, setDeletingMessageId] = useState(null);
   const [typingUsers, setTypingUsers] = useState({});
   const [readByTopic, setReadByTopic] = useState({});
+  const [readStateByTopicUser, setReadStateByTopicUser] = useState({});
   const [onlineUserIds, setOnlineUserIds] = useState({});
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const [pendingLatestCount, setPendingLatestCount] = useState(0);
 
   const channelRef = useRef(null);
   const channelStatusRef = useRef("INIT");
+  const messageSelectStrategyRef = useRef(MESSAGE_SELECT_STRATEGIES[0]);
+  const messageInsertSupportsAttachmentRef = useRef(true);
   const typingTimeout = useRef(null);
   const endRef = useRef(null);
+  const scrollRef = useRef(null);
   const textareaRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const suppressAutoScrollRef = useRef(false);
+  const latestVisibleMessageIdRef = useRef(null);
 
   const getReadsStorageKey = useCallback((projectId, userId) => {
     return `${READS_STORAGE_PREFIX}:${projectId || "none"}:${userId || "none"}`;
@@ -140,6 +167,18 @@ export default function Discussion() {
       return next;
     });
 
+    setReadStateByTopicUser((prev) => {
+      const existingByTopic = prev[topicId] || {};
+      if (toMs(existingByTopic[profile.id]) >= toMs(seenAtIso)) return prev;
+      return {
+        ...prev,
+        [topicId]: {
+          ...existingByTopic,
+          [profile.id]: seenAtIso,
+        },
+      };
+    });
+
     try {
       const { error: upsertErr } = await supabase
         .from("discussion_reads")
@@ -172,7 +211,7 @@ export default function Discussion() {
       extras.push({
         id: discussionFaculty.id,
         name: discussionFaculty.full_name,
-        role: project.guide ? "Guide" : "Mentor",
+        role: "Mentor",
       });
     }
     const seen = new Set();
@@ -184,6 +223,11 @@ export default function Discussion() {
     participants.forEach(p => { m[p.id] = p; });
     return m;
   }, [participants]);
+
+  const recipientIds = useMemo(
+    () => participants.map((p) => p.id).filter((id) => id && id !== profile?.id),
+    [participants, profile?.id]
+  );
 
   const visibleMessages = useMemo(() =>
     messages.filter(m => m.topic === topic), [messages, topic]);
@@ -208,6 +252,19 @@ export default function Discussion() {
     return map;
   }, [messages, profile?.id, readByTopic]);
 
+  const resolveReadTickState = useCallback((msg) => {
+    if (!msg || msg.sender_id !== profile?.id) return "";
+    if (!recipientIds.length) return "sent";
+
+    const topicReads = readStateByTopicUser[msg.topic] || {};
+    const anyRead = recipientIds.some((userId) => toMs(topicReads[userId]) >= toMs(msg.created_at));
+    if (anyRead) return "read";
+
+    const ageMs = Date.now() - toMs(msg.created_at);
+    if (ageMs < 2500) return "sent";
+    return "delivered";
+  }, [profile?.id, readStateByTopicUser, recipientIds]);
+
   const syncOnlinePresence = useCallback((channel) => {
     if (!channel) return;
     const state = channel.presenceState?.() || {};
@@ -223,20 +280,35 @@ export default function Discussion() {
     setOnlineUserIds(next);
   }, []);
 
+  const normalizeMessage = useCallback((msg) => {
+    if (!msg) return msg;
+    const messageType = msg.message_type || (msg.file_url
+      ? ((msg.file_name || "").match(/\.(png|jpg|jpeg|gif|webp)$/i) ? "image" : "file")
+      : "text");
+    return {
+      ...msg,
+      message_type: messageType,
+      file_url: msg.file_url || null,
+      file_name: msg.file_name || null,
+      message: msg.message || "",
+    };
+  }, []);
+
   const upsertRealtimeMessage = useCallback((nextMessage) => {
     if (!nextMessage?.id) return;
+    const normalized = normalizeMessage(nextMessage);
     setMessages((prev) => {
-      const idx = prev.findIndex((m) => m.id === nextMessage.id);
+      const idx = prev.findIndex((m) => m.id === normalized.id);
       if (idx >= 0) {
         const copy = [...prev];
-        copy[idx] = { ...copy[idx], ...nextMessage };
+        copy[idx] = { ...copy[idx], ...normalized };
         return copy;
       }
-      const copy = [...prev, nextMessage];
+      const copy = [...prev, normalized];
       copy.sort((a, b) => toMs(a.created_at) - toMs(b.created_at));
       return copy;
     });
-  }, []);
+  }, [normalizeMessage]);
 
   const removeRealtimeMessage = useCallback((messageId) => {
     if (!messageId) return;
@@ -244,16 +316,67 @@ export default function Discussion() {
     setReplyTo((prev) => (prev?.id === messageId ? null : prev));
   }, []);
 
-  /* ── Load messages ── */
-  const loadMessages = useCallback(async (projectId) => {
-    const { data, error: e } = await supabase
-      .from("discussion_messages")
-      .select("id, project_id, sender_id, topic, message, reply_to, created_at")
-      .eq("project_id", projectId)
-      .order("created_at", { ascending: true });
-    if (e) throw e;
-    setMessages(data || []);
+  const fetchReadStateForParticipants = useCallback(async (projectId) => {
+    try {
+      const { data, error: readErr } = await supabase
+        .from("discussion_reads")
+        .select("topic, user_id, last_seen_at")
+        .eq("project_id", projectId);
+      if (readErr) throw readErr;
+
+      const next = {};
+      (data || []).forEach((row) => {
+        if (!row?.topic || !row?.user_id || !row?.last_seen_at) return;
+        if (!next[row.topic]) next[row.topic] = {};
+        next[row.topic][row.user_id] = row.last_seen_at;
+      });
+      setReadStateByTopicUser(next);
+    } catch {
+      setReadStateByTopicUser({});
+    }
   }, []);
+
+  const fetchMessagesPage = useCallback(async (projectId, pageIndex) => {
+    const strategies = messageSelectStrategyRef.current
+      ? [messageSelectStrategyRef.current, ...MESSAGE_SELECT_STRATEGIES.filter((s) => s !== messageSelectStrategyRef.current)]
+      : MESSAGE_SELECT_STRATEGIES;
+
+    for (const selectColumns of strategies) {
+      const from = pageIndex * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      const { data, error: e } = await supabase
+        .from("discussion_messages")
+        .select(selectColumns)
+        .eq("project_id", projectId)
+        .order("created_at", { ascending: false })
+        .range(from, to);
+      if (e) continue;
+      messageSelectStrategyRef.current = selectColumns;
+      const normalized = (data || []).map(normalizeMessage);
+      normalized.sort((a, b) => toMs(a.created_at) - toMs(b.created_at));
+      return normalized;
+    }
+
+    throw new Error("Failed to load messages.");
+  }, [normalizeMessage]);
+
+  /* ── Load messages ── */
+  const loadMessages = useCallback(async (projectId, { reset = false } = {}) => {
+    const currentPage = reset ? 0 : page;
+    const rows = await fetchMessagesPage(projectId, currentPage);
+
+    setMessages((prev) => {
+      if (reset) return rows;
+      const existing = new Set(prev.map((m) => m.id));
+      const merged = [...rows.filter((m) => !existing.has(m.id)), ...prev];
+      merged.sort((a, b) => toMs(a.created_at) - toMs(b.created_at));
+      return merged;
+    });
+
+    if (reset) setPage(0);
+    setHasMore(rows.length === PAGE_SIZE);
+    return rows;
+  }, [fetchMessagesPage, page]);
 
   /* ── Init ── */
   useEffect(() => {
@@ -261,35 +384,88 @@ export default function Discussion() {
     (async () => {
       setLoading(true); setError("");
       try {
-        const [p, projects] = await Promise.all([apiRequest("/profile"), apiRequest("/projects")]);
+        let p = null;
+        let resolvedProjectId = externalProjectId || null;
+
+        if (externalUserId) {
+          p = {
+            id: externalUserId,
+            full_name: externalUserName || "Participant",
+            role: externalUserRole || "student",
+          };
+        }
+
+        if (!p || !resolvedProjectId) {
+          const [profileData, projects] = await Promise.all([apiRequest("/profile"), apiRequest("/projects")]);
+          if (!p) p = profileData;
+          if (!resolvedProjectId) {
+            resolvedProjectId = projects?.[0]?.id || null;
+          }
+        }
+
         if (!mounted) return;
         setProfile(p);
-        const cur = projects?.[0];
-        if (!cur?.id) return;
-        const detail = await apiRequest(`/projects/${cur.id}`);
+
+        if (!resolvedProjectId) {
+          setProject(null);
+          return;
+        }
+
+        let detail = null;
+        try {
+          detail = await apiRequest(`/projects/${resolvedProjectId}`);
+        } catch {
+          detail = null;
+        }
+
         if (!mounted) return;
-        setProject(detail);
-        await loadMessages(detail.id);
-        await loadReadState(detail.id, p.id);
+        setProject({
+          id: resolvedProjectId,
+          title: detail?.title || initialTitle || "Team Discussion",
+          team_members: detail?.team_members?.length ? detail.team_members : (initialMembers || []),
+          guide: detail?.guide || null,
+          mentor: detail?.mentor || null,
+          coordinator: detail?.coordinator || null,
+        });
+        await loadMessages(resolvedProjectId, { reset: true });
+        await loadReadState(resolvedProjectId, p.id);
+        await fetchReadStateForParticipants(resolvedProjectId);
 
         const channel = supabase
-          .channel(`discussion-${detail.id}`, {
+          .channel(`discussion-${resolvedProjectId}`, {
             config: { presence: { key: p.id } },
           })
           .on(
             "postgres_changes",
-            { event: "INSERT", schema: "public", table: "discussion_messages", filter: `project_id=eq.${detail.id}` },
+            { event: "INSERT", schema: "public", table: "discussion_messages", filter: `project_id=eq.${resolvedProjectId}` },
             ({ new: nextRow }) => upsertRealtimeMessage(nextRow)
           )
           .on(
             "postgres_changes",
-            { event: "UPDATE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${detail.id}` },
+            { event: "UPDATE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${resolvedProjectId}` },
             ({ new: nextRow }) => upsertRealtimeMessage(nextRow)
           )
           .on(
             "postgres_changes",
-            { event: "DELETE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${detail.id}` },
+            { event: "DELETE", schema: "public", table: "discussion_messages", filter: `project_id=eq.${resolvedProjectId}` },
             ({ old }) => removeRealtimeMessage(old?.id)
+          )
+          .on(
+            "postgres_changes",
+            { event: "*", schema: "public", table: "discussion_reads", filter: `project_id=eq.${resolvedProjectId}` },
+            ({ new: nextRead, old: prevRead }) => {
+              const row = nextRead || prevRead;
+              if (!row?.topic || !row?.user_id) return;
+              const seenAt = row.last_seen_at || null;
+              setReadStateByTopicUser((prev) => {
+                const next = { ...prev };
+                const topicMap = { ...(next[row.topic] || {}) };
+                if (seenAt) topicMap[row.user_id] = seenAt;
+                else delete topicMap[row.user_id];
+                next[row.topic] = topicMap;
+                return next;
+              });
+            }
           )
           .on("presence", { event: "sync" }, () => syncOnlinePresence(channel))
           .on("broadcast", { event: "typing" }, ({ payload }) => {
@@ -331,30 +507,123 @@ export default function Discussion() {
       if (typingTimeout.current) clearTimeout(typingTimeout.current);
       setOnlineUserIds({});
     };
-  }, [loadMessages, loadReadState, removeRealtimeMessage, syncOnlinePresence, upsertRealtimeMessage]);
+  }, [externalProjectId, externalUserId, externalUserName, externalUserRole, fetchReadStateForParticipants, initialMembers, initialTitle, loadMessages, loadReadState, removeRealtimeMessage, syncOnlinePresence, upsertRealtimeMessage]);
 
   // Fallback sync when realtime channel is unavailable.
   useEffect(() => {
     if (!project?.id) return undefined;
     const timer = setInterval(() => {
       if (channelStatusRef.current === "SUBSCRIBED") return;
-      loadMessages(project.id).catch(() => {});
+      loadMessages(project.id, { reset: true }).catch(() => {});
     }, 2000);
     return () => clearInterval(timer);
   }, [loadMessages, project?.id]);
 
+  const loadOlderMessages = useCallback(async () => {
+    if (!project?.id || loadingMore || !hasMore) return;
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const prevHeight = container.scrollHeight;
+    const prevTop = container.scrollTop;
+
+    setLoadingMore(true);
+    suppressAutoScrollRef.current = true;
+    const nextPage = page + 1;
+    try {
+      const rows = await fetchMessagesPage(project.id, nextPage);
+      setMessages((prev) => {
+        const existing = new Set(prev.map((m) => m.id));
+        const merged = [...rows.filter((m) => !existing.has(m.id)), ...prev];
+        merged.sort((a, b) => toMs(a.created_at) - toMs(b.created_at));
+        return merged;
+      });
+      setPage(nextPage);
+      setHasMore(rows.length === PAGE_SIZE);
+
+      requestAnimationFrame(() => {
+        const nextHeight = container.scrollHeight;
+        container.scrollTop = nextHeight - prevHeight + prevTop;
+      });
+    } catch {
+      // ignore transient pagination failures
+    } finally {
+      setLoadingMore(false);
+      setTimeout(() => {
+        suppressAutoScrollRef.current = false;
+      }, 50);
+    }
+  }, [fetchMessagesPage, hasMore, loadingMore, page, project?.id]);
+
+  const handleScroll = useCallback(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const threshold = 56;
+    const atBottom = container.scrollHeight - (container.scrollTop + container.clientHeight) <= threshold;
+    setIsAtBottom(atBottom);
+    setShowJumpToLatest(!atBottom);
+    if (atBottom) setPendingLatestCount(0);
+
+    if (container.scrollTop <= 24) {
+      loadOlderMessages();
+    }
+
+    if (!visibleMessages.length || !atBottom) return;
+    const candidate = visibleMessages[visibleMessages.length - 1];
+    if (candidate && toMs(candidate.created_at) > toMs(readByTopic[topic])) {
+      markTopicRead(topic, candidate.created_at);
+    }
+  }, [loadOlderMessages, markTopicRead, readByTopic, topic, visibleMessages]);
+
+  const scrollToLatest = useCallback(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    setIsAtBottom(true);
+    setShowJumpToLatest(false);
+    setPendingLatestCount(0);
+  }, []);
+
   /* ── Auto-scroll ── */
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [visibleMessages]);
+  useEffect(() => {
+    if (suppressAutoScrollRef.current) return;
+    if (!visibleMessages.length) return;
+
+    const latest = visibleMessages[visibleMessages.length - 1];
+    const prevId = latestVisibleMessageIdRef.current;
+    const latestId = latest?.id || null;
+    const isNewMessage = Boolean(latestId && prevId && latestId !== prevId);
+    latestVisibleMessageIdRef.current = latestId;
+
+    if (isAtBottom) {
+      endRef.current?.scrollIntoView({ behavior: "smooth" });
+      setShowJumpToLatest(false);
+      setPendingLatestCount(0);
+      return;
+    }
+
+    if (isNewMessage) {
+      setShowJumpToLatest(true);
+      setPendingLatestCount((prev) => Math.min(prev + 1, 99));
+    }
+  }, [isAtBottom, visibleMessages]);
 
   /* ── Mark active topic as seen ── */
   useEffect(() => {
     if (!project?.id || !profile?.id) return;
+    if (!isAtBottom) return;
     if (!visibleMessages.length) return;
     const latest = visibleMessages[visibleMessages.length - 1];
     if (!latest) return;
     if (toMs(latest.created_at) <= toMs(readByTopic[topic])) return;
     markTopicRead(topic, latest.created_at);
-  }, [markTopicRead, profile?.id, project?.id, readByTopic, topic, visibleMessages]);
+  }, [isAtBottom, markTopicRead, profile?.id, project?.id, readByTopic, topic, visibleMessages]);
+
+  useEffect(() => {
+    setShowJumpToLatest(false);
+    setIsAtBottom(true);
+    setPendingLatestCount(0);
+    latestVisibleMessageIdRef.current = null;
+  }, [topic]);
 
   /* ── Typing ── */
   const sendTyping = (isTyping) => {
@@ -372,20 +641,106 @@ export default function Discussion() {
     if (ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 128) + "px"; }
   };
 
+  const insertDiscussionMessage = useCallback(async (payload) => {
+    const selectColumns = messageSelectStrategyRef.current || MESSAGE_SELECT_STRATEGIES[0];
+
+    if (messageInsertSupportsAttachmentRef.current) {
+      const { data, error } = await supabase
+        .from("discussion_messages")
+        .insert(payload)
+        .select(selectColumns)
+        .single();
+      if (!error) return normalizeMessage(data);
+      messageInsertSupportsAttachmentRef.current = false;
+    }
+
+    const fallbackPayload = {
+      project_id: payload.project_id,
+      sender_id: payload.sender_id,
+      topic: payload.topic,
+      message: payload.message,
+      reply_to: payload.reply_to,
+    };
+
+    const { data: fallbackData, error: fallbackError } = await supabase
+      .from("discussion_messages")
+      .insert(fallbackPayload)
+      .select("id, project_id, sender_id, topic, message, reply_to, created_at")
+      .single();
+    if (fallbackError) throw fallbackError;
+    return normalizeMessage(fallbackData);
+  }, [normalizeMessage]);
+
+  const triggerAttachmentPicker = () => {
+    if (uploadingFile || sending) return;
+    fileInputRef.current?.click();
+  };
+
+  const onPickAttachment = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !project?.id || !profile?.id || uploadingFile) return;
+
+    setUploadingFile(true);
+    setError("");
+    const caption = text.trim();
+
+    try {
+      const ext = (file.name.split(".").pop() || "bin").toLowerCase();
+      const safeExt = ext.replace(/[^a-z0-9]/g, "") || "bin";
+      const path = `${project.id}/${topic}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${safeExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("discussion-files")
+        .upload(path, file, { upsert: false });
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage.from("discussion-files").getPublicUrl(path);
+      const fileUrl = publicUrlData?.publicUrl;
+      if (!fileUrl) throw new Error("Failed to generate file URL.");
+
+      const isImage = /^image\//i.test(file.type || "") || /\.(png|jpg|jpeg|gif|webp)$/i.test(file.name);
+      const inserted = await insertDiscussionMessage({
+        project_id: project.id,
+        sender_id: profile.id,
+        topic,
+        message: caption || file.name,
+        reply_to: replyTo?.id || null,
+        message_type: isImage ? "image" : "file",
+        file_url: fileUrl,
+        file_name: file.name,
+      });
+
+      setMessages((prev) => (prev.some((m) => m.id === inserted.id) ? prev : [...prev, inserted]));
+      setText("");
+      setReplyTo(null);
+      sendTyping(false);
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
+    } catch (e) {
+      setError(e.message || "Failed to upload attachment.");
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
   /* ── Send ── */
-  const postMessage = async () => {
+  const postMessage = useCallback(async () => {
     if (!text.trim() || !profile || !project?.id || sending) return;
     const content = text.trim();
     setText(""); setReplyTo(null); sendTyping(false);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     setSending(true);
     try {
-      const { data: ins, error: e } = await supabase
-        .from("discussion_messages")
-        .insert({ project_id: project.id, sender_id: profile.id, topic, message: content, reply_to: replyTo?.id || null })
-        .select("id, project_id, sender_id, topic, message, reply_to, created_at")
-        .single();
-      if (e) throw e;
+      const ins = await insertDiscussionMessage({
+        project_id: project.id,
+        sender_id: profile.id,
+        topic,
+        message: content,
+        reply_to: replyTo?.id || null,
+        message_type: "text",
+        file_url: null,
+        file_name: null,
+      });
       setMessages(prev => prev.some(m => m.id === ins.id) ? prev : [...prev, ins]);
     } catch (e) {
       setError(e.message || "Failed to send.");
@@ -393,7 +748,7 @@ export default function Discussion() {
     } finally {
       setSending(false);
     }
-  };
+  }, [insertDiscussionMessage, profile, project?.id, replyTo?.id, sending, text, topic]);
 
   const deleteMessage = async (msg) => {
     if (!msg?.id || !profile?.id || !project?.id) return;
@@ -508,7 +863,7 @@ export default function Discussion() {
       </div>
 
       {/* ─────────────── CHAT PANEL ─────────────── */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-white/35">
+      <div className="flex-1 flex flex-col overflow-hidden bg-white/35 relative">
 
         {/* Chat header */}
         <div className="flex-shrink-0 flex items-center gap-3 px-5 py-3.5 border-b border-white/70"
@@ -532,7 +887,7 @@ export default function Discussion() {
         )}
 
         {/* ── Messages area ── */}
-        <div className="flex-1 overflow-y-auto"
+        <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto"
           style={{
             backgroundImage: `
               radial-gradient(ellipse 90% 60% at 0% 0%,   rgba(0,196,180,0.07) 0%, transparent 55%),
@@ -544,6 +899,13 @@ export default function Discussion() {
 
           {/* Inner wrapper: min-h-full + justify-end pins messages to bottom */}
           <div className="min-h-full flex flex-col justify-end py-4">
+
+            {loadingMore && (
+              <div className="flex items-center justify-center py-2">
+                <div className="size-4 border-2 border-slate-300 border-t-slate-500 rounded-full animate-spin" />
+                <span className="ml-2 text-xs text-slate-500">Loading older messages...</span>
+              </div>
+            )}
 
             {visibleMessages.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center select-none py-12">
@@ -568,6 +930,7 @@ export default function Discussion() {
                   const isLast = !sameNext; // last in sender-group
                   const quotedMsg = msg.reply_to ? msgMap[msg.reply_to] : null;
                   const quotedSender = quotedMsg ? participantMap[quotedMsg.sender_id] : null;
+                  const tickState = resolveReadTickState(msg);
 
                   return (
                     <div key={msg.id}>
@@ -610,13 +973,17 @@ export default function Discussion() {
                               className="px-3.5 py-2.5 text-sm leading-relaxed relative"
                               style={{
                                 ...(mine ? {
-                                  background: "linear-gradient(130deg, #14B8A6 0%, #0F766E 100%)",
+                                  background: externalUserRole === "mentor"
+                                    ? "linear-gradient(130deg, #6366F1 0%, #4338CA 100%)"
+                                    : "linear-gradient(130deg, #14B8A6 0%, #0F766E 100%)",
                                   color: "#ffffff",
                                   borderRadius: isFirst && isLast ? "18px 4px 18px 18px"
                                     : isFirst ? "18px 4px 14px 18px"
                                       : isLast ? "18px 4px 18px 18px"
                                         : "18px 4px 14px 18px",
-                                  boxShadow: "0 1px 8px rgba(20,184,166,0.30), 0 1px 2px rgba(0,0,0,0.06)",
+                                  boxShadow: externalUserRole === "mentor"
+                                    ? "0 1px 8px rgba(99,102,241,0.30), 0 1px 2px rgba(0,0,0,0.06)"
+                                    : "0 1px 8px rgba(20,184,166,0.30), 0 1px 2px rgba(0,0,0,0.06)",
                                 } : {
                                   background: "rgba(255,255,255,0.96)",
                                   color: "#1e293b",
@@ -646,8 +1013,48 @@ export default function Discussion() {
                                 </div>
                               )}
 
+                              {/* Attachment content */}
+                              {msg.file_url && msg.message_type === "image" && (
+                                <a
+                                  href={msg.file_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="block mb-2"
+                                  title={msg.file_name || "Open image"}
+                                >
+                                  <img
+                                    src={msg.file_url}
+                                    alt={msg.file_name || "Shared image"}
+                                    className="max-h-64 w-auto rounded-xl object-cover"
+                                    style={{ border: mine ? "1px solid rgba(255,255,255,0.35)" : "1px solid rgba(226,232,240,0.9)" }}
+                                  />
+                                </a>
+                              )}
+
+                              {msg.file_url && msg.message_type === "file" && (
+                                <a
+                                  href={msg.file_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="mb-2 px-3 py-2 rounded-xl flex items-center gap-2 text-xs"
+                                  style={{
+                                    backgroundColor: mine ? "rgba(255,255,255,0.16)" : "rgba(241,245,249,0.95)",
+                                    border: mine ? "1px solid rgba(255,255,255,0.25)" : "1px solid rgba(203,213,225,0.8)",
+                                    color: mine ? "rgba(255,255,255,0.95)" : "#334155",
+                                  }}
+                                >
+                                  <span className="material-symbols-outlined" style={{ fontSize: 16 }}>attach_file</span>
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate">{msg.file_name || "Attachment"}</span>
+                                    <span className="block text-[10px] opacity-80">Download</span>
+                                  </span>
+                                </a>
+                              )}
+
                               {/* Message text */}
-                              <p className="whitespace-pre-wrap break-words">{msg.message}</p>
+                              {msg.message && (
+                                <p className="whitespace-pre-wrap break-words">{msg.message}</p>
+                              )}
 
                               {/* Timestamp + tick */}
                               <div className={`flex items-center gap-1 mt-1 ${mine ? "justify-end" : "justify-end"}`}>
@@ -655,7 +1062,17 @@ export default function Discussion() {
                                   {fmtTime(msg.created_at)}
                                 </span>
                                 {mine && (
-                                  <span className="material-symbols-outlined select-none" style={{ fontSize: 12, color: "rgba(255,255,255,0.70)" }}>done_all</span>
+                                  <span
+                                    className="material-symbols-outlined select-none"
+                                    style={{
+                                      fontSize: 12,
+                                      color: tickState === "read"
+                                        ? "#60a5fa"
+                                        : "#94a3b8",
+                                    }}
+                                  >
+                                    {tickState === "sent" ? "done" : "done_all"}
+                                  </span>
                                 )}
                               </div>
                             </div>
@@ -758,6 +1175,19 @@ export default function Discussion() {
                 className="flex-1 bg-transparent text-sm text-slate-800 placeholder-slate-400 resize-none focus:outline-none leading-relaxed"
                 style={{ minHeight: 22, maxHeight: 128 }}
               />
+
+              <button
+                onClick={triggerAttachmentPicker}
+                disabled={sending || uploadingFile}
+                title={uploadingFile ? "Uploading..." : "Attach file"}
+                className="h-8 px-1 flex items-center justify-center flex-shrink-0 transition-colors disabled:opacity-50 text-slate-500 hover:text-slate-700"
+              >
+                {uploadingFile ? (
+                  <div className="size-3.5 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+                ) : (
+                  <span className="material-symbols-outlined" style={{ fontSize: 20 }}>attach_file</span>
+                )}
+              </button>
             </div>
 
             {/* Send button */}
@@ -776,7 +1206,40 @@ export default function Discussion() {
                 : <span className="material-symbols-outlined text-white" style={{ fontSize: 18, marginLeft: 2 }}>send</span>
               }
             </button>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              accept="image/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.zip,.rar"
+              onChange={onPickAttachment}
+            />
           </div>
+
+          {showJumpToLatest && (
+            <div className="absolute right-6 bottom-24 z-10">
+              <button
+                onClick={scrollToLatest}
+                title="Jump to latest"
+                className="size-11 rounded-full flex items-center justify-center shadow-lg transition-all hover:scale-105"
+                style={{
+                  background: "linear-gradient(135deg, #22c1b2 0%, #0f9f94 100%)",
+                  color: "#ffffff",
+                  boxShadow: "0 8px 20px rgba(20,184,166,0.35)",
+                }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: 22 }}>arrow_downward</span>
+              </button>
+              {pendingLatestCount > 0 && (
+                <span
+                  className="absolute -top-2 -right-2 min-w-[20px] h-5 px-1 rounded-full text-[10px] font-black text-white flex items-center justify-center"
+                  style={{ backgroundColor: "#ef4444", boxShadow: "0 4px 10px rgba(239,68,68,0.35)" }}
+                >
+                  {pendingLatestCount > 99 ? "99+" : pendingLatestCount}
+                </span>
+              )}
+            </div>
+          )}
 
 
         </div>

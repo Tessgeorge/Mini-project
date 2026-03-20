@@ -26,7 +26,7 @@ export default function StudentLayout({ onLogout }) {
       import("../pages/MyTeam");
       import("../pages/Submissions");
       import("../pages/Marks");
-      import("../pages/Discussion");
+      import("../pages/StudentDiscussion");
       import("../pages/MyProject");
     };
 

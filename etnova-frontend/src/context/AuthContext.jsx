@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import supabase from '../config/supabaseClient'
 import { apiRequest } from '../config/apiClient'
 
@@ -20,6 +20,11 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [role, setRole] = useState(null)
   const [loading, setLoading] = useState(true)
+  const roleRef = useRef(null)
+
+  useEffect(() => {
+    roleRef.current = role
+  }, [role])
 
   useEffect(() => {
     let isMounted = true
@@ -29,10 +34,10 @@ export function AuthProvider({ children }) {
 
     const toSessionKey = (nextSession) => {
       if (!nextSession?.user) return 'anon'
-      return nextSession.access_token || nextSession.user.id
+      return nextSession.user.id
     }
 
-    const handleSession = async (nextSession, { force = false } = {}) => {
+    const handleSession = async (nextSession, { force = false, event = null } = {}) => {
       const sessionKey = toSessionKey(nextSession)
       if (!force && isInitialized && sessionKey === lastSessionKey) {
         return
@@ -55,6 +60,14 @@ export function AuthProvider({ children }) {
       // Only show loading spinner on first load, not on token refresh
       if (!isInitialized) {
         setLoading(true)
+      }
+
+      if (event === 'TOKEN_REFRESHED' && roleRef.current) {
+        if (isMounted && requestId === activeRequestId) {
+          setLoading(false)
+          isInitialized = true
+        }
+        return
       }
 
       try {
@@ -82,7 +95,7 @@ export function AuthProvider({ children }) {
         data: { session: initialSession },
       } = await supabase.auth.getSession()
       if (isMounted) {
-        handleSession(initialSession, { force: true })
+        handleSession(initialSession, { force: true, event: 'INITIAL_SESSION' })
       }
     }
 
@@ -94,7 +107,7 @@ export function AuthProvider({ children }) {
       if (!['INITIAL_SESSION', 'SIGNED_IN', 'SIGNED_OUT', 'TOKEN_REFRESHED', 'USER_UPDATED'].includes(event)) {
         return
       }
-      handleSession(nextSession)
+      handleSession(nextSession, { event })
     })
 
     return () => {

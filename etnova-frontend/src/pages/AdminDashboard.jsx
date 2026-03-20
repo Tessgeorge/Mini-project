@@ -356,10 +356,10 @@ export default function AdminDashboard() {
   const adminDepartment = adminProfile.department || "CSE";
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen etnova-bg">
       <Sidebar activeItem="dashboard" onSignOut={handleSignOut} onNavigate={handleNavigate} />
 
-      <main className="lg:ml-72 min-h-screen">
+      <main className="flex-1 min-h-0 md:ml-64 h-[100dvh] overflow-y-auto">
         <TopNavbar
           adminName={adminName}
           academicYearLabel="2026 - S6 Mini Project"
@@ -390,13 +390,13 @@ export default function AdminDashboard() {
         )}
 
         <div className="p-4 md:p-6 lg:p-8 space-y-6">
-          <section className="rounded-xl shadow-md bg-gradient-to-r from-teal-600 to-teal-500 text-white p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <section className="glass-card p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-semibold">Good Evening, Dr. {adminName}</h1>
-              <p className="text-teal-50 mt-1 text-sm">{adminDepartment} Department - Project Evaluation Control Panel</p>
+              <h1 className="text-2xl font-semibold text-slate-800">Good Evening, Dr. {adminName}</h1>
+              <p className="text-slate-500 mt-1 text-sm">{adminDepartment} Department - Project Evaluation Control Panel</p>
             </div>
-            <div className="text-sm sm:text-right text-teal-50">
-              <p className="font-semibold text-white">Today</p>
+            <div className="text-sm sm:text-right text-slate-500">
+              <p className="font-semibold text-slate-700">Today</p>
               <p>{today}</p>
             </div>
           </section>
@@ -405,7 +405,7 @@ export default function AdminDashboard() {
             {dashboardKpis.map((item) => <StatCard key={item.title} {...item} />)}
           </section>
 
-          {loading ? <p className="text-sm text-gray-500">Loading live dashboard data...</p> : null}
+          {loading ? <p className="text-sm text-slate-500">Loading live dashboard data...</p> : null}
 
           <SectionCard
             title="Unassigned Projects"
@@ -422,8 +422,8 @@ export default function AdminDashboard() {
             {unassignedProjectRows.length > 0 ? (
               <div className="space-y-3">
                 {unassignedProjectRows.slice(0, 5).map((project) => (
-                  <div key={project.id} className="flex items-center justify-between rounded-lg border border-gray-100 px-3 py-2">
-                    <p className="text-sm font-medium text-gray-800 truncate pr-3">{project.title || "Untitled Project"}</p>
+                  <div key={project.id} className="flex items-center justify-between rounded-lg border border-slate-200/70 bg-white/70 px-3 py-2">
+                    <p className="text-sm font-medium text-slate-800 truncate pr-3">{project.title || "Untitled Project"}</p>
                     <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-100 text-rose-700">
                       Unassigned
                     </span>
@@ -442,7 +442,7 @@ export default function AdminDashboard() {
                 ) : null}
               </div>
             ) : (
-              <p className="text-sm text-gray-600">All projects have been allocated a guide.</p>
+              <p className="text-sm text-slate-600">All projects have been allocated a guide.</p>
             )}
           </SectionCard>
 
@@ -456,7 +456,7 @@ export default function AdminDashboard() {
                     setSelectedClassName(nextClass);
                     await fetchReviewStages(nextClass);
                   }}
-                  className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/40 min-w-[170px]"
+                  className="glass-input rounded-lg px-3 py-1.5 text-sm text-slate-700 min-w-[170px]"
                 >
                   {reviewClasses.map((classItem) => (
                     <option key={classItem.id} value={classItem.class_name}>
@@ -481,35 +481,35 @@ export default function AdminDashboard() {
                   const dotClass = isCompleted || isActive
                     ? "bg-teal-500 border-teal-500 text-white"
                     : isLocked
-                      ? "bg-rose-50 border-rose-200 text-rose-600"
-                      : "bg-gray-50 border-gray-200 text-gray-500";
+                        ? "bg-rose-50 border-rose-200 text-rose-600"
+                        : "bg-slate-50 border-slate-200 text-slate-500";
                   return (
                     <button
                       key={stage.id || `${stage.name}-${index}`}
                       type="button"
                       onClick={() => navigate(`/admin/review-management?class=${encodeURIComponent(selectedClassName || "")}`)}
-                      className="text-left rounded-xl border border-gray-200 p-3 hover:border-teal-300 hover:bg-teal-50/30 transition-colors"
+                      className="text-left rounded-xl border border-slate-200/80 bg-white/70 p-3 hover:border-teal-300 hover:bg-teal-50/30 transition-colors"
                     >
                       <div className="flex items-center gap-2">
                         <span className={`inline-flex w-8 h-8 items-center justify-center rounded-full border text-sm font-semibold ${dotClass}`}>
                           {isCompleted ? "✓" : index + 1}
                         </span>
-                        <span className="text-sm font-semibold text-gray-800">{formatStageLabel(stage.name)}</span>
+                        <span className="text-sm font-semibold text-slate-800">{formatStageLabel(stage.name)}</span>
                       </div>
-                      <p className="mt-2 text-xs text-gray-500">{formatStageSubline(stage)}</p>
-                      <p className="text-xs mt-1 text-gray-600">{stage.status === "Inactive" ? "Pending" : stage.status}</p>
+                      <p className="mt-2 text-xs text-slate-500">{formatStageSubline(stage)}</p>
+                      <p className="text-xs mt-1 text-slate-600">{stage.status === "Inactive" ? "Pending" : stage.status}</p>
                     </button>
                   );
                 })}
               </div>
 
-              <div className="border-t border-gray-100 pt-4">
-                <div className="flex items-center justify-between text-sm text-gray-600">
-                  <p className="font-semibold text-gray-700">Overall Progress</p>
+              <div className="border-t border-slate-200/70 pt-4">
+                <div className="flex items-center justify-between text-sm text-slate-600">
+                  <p className="font-semibold text-slate-700">Overall Progress</p>
                   <p>{progressPercent}%</p>
                 </div>
-                <p className="text-sm text-gray-500 mt-1">{`${completedCount} of ${orderedReviewStages.length} completed`}</p>
-                <div className="mt-3 h-2 rounded-full bg-gray-100 overflow-hidden">
+                <p className="text-sm text-slate-500 mt-1">{`${completedCount} of ${orderedReviewStages.length} completed`}</p>
+                <div className="mt-3 h-2 rounded-full bg-slate-100 overflow-hidden">
                   <div className="h-full bg-teal-500 rounded-full" style={{ width: `${progressPercent}%` }} />
                 </div>
               </div>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import JoinRequestsModal from "../components/JoinRequestsModal";
 import { apiRequest } from "../config/apiClient";
 import supabase from "../config/supabaseClient";
@@ -482,6 +482,7 @@ async function fetchCoordinatorBySection(classSection) {
 // Main component
 
 export default function MyTeam() {
+  const hasInitializedRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [project, setProject] = useState(null);
@@ -553,7 +554,11 @@ export default function MyTeam() {
     }
   }, [refreshPendingJoinRequestsCount]);
 
-  useEffect(() => { loadTeam(); }, [loadTeam]);
+  useEffect(() => {
+    if (hasInitializedRef.current) return;
+    hasInitializedRef.current = true;
+    loadTeam();
+  }, [loadTeam]);
 
   // Load tasks from Supabase
   const loadTasks = async (projectId) => {

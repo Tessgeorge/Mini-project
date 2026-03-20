@@ -29,14 +29,14 @@ function StatIcon({ name }) {
 
 export default function StatCard({ title, value, hint, borderClass, icon }) {
   return (
-    <article className={`rounded-xl shadow-md bg-white border border-gray-100 border-t-4 ${borderClass} p-5 hover:shadow-lg transition-shadow`}>
+    <article className={`rounded-2xl bg-white/90 border border-slate-200/70 border-t-4 ${borderClass} p-5 shadow-sm`}>
       <div className="flex justify-between items-start gap-3">
         <div>
-          <p className="text-sm font-medium text-gray-500">{title}</p>
-          <p className="mt-2 text-2xl font-semibold text-gray-800">{value}</p>
-          <p className="mt-1 text-xs text-gray-500">{hint}</p>
+          <p className="text-sm font-medium text-slate-500">{title}</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-800">{value}</p>
+          <p className="mt-1 text-xs text-slate-500">{hint}</p>
         </div>
-        <div className="size-9 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center">
+        <div className="size-9 rounded-lg bg-teal-50/80 text-teal-600 flex items-center justify-center">
           <StatIcon name={icon} />
         </div>
       </div>

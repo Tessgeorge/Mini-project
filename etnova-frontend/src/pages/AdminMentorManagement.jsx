@@ -12,11 +12,39 @@ const ADMIN_NAME = "Meenakshi";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isUuid = (value) => typeof value === "string" && UUID_REGEX.test(value);
+let mentorEvalColumnStrategy = null;
 
 function projectClassName(project) {
   if (!project) return "Unknown Class";
   if (Array.isArray(project.classes)) return project.classes[0]?.class_name || "Unknown Class";
   return project.classes?.class_name || "Unknown Class";
+}
+
+async function fetchMentorEvaluationsByMentorId(mentorId) {
+  const evaluatorColumns = mentorEvalColumnStrategy ? [mentorEvalColumnStrategy] : ["evaluator_id", "guide_id"];
+
+  for (const evaluatorColumn of evaluatorColumns) {
+    const { data, error } = await supabase
+      .from("evaluations")
+      .select(`
+        *,
+        projects:project_id (
+          id,
+          title,
+          class_id,
+          classes:class_id (
+            class_name
+          )
+        )
+      `)
+      .eq(evaluatorColumn, mentorId);
+
+    if (error) continue;
+    mentorEvalColumnStrategy = evaluatorColumn;
+    return data || [];
+  }
+
+  return [];
 }
 
 export default function AdminMentorManagement() {
@@ -222,34 +250,12 @@ export default function AdminMentorManagement() {
           `)
           .eq("guide_id", selectedMentorId);
 
-        const evaluationsQuery = supabase
-          .from("evaluations")
-          .select(`
-            id,
-            guide_id,
-            mentor_id:guide_id,
-            project_id,
-            stage:evaluation_type,
-            obtained_marks,
-            max_marks,
-            projects:project_id (
-              id,
-              title,
-              class_id,
-              classes:class_id (
-                class_name
-              )
-            )
-          `)
-          .eq("guide_id", selectedMentorId);
-
-        const [guidanceRes, evaluationsRes] = await Promise.all([
+        const [guidanceRes, evaluationData] = await Promise.all([
           guidanceQuery,
-          evaluationsQuery,
+          fetchMentorEvaluationsByMentorId(selectedMentorId),
         ]);
 
         if (guidanceRes.error) throw guidanceRes.error;
-        if (evaluationsRes.error) throw evaluationsRes.error;
 
         const guidanceRows = (guidanceRes.data || []).map((row) => ({
           id: row.id,
@@ -259,13 +265,13 @@ export default function AdminMentorManagement() {
           status: row.status || "active",
         }));
 
-        const evaluationRows = (evaluationsRes.data || []).map((row) => ({
+        const evaluationRows = (evaluationData || []).map((row) => ({
           id: row.id,
-          stage: row.stage || "Unknown Stage",
+          stage: row.evaluation_type || row.phase || "Unknown Stage",
           title: row.projects?.title || "Untitled Project",
           className: projectClassName(row.projects),
           completed:
-            row.marks !== null
+            row.score !== null
             || row.obtained_marks !== null
             || (typeof row.max_marks === "number" && row.max_marks > 0),
         }));
@@ -524,32 +530,32 @@ export default function AdminMentorManagement() {
     : 0;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen etnova-bg">
       <Sidebar
         activeItem="mentor-management"
         onSignOut={handleSignOut}
         onNavigate={handleNavigate}
       />
 
-      <main className="lg:ml-72 min-h-screen">
+      <main className="flex-1 min-h-0 md:ml-64 h-[100dvh] overflow-y-auto">
         <TopNavbar
           adminName={ADMIN_NAME}
           academicYearLabel="2026 - S6 Mini Project"
           pageTitle="Mentor Management"
         />
 
-        <div className="p-4 md:p-6 lg:p-8 bg-gray-50 space-y-6">
+        <div className="p-4 md:p-6 lg:p-8 space-y-6">
           <section className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-semibold text-gray-800">Mentor Management</h1>
-              <p className="text-gray-500 mt-1">Manage Mentor Roles and Department Privileges</p>
+              <h1 className="text-2xl font-semibold text-slate-800">Mentor Management</h1>
+              <p className="text-slate-500 mt-1">Manage Mentor Roles and Department Privileges</p>
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
               <select
                 value={roleFilter}
                 onChange={(event) => setRoleFilter(event.target.value)}
-                className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/40"
+                className="glass-input rounded-xl px-3 py-2.5 text-sm text-slate-700"
               >
                 <option value="All">All</option>
                 <option value="Guide">Guide</option>
@@ -560,7 +566,7 @@ export default function AdminMentorManagement() {
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
                 placeholder="Search by name or email"
-                className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 placeholder:text-gray-400 w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-teal-500/40"
+                className="glass-input rounded-xl px-3 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 w-full sm:w-64"
               />
             </div>
           </section>
@@ -572,7 +578,7 @@ export default function AdminMentorManagement() {
           </section>
 
           {loading ? (
-            <div className="flex items-center gap-3 text-sm text-gray-600">
+            <div className="flex items-center gap-3 text-sm text-slate-600">
               <span className="inline-block h-4 w-4 rounded-full border-2 border-teal-600 border-t-transparent animate-spin" />
               Loading mentors...
             </div>
@@ -591,15 +597,15 @@ export default function AdminMentorManagement() {
             selectedMentorId={selectedMentorId}
           />
 
-          <section className="bg-white rounded-xl border border-gray-100 shadow-md overflow-hidden">
+          <section className="bg-white/90 rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
             <button
               type="button"
               onClick={() => setWorkloadOpen((prev) => !prev)}
-              className="w-full px-6 py-4 border-b border-gray-100 flex items-center justify-between"
+              className="w-full px-6 py-4 border-b border-slate-200/70 flex items-center justify-between"
             >
               <div className="text-left">
-                <h2 className="text-base font-semibold text-gray-800">Mentor Workload Panel</h2>
-                <p className="text-xs text-gray-500 mt-0.5">
+                <h2 className="text-base font-semibold text-slate-800">Mentor Workload Panel</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
                   {selectedMentor ? `Selected: ${selectedMentor.name}` : "Select a mentor to view workload"}
                 </p>
               </div>
@@ -613,7 +619,7 @@ export default function AdminMentorManagement() {
                   <div>
                     <MentorStatCard title="Coordination Assignments" value={coordinatorAssignments} icon="coordinator" borderClass="border-t-violet-500" />
                     {coordinatorClassName && (
-                      <div className="text-sm text-gray-500 mt-2">
+                      <div className="text-sm text-slate-500 mt-2">
                         Class: {coordinatorClassName}
                       </div>
                     )}
@@ -622,26 +628,26 @@ export default function AdminMentorManagement() {
                   <MentorStatCard title="Pending Evaluations" value={workload.summary.pendingEvaluations} icon="evaluator" borderClass="border-t-rose-500" />
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <section className="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                    <h3 className="text-sm font-semibold text-gray-800">Guidance Load (Max 2)</h3>
-                    <div className="mt-3 h-2.5 rounded-full bg-gray-200 overflow-hidden">
+                  <section className="rounded-xl border border-slate-200/70 bg-slate-50/70 p-4">
+                    <h3 className="text-sm font-semibold text-slate-800">Guidance Load (Max 2)</h3>
+                    <div className="mt-3 h-2.5 rounded-full bg-slate-200 overflow-hidden">
                       <div className={`h-full rounded-full ${
                         guidancePercent >= 100 ? "bg-rose-500" : guidancePercent >= 50 ? "bg-amber-500" : "bg-emerald-500"
                       }`} style={{ width: `${guidancePercent}%` }} />
                     </div>
-                    <p className="mt-2 text-xs text-gray-600">{guidanceTeams}/2 teams</p>
+                    <p className="mt-2 text-xs text-slate-600">{guidanceTeams}/2 teams</p>
                   </section>
 
-                  <section className="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                    <h3 className="text-sm font-semibold text-gray-800">Evaluation Completion</h3>
-                    <div className="mt-3 h-2.5 rounded-full bg-gray-200 overflow-hidden">
+                  <section className="rounded-xl border border-slate-200/70 bg-slate-50/70 p-4">
+                    <h3 className="text-sm font-semibold text-slate-800">Evaluation Completion</h3>
+                    <div className="mt-3 h-2.5 rounded-full bg-slate-200 overflow-hidden">
                       <div className="h-full rounded-full bg-teal-500" style={{ width: `${evaluationPercent}%` }} />
                     </div>
-                    <p className="mt-2 text-xs text-gray-600">{evaluationPercent}% completed</p>
+                    <p className="mt-2 text-xs text-slate-600">{evaluationPercent}% completed</p>
                   </section>
                 </div>
 
-                {workloadLoading ? <p className="text-sm text-gray-500">Loading mentor workload...</p> : null}
+                {workloadLoading ? <p className="text-sm text-slate-500">Loading mentor workload...</p> : null}
 
               </div>
             ) : null}
