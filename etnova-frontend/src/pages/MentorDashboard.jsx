@@ -2213,7 +2213,7 @@ export default function MentorDashboard() {
         ? supabase.from("team_members").select("id, project_id").in("project_id", projectIds)
         : Promise.resolve({ data: [] }),
       projectIds.length
-        ? supabase.from("evaluations").select("id, project_id, obtained_marks").in("project_id", projectIds)
+        ? supabase.from("evaluations").select("id, project_id, score, obtained_marks").in("project_id", projectIds)
         : Promise.resolve({ data: [] }),
       guideIds.length
         ? supabase.from("profiles").select("id, full_name").in("id", guideIds)
@@ -2250,7 +2250,7 @@ export default function MentorDashboard() {
     });
 
     const evaluatedCount = projectRows.filter((item) => item.evaluationCount > 0).length;
-    const allScores = classEvals.map((item) => Number(item.score)).filter((score) => !Number.isNaN(score));
+    const allScores = classEvals.map((item) => Number(item.score ?? item.obtained_marks)).filter((score) => !Number.isNaN(score));
     const classAverageScore = allScores.length
       ? allScores.reduce((sum, score) => sum + score, 0) / allScores.length
       : null;
@@ -2451,7 +2451,7 @@ export default function MentorDashboard() {
 
     const { error } = await supabase
       .from("review_stages")
-      .update({ deadline: deadlineIso, student_deadline_set_by_coordinator: true })
+      .update({ deadline: deadlineIso, student_deadline_set_by_coordinator: deadlineIso !== null })
       .eq("id", stageId)
       .eq("class_id", coordinatorClassId);
 

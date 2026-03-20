@@ -16,12 +16,12 @@ export const authenticateUser = async (req, res, next) => {
     // Verify token with Supabase
     const { data: { user }, error } = await supabase.auth.getUser(token);
 
-    if (isDev && user?.id) {
-      console.log('DEBUG AUTH: User ID:', user.id);
-    }
-
     if (error || !user) {
       return res.status(401).json({ message: 'Invalid or expired token' });
+    }
+
+    if (isDev && user?.id) {
+      console.log('DEBUG AUTH: User ID:', user.id);
     }
 
     // Get user profile with role information

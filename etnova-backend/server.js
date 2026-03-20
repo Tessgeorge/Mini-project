@@ -3,6 +3,8 @@ import cors from 'cors';
 import compression from 'compression';
 import dotenv from 'dotenv';
 import apiRoutes from './routes/api.js';
+import coordinatorRoutes from './routes/coordinatorRoutes.js';
+import { authenticateUser, requireRole, requireCoordinator } from './middleware/supabaseAuth.js';
 
 // Load environment variables
 dotenv.config();
@@ -32,6 +34,7 @@ app.get('/health', (req, res) => {
 
 // API Routes
 app.use('/api', apiRoutes);
+app.use('/api/coordinator', authenticateUser, requireRole(['mentor']), requireCoordinator, coordinatorRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
