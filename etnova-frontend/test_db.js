@@ -1,0 +1,12 @@
+import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+dotenv.config();
+
+const supabase = createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_ANON_KEY);
+
+async function run() {
+  const { data: projects, error } = await supabase.from('projects').select('*');
+  console.log("Projects:", JSON.stringify(projects, null, 2));
+  console.log("Error:", error);
+}
+run();
