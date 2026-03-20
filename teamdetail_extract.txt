@@ -1,0 +1,214 @@
+﻿function TeamDetail({ projectId, onBack }) {
+  const [project, setProject] = useState(null);
+  const [members, setMembers] = useState([]);
+  const [docs, setDocs]       = useState([]);
+  const [evals, setEvals]     = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      try {
+        const [projRes, memRes, docRes, evalRes] = await Promise.all([
+          supabase.from("projects").select("id,title,description,status,guide_id,domain,technology_stacks,created_at").eq("id", projectId).single(),
+          supabase.from("team_members").select("id,role,profiles:student_id(id,full_name,roll_number,email)").eq("project_id", projectId),
+          supabase.from("documents").select("id,document_type,file_name,file_url,file_size,status,coordinator_verified,uploaded_at,feedback").eq("project_id", projectId).order("uploaded_at", { ascending: false }),
+          supabase.from("evaluations").select("id,evaluation_type,obtained_marks,max_marks,feedback,created_at,profiles:evaluator_id(full_name)").eq("project_id", projectId).order("created_at", { ascending: false }),
+        ]);
+        let proj = projRes.data;
+        if (proj?.guide_id) {
+          const { data: guide } = await supabase.from("profiles").select("full_name").eq("id", proj.guide_id).single();
+          proj = { ...proj, guide_name: guide?.full_name || "—" };
+        }
+        setProject(proj);
+        setMembers(memRes.data || []);
+        setDocs(docRes.data || []);
+        setEvals(evalRes.data || []);
+      } catch (e) { console.error(e); }
+      setLoading(false);
+    };
+    load();
+  }, [projectId]);
+
+  if (loading) return <Spinner />;
+  if (!project) return <div className="text-center py-16 text-slate-400">Project not found.</div>;
+
+  const statusColor = s => { const k=(s||"").toLowerCase(); return k==="approved"?"#10b981":k==="pending"?"#f59e0b":k==="rejected"?"#ef4444":"#94a3b8"; };
+  const statusBg    = s => { const k=(s||"").toLowerCase(); return k==="approved"?"#f0fdf4":k==="pending"?"#fffbeb":k==="rejected"?"#fef2f2":"#f8fafc"; };
+  const stageLabel  = s => (s||"—").replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase());
+  const fmtDate     = ts => ts ? new Date(ts).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}) : "—";
+  const fmtSize     = b => !b?"":b<1048576?`${(b/1024).toFixed(0)} KB`:`${(b/1048576).toFixed(1)} MB`;
+  const completedStages = [...new Set(docs.filter(d=>d.status==="approved").map(d=>d.document_type))];
+  const pct = Math.round((completedStages.length / 6) * 100);
+
+  return (
+    <div className="space-y-5">
+      <button onClick={onBack} className="flex items-center gap-2 text-sm font-semibold text-teal-600 hover:text-teal-700 transition-colors">
+        <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+        Back to Teams
+      </button>
+
+      <div className="bg-white rounded-2xl border border-slate-100 px-6 py-5">
+        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">My Class › Teams › Project</p>
+        <h1 className="text-xl font-extrabold text-slate-900 leading-tight">{project.title}</h1>
+        <div className="flex items-center gap-3 mt-2 flex-wrap">
+          <span className="text-xs font-semibold px-2.5 py-1 rounded-full" style={{ backgroundColor: statusBg(project.status), color: statusColor(project.status) }}>
+            {(project.status||"active").toUpperCase()}
+          </span>
+          {project.domain && <span className="text-xs text-slate-500">{project.domain}</span>}
+        </div>
+        <div className="mt-4">
+          <div className="flex justify-between text-xs text-slate-500 mb-1.5">
+            <span>Overall progression</span>
+            <span className="font-semibold text-slate-700">{pct}% complete</span>
+          </div>
+          <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+            <div className="h-full rounded-full transition-all duration-700" style={{ width: pct+"%", backgroundColor: "#14b8a6" }} />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+        <div className="xl:col-span-2 space-y-5">
+          <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50"><p className="text-sm font-bold text-slate-700">Project information</p></div>
+            <div className="px-6 py-5 grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Assigned guide</p>
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-full bg-teal-100 text-teal-700 text-xs font-bold flex items-center justify-center flex-shrink-0">{project.guide_name?.[0]||"G"}</div>
+                  <span className="text-sm font-semibold text-slate-800">{project.guide_name||"—"}</span>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Created</p>
+                <p className="text-sm text-slate-700">{fmtDate(project.created_at)}</p>
+              </div>
+              {project.technology_stacks && (
+                <div className="col-span-2">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Technologies</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(Array.isArray(project.technology_stacks)?project.technology_stacks:[project.technology_stacks]).map((t,i)=>(
+                      <span key={i} className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">{t}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {project.description && (
+                <div className="col-span-2">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Description</p>
+                  <p className="text-sm text-slate-600 leading-relaxed">{project.description}</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+              <p className="text-sm font-bold text-slate-700">Submission history</p>
+              <span className="text-xs text-slate-400">{docs.length} file{docs.length!==1?"s":""}</span>
+            </div>
+            {docs.length === 0 ? (
+              <div className="px-6 py-10 text-center text-slate-400 text-sm">No submissions yet.</div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    {["Stage","File","Guide","Coord","Date"].map(h=>(
+                      <th key={h} className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-slate-400">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {docs.map(d => (
+                    <tr key={d.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-5 py-3 font-semibold text-slate-800">{stageLabel(d.document_type)}</td>
+                      <td className="px-5 py-3">
+                        {d.file_url ? (
+                          <a href={d.file_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-teal-600 hover:text-teal-700 font-medium">
+                            <span className="material-symbols-outlined text-sm">description</span>
+                            <span className="truncate max-w-[120px]">{d.file_name||"file"}</span>
+                            {d.file_size && <span className="text-slate-300 text-xs">{fmtSize(d.file_size)}</span>}
+                          </a>
+                        ) : <span className="text-slate-400 text-xs">{d.file_name||"—"}</span>}
+                      </td>
+                      <td className="px-5 py-3">
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: statusBg(d.status), color: statusColor(d.status) }}>
+                          {(d.status||"—").toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3">
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: d.coordinator_verified?"#f0fdf4":"#f8fafc", color: d.coordinator_verified?"#10b981":"#94a3b8" }}>
+                          {d.coordinator_verified?"VERIFIED":"PENDING"}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3 text-slate-500 text-xs whitespace-nowrap">{fmtDate(d.uploaded_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-5">
+          <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+              <p className="text-sm font-bold text-slate-700">Team members</p>
+              <span className="text-xs text-slate-400">{members.length} members</span>
+            </div>
+            <div className="divide-y divide-slate-50">
+              {members.length === 0 ? (
+                <p className="px-5 py-8 text-center text-slate-400 text-sm">No members found.</p>
+              ) : members.map((m,i) => {
+                const colors=["#14b8a6","#6366f1","#f59e0b","#ef4444","#8b5cf6"];
+                return (
+                  <div key={m.id} className="flex items-center gap-3 px-5 py-3.5">
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0" style={{ backgroundColor: colors[i%colors.length] }}>
+                      {m.profiles?.full_name?.[0]?.toUpperCase()||"?"}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-slate-900 truncate">{m.profiles?.full_name||"—"}</p>
+                      <p className="text-xs text-slate-400">{m.profiles?.roll_number||m.profiles?.email||"—"}</p>
+                    </div>
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 capitalize">{m.role||"member"}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50">
+              <p className="text-sm font-bold text-slate-700">Evaluation history</p>
+            </div>
+            <div className="divide-y divide-slate-50">
+              {evals.length === 0 ? (
+                <p className="px-5 py-8 text-center text-slate-400 text-sm">No evaluations yet.</p>
+              ) : evals.map(ev => {
+                const sc = ev.max_marks>0 ? Math.round((ev.obtained_marks/ev.max_marks)*100) : null;
+                const scColor = sc>=75?"#10b981":sc>=50?"#f59e0b":"#ef4444";
+                return (
+                  <div key={ev.id} className="px-5 py-4">
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{stageLabel(ev.evaluation_type)}</p>
+                      {sc!==null && <span className="text-lg font-extrabold" style={{ color: scColor }}>{ev.obtained_marks}<span className="text-xs text-slate-400 font-medium">/{ev.max_marks}</span></span>}
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-slate-400">{ev.profiles?.full_name||"—"}</p>
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: sc!==null?"#f0fdf4":"#f8fafc", color: sc!==null?"#10b981":"#94a3b8" }}>
+                        {sc!==null?"COMPLETED":"NOT STARTED"}
+                      </span>
+                    </div>
+                    {ev.feedback && <p className="text-xs text-slate-500 mt-1.5 leading-relaxed line-clamp-2">{ev.feedback}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
