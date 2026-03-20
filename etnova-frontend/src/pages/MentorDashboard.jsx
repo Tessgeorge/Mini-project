@@ -197,6 +197,35 @@ function buildDeadlineIso(datePart, timePart) {
   return datePart + "T" + timePart + ":00";
 }
 
+function normalizeMilestoneDueDate(value) {
+  if (value == null || value === "") return "";
+  if (typeof value === "string") return value;
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return "";
+    return value.toISOString();
+  }
+
+  if (typeof value === "number") {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toISOString();
+  }
+
+  const maybeDate = new Date(value);
+  if (!Number.isNaN(maybeDate.getTime())) {
+    return maybeDate.toISOString();
+  }
+
+  return String(value);
+}
+
+function formatMyClassError(prefix, error) {
+  const message = String(error?.message || error?.details || "").trim();
+  if (!message) return prefix;
+  return `${prefix}: ${message}`;
+}
+
 function sortReviewStages(rows) {
   const grouped = new Map();
 
@@ -252,6 +281,31 @@ function sortReviewStages(rows) {
     return String(normalizeReviewStageName(a?.stage_name)).localeCompare(String(normalizeReviewStageName(b?.stage_name)));
   });
 }
+
+function resolveCoordinatorClassId(profile, projects) {
+  if (!profile?.is_coordinator) {
+    return { classId: null, error: "" };
+  }
+
+  if (profile.class_id) {
+    return { classId: profile.class_id, error: "" };
+  }
+
+  const classIds = Array.from(new Set((projects || []).map((project) => project?.class_id).filter(Boolean)));
+  if (classIds.length === 1) {
+    return { classId: classIds[0], error: "" };
+  }
+
+  if (classIds.length > 1) {
+    return {
+      classId: null,
+      error: "Coordinator is linked to multiple classes. Ask admin to assign a coordinator class.",
+    };
+  }
+
+  return { classId: null, error: "No coordinator class assigned." };
+}
+
 function WeeklyChart({ projects, evaluations }) {
   // Build last-7-days evaluation count per day
   const days = [];
@@ -991,7 +1045,7 @@ function Topbar({ active, mentorName, onProfileClick, showMyClass }) {
   );
 }
 
-function MyClassTab({ classData, loading, onSaveStudentDeadline }) {
+function MyClassTab({ classData, loading, onSaveStudentDeadline, emptyMessage = "No coordinator class assigned." }) {
   const [deadlineDrafts, setDeadlineDrafts] = useState({});
   const [editingDeadlineIds, setEditingDeadlineIds] = useState({});
   const [savingDeadlineId, setSavingDeadlineId] = useState("");
@@ -1021,7 +1075,7 @@ function MyClassTab({ classData, loading, onSaveStudentDeadline }) {
   if (!classData) {
     return (
       <div className="bg-white rounded-2xl p-10 border border-gray-100 shadow-sm text-center">
-        <p className="text-gray-700 font-semibold">No coordinator class assigned.</p>
+        <p className="text-gray-700 font-semibold">{emptyMessage}</p>
       </div>
     );
   }
@@ -2136,6 +2190,7 @@ export default function MentorDashboard() {
   const [showProfileEditor, setShowProfileEditor] = useState(false);
   const [myClassData, setMyClassData] = useState(null);
   const [myClassLoading, setMyClassLoading] = useState(false);
+  const [myClassError, setMyClassError] = useState("");
   const navigate = useNavigate();
 
   const loadCoordinatorClassData = useCallback(async (classId) => {
@@ -2228,27 +2283,43 @@ export default function MentorDashboard() {
           .from("profiles").select("*").eq("id", user.id).single();
         setMentorProfile(profile);
 
+        let projData = [];
+
         if (profile) {
           // Projects assigned to this mentor + team members joined with profiles
-          const { data: projData } = await supabase
+          const { data: projectRows, error: projectError } = await supabase
             .from("projects")
             .select(`*, team_members(id, student_id, role, profiles:student_id(full_name, email, roll_number, department))`)
             .or(`guide_id.eq.${profile.id},mentor_id.eq.${profile.id}`)
             .order("created_at", { ascending: false });
+          if (projectError) {
+            console.error(projectError);
+          }
+          projData = projectRows || [];
           setProjects(projData || []);
 
           // Evaluations by this mentor
-          const evalData = await fetchEvaluationsForMentor(profile.id);
+          let evalData = [];
+          try {
+            evalData = await fetchEvaluationsForMentor(profile.id);
+          } catch (evaluationError) {
+            console.error(evaluationError);
+          }
           setEvaluations(evalData || []);
 
           // Milestones (system_settings table) — read admin-controlled deadlines
-          const msData = await fetchSystemSettingsRows();
+          let msData = [];
+          try {
+            msData = await fetchSystemSettingsRows();
+          } catch (settingsError) {
+            console.error(settingsError);
+          }
           // Map to milestone shape — adjust column names if needed
           setMilestones((msData || []).map(m => ({
             title: m.setting_key || m.key || m.title || m.name,
-            due_date: m.setting_value || m.value || m.due_date || "—",
+            due_date: normalizeMilestoneDueDate(m.setting_value || m.value || m.due_date),
             status: m.status || "upcoming",
-          })).filter(m => m.due_date !== "—" && m.due_date?.includes("-")));
+          })).filter(m => Boolean(m.due_date) && String(m.due_date).includes("-")));
 
           // Build recent activity from evaluations
           const activity = (evalData || []).slice(0, 5).map(ev => {
@@ -2259,16 +2330,26 @@ export default function MentorDashboard() {
           setRecentActivity(activity);
         }
 
-        if (profile?.is_coordinator && profile?.class_id) {
+        const coordinatorResolution = resolveCoordinatorClassId(profile, projData);
+        if (coordinatorResolution.classId) {
           setMyClassLoading(true);
-          setMyClassData(await loadCoordinatorClassData(profile.class_id));
+          try {
+            setMyClassError("");
+            setMyClassData(await loadCoordinatorClassData(coordinatorResolution.classId));
+          } catch (error) {
+            console.error(error);
+            setMyClassData(null);
+            setMyClassError(formatMyClassError("Failed to load coordinator class details", error));
+          }
           setMyClassLoading(false);
         } else {
           setMyClassData(null);
+          setMyClassError(profile?.is_coordinator ? coordinatorResolution.error : "");
           setMyClassLoading(false);
         }
       } catch (e) {
         console.error(e);
+        setMyClassError(formatMyClassError("Failed to load coordinator class details", e));
         setMyClassLoading(false);
       }
       finally { setLoading(false); }
@@ -2276,7 +2357,8 @@ export default function MentorDashboard() {
     init();
   }, [loadCoordinatorClassData, navigate]);
 
-  const isCoordinatorWithClass = Boolean(mentorProfile?.is_coordinator && mentorProfile?.class_id);
+  const coordinatorClassId = resolveCoordinatorClassId(mentorProfile, projects).classId;
+  const isCoordinatorWithClass = Boolean(mentorProfile?.is_coordinator && coordinatorClassId);
 
   useEffect(() => {
     if (!isCoordinatorWithClass && active === "my-class") {
@@ -2285,25 +2367,27 @@ export default function MentorDashboard() {
   }, [active, isCoordinatorWithClass]);
 
   useEffect(() => {
-    if (!mentorProfile?.is_coordinator || !mentorProfile?.class_id) return undefined;
+    if (!mentorProfile?.is_coordinator || !coordinatorClassId) return undefined;
 
     const refreshMyClassData = async () => {
       try {
-        setMyClassData(await loadCoordinatorClassData(mentorProfile.class_id));
+        setMyClassData(await loadCoordinatorClassData(coordinatorClassId));
+        setMyClassError("");
       } catch (error) {
         console.error(error);
+        setMyClassError(formatMyClassError("Failed to refresh coordinator class details", error));
       }
     };
 
     const channel = supabase
-      .channel(`mentor-my-class-review-stages-${mentorProfile.class_id}`)
+      .channel(`mentor-my-class-review-stages-${coordinatorClassId}`)
       .on(
         "postgres_changes",
         {
           event: "*",
           schema: "public",
           table: "review_stages",
-          filter: `class_id=eq.${mentorProfile.class_id}`,
+          filter: `class_id=eq.${coordinatorClassId}`,
         },
         async () => {
           await refreshMyClassData();
@@ -2314,7 +2398,7 @@ export default function MentorDashboard() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [loadCoordinatorClassData, mentorProfile?.class_id, mentorProfile?.is_coordinator]);
+  }, [coordinatorClassId, loadCoordinatorClassData, mentorProfile?.is_coordinator]);
 
   // Time ago helper
   function getTimeAgo(ts) {
@@ -2348,7 +2432,7 @@ export default function MentorDashboard() {
   };
 
   const handleSaveStudentDeadline = async (stageId, deadlineIso) => {
-    if (!mentorProfile?.class_id) {
+    if (!coordinatorClassId) {
       throw new Error("No coordinator class assigned.");
     }
 
@@ -2369,13 +2453,13 @@ export default function MentorDashboard() {
       .from("review_stages")
       .update({ deadline: deadlineIso, student_deadline_set_by_coordinator: true })
       .eq("id", stageId)
-      .eq("class_id", mentorProfile.class_id);
+      .eq("class_id", coordinatorClassId);
 
     if (error) {
       throw new Error(error.message || "Failed to update student deadline.");
     }
 
-    setMyClassData(await loadCoordinatorClassData(mentorProfile.class_id));
+    setMyClassData(await loadCoordinatorClassData(coordinatorClassId));
   };
 
   const handleSignOut = async () => {
@@ -2476,6 +2560,7 @@ export default function MentorDashboard() {
               classData={myClassData}
               loading={myClassLoading}
               onSaveStudentDeadline={handleSaveStudentDeadline}
+              emptyMessage={myClassError || "No coordinator class assigned."}
             />
           )}
         </main>
