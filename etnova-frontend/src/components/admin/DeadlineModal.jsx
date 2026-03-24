@@ -3,7 +3,7 @@ export default function DeadlineModal({
   isOpen,
   deadlineDate,
   deadlineTime,
-  title = "Edit Review Deadline",
+  title = "Edit Deadline",
   dateLabel = "Deadline Date",
   timeLabel = "Deadline Time",
   onDeadlineDateChange,
