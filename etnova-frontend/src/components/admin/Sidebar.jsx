@@ -4,7 +4,7 @@ const ADMIN_NAV_ITEMS = [
   { id: "dashboard", label: "Dashboard", icon: "dashboard" },
   { id: "mentor-management", label: "Mentor Management", icon: "groups" },
   { id: "guide-allocation", label: "Mentor Allocation", icon: "shuffle" },
-  { id: "review-management", label: "Review Management", icon: "grading" },
+  { id: "review-management", label: "Review Workflow", icon: "grading" },
 ];
 
 export default function AdminSidebar({ activeItem = "dashboard", onSignOut, onNavigate }) {

@@ -85,7 +85,7 @@ function Card({ children, className = "" }) {
   );
 }
 
-// Section header matching "Project Overview" / "Team Summary" style
+// Section header matching the shared overview and team cards
 function SectionHeader({ icon, title, action }) {
   return (
     <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
@@ -131,7 +131,7 @@ function OutlineButton({ children, onClick, disabled, icon, small = false, dange
   );
 }
 
-// Status pill matching "In Progress" / "Pending" / "Assigned"
+// Status pill matching the shared class dashboard badges
 function StatusPill({ label, type = "gray" }) {
   const styles = {
     teal: { bg: "rgba(0,210,196,0.12)", color: "#00897B", border: "1px solid rgba(0,210,196,0.3)" },
@@ -178,7 +178,7 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
       return acc;
     }, {});
     setDeadlineDrafts(drafts);
-    // Never reset editingIds here — it would override Cancel/Save actions
+    // Never reset editingIds here - it would override Cancel/Save actions
     // editingIds is only changed by handleEdit, handleSave, and Cancel clicks
     setSavedDeadlines(p => ({ ...existing, ...p })); // merge: keep any this-session saves
     setSavingId(""); setDlError(""); setDlNotice("");
@@ -265,7 +265,7 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
       {/* Class identity header */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-6 py-5">
         <h2 className="text-xl font-extrabold text-slate-900 leading-tight">
-          My Class — {classTitle}
+          My Class - {classTitle}
         </h2>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5">
           <span className="text-sm text-slate-500 flex items-center gap-1.5">
@@ -281,7 +281,7 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
               <span className="text-slate-300 text-sm">·</span>
               <span className="text-sm text-slate-500 flex items-center gap-1.5">
                 <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
-                {coordinators.map(c => c.full_name).join(" · ")}
+                {coordinators.map(c => c.full_name).join(" - ")}
               </span>
             </>
           )}
@@ -294,7 +294,7 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
           { label: "Total Teams", value: totalProjects, icon: "groups", color: "#00D2C4" },
           { label: "Evaluated", value: evaluatedProjects, icon: "verified", color: "#10b981" },
           { label: "Pending", value: pendingEvaluations, icon: "pending", color: "#f59e0b" },
-          { label: "Class Avg Score", value: classAverageScore != null ? `${formatClassScore(classAverageScore)}/100` : "—", icon: "grade", color: "#6366f1" },
+          { label: "Class Avg Score", value: classAverageScore != null ? `${formatClassScore(classAverageScore)}/100` : "-", icon: "grade", color: "#6366f1" },
         ].map(k => (
           <Card key={k.label}>
             <div className="px-5 py-4 flex items-center gap-4">
@@ -303,7 +303,7 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
                 <span className="material-symbols-outlined" style={{ color: k.color, fontSize: "20px" }}>{k.icon}</span>
               </div>
               <div>
-                <p className="text-2xl font-black text-slate-900 leading-none">{k.value ?? "—"}</p>
+                <p className="text-2xl font-black text-slate-900 leading-none">{k.value ?? "-"}</p>
                 <p className="text-xs text-slate-400 font-medium mt-1">{k.label}</p>
               </div>
             </div>
@@ -316,7 +316,7 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <div>
             <p className="text-sm font-bold text-slate-800">Review deadlines</p>
-            <p className="text-xs text-slate-400 mt-0.5">Admin sets evaluation deadlines · you set student submission deadlines</p>
+            <p className="text-xs text-slate-400 mt-0.5">Admin sets evaluation deadlines - you set student submission deadlines</p>
           </div>
         </div>
         <div className="px-5 py-4">
@@ -382,7 +382,7 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
                     const hasSaved = adminEnabled && Boolean(savedIso);
                     // Coordinator can only set/edit if admin has enabled this stage first
                     const canEdit = adminEnabled;
-                    // Only enter edit mode when explicitly triggered — never auto-open
+                    // Only enter edit mode when explicitly triggered - never auto-open
                     const isEditing = editingIds[s.id] === true;
                     const isSaving = savingId === s.id;
                     return (
@@ -415,7 +415,7 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
                                   <span className="inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Saved</span>
                                 </>
                               ) : (
-                                <span className="text-slate-300 text-sm">—</span>
+                                <span className="text-slate-300 text-sm">-</span>
                               )}
                             </div>
                           )}
@@ -488,7 +488,7 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
       <Card>
         <div className="px-5 py-4 border-b border-gray-100">
           <p className="text-sm font-bold text-slate-800">Stage progress</p>
-          <p className="text-xs text-slate-400 mt-0.5">Teams completed per stage · {totalProjects} total teams</p>
+          <p className="text-xs text-slate-400 mt-0.5">Teams completed per stage - {totalProjects} total teams</p>
         </div>
         <div className="px-5 py-4 space-y-4">
           {reviewStages.length === 0 ? (
@@ -531,7 +531,7 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
                 ? `${pendingEvaluations} submission${pendingEvaluations !== 1 ? "s" : ""} awaiting your verification`
                 : "No pending submissions",
               sub: pendingEvaluations > 0
-                ? "Guide-approved documents waiting for your sign-off"
+                ? "Mentor-approved documents waiting for your sign-off"
                 : "All submissions are verified",
               btn: "Go to Submissions",
               nav: "submissions",
@@ -616,8 +616,8 @@ function TabSubmissions({ classId }) {
         .order("coordinator_verified_at", { ascending: false });
 
       const enrich = docs => (docs || []).map(d => ({
-        ...d, project_title: projMap[d.project_id]?.title || "—",
-        guide_name: guideMap[projMap[d.project_id]?.guide_id] || "—",
+        ...d, project_title: projMap[d.project_id]?.title || "-",
+        guide_name: guideMap[projMap[d.project_id]?.guide_id] || "-",
       }));
       setPending(enrich(pDocs));
       setVerified(enrich(vDocs));
@@ -651,7 +651,7 @@ function TabSubmissions({ classId }) {
   };
 
   const ago = ts => {
-    if (!ts) return "—";
+    if (!ts) return "-";
     const d = Math.floor((Date.now() - new Date(ts)) / 1000);
     if (d < 3600) return `${Math.floor(d / 60)}m ago`;
     if (d < 86400) return `${Math.floor(d / 3600)}h ago`;
@@ -675,7 +675,7 @@ function TabSubmissions({ classId }) {
             <span className="material-symbols-outlined text-xl" style={{ color: "#00D2C4" }}>pending_actions</span>
             <div>
               <h2 className="text-base font-bold text-slate-900">Pending Verification</h2>
-              <p className="text-xs text-slate-400 mt-0.5">Guide-approved documents waiting for your sign-off</p>
+              <p className="text-xs text-slate-400 mt-0.5">Mentor-approved documents waiting for your sign-off</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -689,8 +689,8 @@ function TabSubmissions({ classId }) {
             <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ backgroundColor: "rgba(0,210,196,0.1)" }}>
               <span className="material-symbols-outlined text-2xl" style={{ color: "#00D2C4" }}>check_circle</span>
             </div>
-            <p className="text-slate-600 font-semibold">All clear — no pending submissions</p>
-            <p className="text-sm text-slate-400">Guide-approved documents will appear here automatically</p>
+            <p className="text-slate-600 font-semibold">All clear - no pending submissions</p>
+            <p className="text-sm text-slate-400">Mentor-approved documents will appear here automatically</p>
           </div>
         ) : (
           <div className="divide-y divide-slate-50">
@@ -706,7 +706,7 @@ function TabSubmissions({ classId }) {
                     <span className="ml-2 text-slate-400 font-normal text-sm">· {(doc.document_type || "document").replace(/_/g, " ")}</span>
                   </p>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Guide: <span className="font-medium text-slate-600">{doc.guide_name}</span>
+                    Mentor: <span className="font-medium text-slate-600">{doc.guide_name}</span>
                     <span className="mx-1.5 text-slate-200">·</span>
                     {ago(doc.uploaded_at)}
                   </p>
@@ -751,7 +751,7 @@ function TabSubmissions({ classId }) {
                   <td className="px-6 py-3 font-semibold text-slate-900">{doc.project_title}</td>
                   <td className="px-6 py-3 text-slate-600 capitalize">{(doc.document_type || "").replace(/_/g, " ")}</td>
                   <td className="px-6 py-3 text-slate-500">
-                    {doc.coordinator_verified_at ? new Date(doc.coordinator_verified_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—"}
+                    {doc.coordinator_verified_at ? new Date(doc.coordinator_verified_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "-"}
                   </td>
                   <td className="px-6 py-3"><StatusPill label="Verified" type="green" /></td>
                 </tr>
@@ -806,7 +806,7 @@ function TeamDetail({ projectId, onBack }) {
         let proj = projRes.data;
         if (proj?.guide_id) {
           const { data: guide } = await supabase.from("profiles").select("full_name").eq("id", proj.guide_id).single();
-          proj = { ...proj, guide_name: guide?.full_name || "—" };
+          proj = { ...proj, guide_name: guide?.full_name || "-" };
         }
         setProject(proj);
         setMembers(memRes.data || []);
@@ -823,8 +823,8 @@ function TeamDetail({ projectId, onBack }) {
 
   const statusColor = s => { const k = (s || "").toLowerCase(); return k === "approved" ? "#10b981" : k === "pending" ? "#f59e0b" : k === "rejected" ? "#ef4444" : "#94a3b8"; };
   const statusBg = s => { const k = (s || "").toLowerCase(); return k === "approved" ? "#f0fdf4" : k === "pending" ? "#fffbeb" : k === "rejected" ? "#fef2f2" : "#f8fafc"; };
-  const stageLabel = s => (s || "—").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-  const fmtDate = ts => ts ? new Date(ts).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+  const stageLabel = s => (s || "-").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  const fmtDate = ts => ts ? new Date(ts).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "-";
   const fmtSize = b => !b ? "" : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
   const completedStages = [...new Set(docs.filter(d => d.status === "approved").map(d => d.document_type))];
   const pct = Math.round((completedStages.length / 6) * 100);
@@ -859,13 +859,13 @@ function TeamDetail({ projectId, onBack }) {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
         <div className="xl:col-span-2 space-y-5">
           <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50"><p className="text-sm font-bold text-slate-700">Project information</p></div>
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50"><p className="text-sm font-bold text-slate-700">Team information</p></div>
             <div className="px-6 py-5 grid grid-cols-2 gap-4">
               <div>
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Assigned guide</p>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Assigned mentor</p>
                 <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-full bg-teal-100 text-teal-700 text-xs font-bold flex items-center justify-center flex-shrink-0">{project.guide_name?.[0] || "G"}</div>
-                  <span className="text-sm font-semibold text-slate-800">{project.guide_name || "—"}</span>
+                  <div className="w-7 h-7 rounded-full bg-teal-100 text-teal-700 text-xs font-bold flex items-center justify-center flex-shrink-0">{project.guide_name?.[0] || "M"}</div>
+                  <span className="text-sm font-semibold text-slate-800">{project.guide_name || "-"}</span>
                 </div>
               </div>
               <div>
@@ -902,7 +902,7 @@ function TeamDetail({ projectId, onBack }) {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100">
-                    {["Stage", "File", "Guide", "Coord", "Date"].map(h => (
+                    {["Stage", "File", "Mentor Review", "Coordinator Review", "Date"].map(h => (
                       <th key={h} className="text-left px-5 py-3 text-xs font-bold uppercase tracking-wider text-slate-400">{h}</th>
                     ))}
                   </tr>
@@ -918,11 +918,11 @@ function TeamDetail({ projectId, onBack }) {
                             <span className="truncate max-w-[120px]">{d.file_name || "file"}</span>
                             {d.file_size && <span className="text-slate-300 text-xs">{fmtSize(d.file_size)}</span>}
                           </a>
-                        ) : <span className="text-slate-400 text-xs">{d.file_name || "—"}</span>}
+                        ) : <span className="text-slate-400 text-xs">{d.file_name || "-"}</span>}
                       </td>
                       <td className="px-5 py-3">
                         <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: statusBg(d.status), color: statusColor(d.status) }}>
-                          {(d.status || "—").toUpperCase()}
+                          {(d.status || "-").toUpperCase()}
                         </span>
                       </td>
                       <td className="px-5 py-3">
@@ -956,8 +956,8 @@ function TeamDetail({ projectId, onBack }) {
                       {m.profiles?.full_name?.[0]?.toUpperCase() || "?"}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-slate-900 truncate">{m.profiles?.full_name || "—"}</p>
-                      <p className="text-xs text-slate-400">{m.profiles?.roll_number || m.profiles?.email || "—"}</p>
+                      <p className="text-sm font-semibold text-slate-900 truncate">{m.profiles?.full_name || "-"}</p>
+                      <p className="text-xs text-slate-400">{m.profiles?.roll_number || m.profiles?.email || "-"}</p>
                     </div>
                     <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 capitalize">{m.role || "member"}</span>
                   </div>
@@ -983,7 +983,7 @@ function TeamDetail({ projectId, onBack }) {
                       {sc !== null && <span className="text-lg font-extrabold" style={{ color: scColor }}>{ev.obtained_marks}<span className="text-xs text-slate-400 font-medium">/{ev.max_marks}</span></span>}
                     </div>
                     <div className="flex items-center justify-between">
-                      <p className="text-xs text-slate-400">{ev.profiles?.full_name || "—"}</p>
+                      <p className="text-xs text-slate-400">{ev.profiles?.full_name || "-"}</p>
                       <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: sc !== null ? "#f0fdf4" : "#f8fafc", color: sc !== null ? "#10b981" : "#94a3b8" }}>
                         {sc !== null ? "COMPLETED" : "NOT STARTED"}
                       </span>
@@ -1058,11 +1058,11 @@ function TabTeams({ classId }) {
         const ld = docMap[p.id];
         return {
           id: p.id, title: p.title, status: p.status, batch: p.batch ?? null,
-          guide_name: guideMap[p.guide_id] || "—",
+          guide_name: guideMap[p.guide_id] || "-",
           members: [],
           team_size: (p.team_members || []).length,
-          current_stage: currentStage || (ld?.document_type?.replace(/_/g, " ") || "—"),
-          sub_status: ld?.status || "—",
+          current_stage: currentStage || (ld?.document_type?.replace(/_/g, " ") || "-"),
+          sub_status: ld?.status || "-",
           coord_verified: ld?.coordinator_verified || false,
         };
       });
@@ -1103,14 +1103,14 @@ function TabTeams({ classId }) {
         await supabase.from("projects").update({ batch: i < half ? 1 : 2 }).eq("id", sorted[i].id);
       }
       await load();
-      showNotice(`${sorted.length} teams divided — Batch 1: ${half}, Batch 2: ${sorted.length - half}`);
+      showNotice(`${sorted.length} teams divided - Batch 1: ${half}, Batch 2: ${sorted.length - half}`);
     } catch (e) { showNotice("Failed: " + e.message, "err"); }
     setSaving(false);
   };
 
   const handleBatchChange = async (teamId, newBatch) => {
     if (locked) return showNotice("Unlock team formation to make changes.", "err");
-    // newBatch is a string from select ("", "1", "2") — convert correctly
+    // newBatch is a string from select ("", "1", "2") - convert correctly
     const val = newBatch === "" || newBatch === null ? null : Number(newBatch);
     // Update UI immediately
     setTeams(prev => {
@@ -1118,7 +1118,7 @@ function TabTeams({ classId }) {
       updated.sort((a, b) => { const ba = a.batch ?? 99, bb = b.batch ?? 99; return ba - bb || a.title.localeCompare(b.title); });
       return updated;
     });
-    // Save to Supabase — use updateBatch helper to handle null correctly
+    // Save to Supabase - use updateBatch helper to handle null correctly
     const { error } = await supabase.from("projects")
       .update({ batch: val })
       .eq("id", teamId);
@@ -1150,9 +1150,9 @@ function TabTeams({ classId }) {
     </style>
     </head><body>
     <h1>${label}</h1>
-    <p class="sub">${arr.length} teams &nbsp;·&nbsp; Generated: ${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</p>
+    <p class="sub">${arr.length} teams &nbsp;-&nbsp; Generated: ${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</p>
     <table>
-      <thead><tr><th>Sl. No.</th><th>Project name</th><th>Members</th><th>Guide</th><th>Batch</th></tr></thead>
+      <thead><tr><th>Sl. No.</th><th>Team name</th><th>Members</th><th>Mentor</th><th>Batch</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     </body></html>`;
@@ -1173,7 +1173,7 @@ function TabTeams({ classId }) {
       @media print{.dl-btn{display:none}}</style>`
     ).replace(
       "<h1>",
-      `<a class="dl-btn" id="dlbtn">⬇ Download</a><h1>`
+      `<a class="dl-btn" id="dlbtn">Download</a><h1>`
     ).replace(
       "</body>",
       `<script>
@@ -1200,7 +1200,7 @@ function TabTeams({ classId }) {
   const b1 = teams.filter(t => t.batch === 1);
   const b2 = teams.filter(t => t.batch === 2);
   const un = teams.filter(t => !t.batch);
-  const guides = ["all", ...new Set(teams.map(t => t.guide_name).filter(g => g !== "—"))];
+  const guides = ["all", ...new Set(teams.map(t => t.guide_name).filter(g => g !== "-"))];
   const filtered = teams.filter(t =>
     (filterBatch === "all" || (filterBatch === "1" && t.batch === 1) || (filterBatch === "2" && t.batch === 2) || (filterBatch === "none" && !t.batch)) &&
     (filterGuide === "all" || t.guide_name === filterGuide)
@@ -1291,7 +1291,7 @@ function TabTeams({ classId }) {
             </select>
             <select value={filterGuide} onChange={e => setFilterGuide(e.target.value)}
               className="px-3 py-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-xl bg-white focus:outline-none">
-              {guides.map(g => <option key={g} value={g}>{g === "all" ? "All guides" : g}</option>)}
+              {guides.map(g => <option key={g} value={g}>{g === "all" ? "All mentors" : g}</option>)}
             </select>
           </div>
         </div>
@@ -1299,7 +1299,7 @@ function TabTeams({ classId }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-100">
-                {["SI.NO", "Project Title", "Members", "Guide", "Batch", "Current Stage", "Status", "Actions"].map(h => (
+                {["SI.NO", "Team Name", "Members", "Mentor", "Batch", "Current Stage", "Status", "Actions"].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider text-slate-400">{h}</th>
                 ))}
               </tr>
@@ -1489,7 +1489,7 @@ function TabReviews({ classId }) {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-slate-900 text-sm">{m.full_name}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">{m.department}{m.designation ? ` · ${m.designation}` : ""}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{m.department}{m.designation ? ` - ${m.designation}` : ""}</p>
                 </div>
                 {checked && <StatusPill label="Assigned" type="teal" />}
               </label>
@@ -1509,7 +1509,7 @@ function TabReviews({ classId }) {
 }
 
 // ─── MAIN EXPORT ──────────────────────────────────────────────────────────────
-// activeSubPage is driven by the sidebar — values: "overview" | "teams" | "submissions" | "reviews"
+// activeSubPage is driven by the sidebar - values: "overview" | "teams" | "submissions" | "reviews"
 export default function MyClass({ classData, loading, onSaveStudentDeadline, activeSubPage = "overview", onNavigate }) {
   const [coordinators, setCoordinators] = useState([]);
 
@@ -1555,13 +1555,13 @@ export default function MyClass({ classData, loading, onSaveStudentDeadline, act
                 <h2 className="text-xl font-black text-slate-900">{classTitle}</h2>
                 <div className="flex items-center gap-1.5 mt-1">
                   <span className="text-xs font-bold text-slate-400 font-mono tracking-wider">{`CL-${String(classId).slice(0, 8).toUpperCase()}`}</span>
-                  {coordinators.length > 0 && <span className="text-xs text-slate-500 ml-1">Coordinator: {coordinators.map(c => c.full_name).join(" - ")}</span>}
+                  {coordinators.length > 0 && <span className="text-xs text-slate-500 ml-1">Coordinators: {coordinators.map(c => c.full_name).join(" - ")}</span>}
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
               <span className="text-xs font-bold px-3 py-1.5 rounded-full" style={{ border: "1px solid #10b981", color: "#10b981", backgroundColor: "#f0fdf4" }}>
-                Up to date
+                Live sync
               </span>
               <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full">
                 {evaluatedTeams} / {totalTeams} Evaluated
@@ -1573,7 +1573,7 @@ export default function MyClass({ classData, loading, onSaveStudentDeadline, act
           </div>
         </div>
       )}
-      {/* Content — sub-page is controlled by sidebar */}
+      {/* Content - sub-page is controlled by sidebar */}
       {activeSubPage === "overview" && <TabOverview classData={classData} coordinators={coordinators} loading={loading} onSaveStudentDeadline={onSaveStudentDeadline} onNavigate={onNavigate} />}
       {activeSubPage === "teams" && classId && <TabTeams classId={classId} />}
       {activeSubPage === "submissions" && classId && <TabSubmissions classId={classId} />}
@@ -1590,3 +1590,5 @@ export default function MyClass({ classData, loading, onSaveStudentDeadline, act
     </div>
   );
 }
+
+

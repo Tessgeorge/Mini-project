@@ -20,7 +20,7 @@ export default function ReviewTimeline({
   if (!stages.length) {
     return (
       <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-6 text-sm text-gray-500">
-        No review stages found for {selectedClass || "the selected class"}.
+        No review stages are configured for {selectedClass || "the selected class"}.
       </div>
     );
   }

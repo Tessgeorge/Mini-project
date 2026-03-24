@@ -723,14 +723,14 @@ export default function AdminReviewManagement() {
         <TopNavbar
           adminName={ADMIN_NAME}
           academicYearLabel="2026 - S6 Mini Project"
-          pageTitle="Review Management"
+          pageTitle="Review Workflow"
         />
 
         <div className="p-4 md:p-6 lg:p-8 space-y-6">
           <section className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
             <div className="flex flex-col gap-2">
-              <h1 className="text-2xl font-semibold text-slate-800">Review Management</h1>
-              <p className="text-slate-500">Control review stages and coordinator evaluation deadlines in realtime</p>
+              <h1 className="text-2xl font-semibold text-slate-800">Review Workflow</h1>
+              <p className="text-slate-500">Manage review stages and mentor evaluation deadlines for each class in real time</p>
             </div>
             <div className="flex items-center gap-3">
               <label className="text-sm text-slate-600 font-medium" htmlFor="class-filter">Class</label>
@@ -761,11 +761,11 @@ export default function AdminReviewManagement() {
           ) : null}
 
           <section className="bg-white/90 rounded-2xl shadow-sm border border-slate-200/70 p-6">
-            <h2 className="text-lg font-semibold text-slate-800 mb-4">Review Timeline Overview</h2>
+            <h2 className="text-lg font-semibold text-slate-800 mb-4">Class Review Timeline</h2>
             <ReviewTimeline
               stages={stages}
               selectedClass={selectedClassName}
-              deadlineLabel="Coordinator evaluation deadline"
+              deadlineLabel="Mentor evaluation deadline"
             />
           </section>
 
@@ -773,7 +773,7 @@ export default function AdminReviewManagement() {
             loading={loading}
             stages={stages}
             selectedClass={selectedClassName}
-            deadlineLabel="Coordinator Evaluation Deadline"
+            deadlineLabel="Mentor Evaluation Deadline"
             simplifiedActions={false}
             actionBusyId={actionBusyId}
             onEditDeadline={handleOpenDeadlineModal}
@@ -798,7 +798,7 @@ export default function AdminReviewManagement() {
         isOpen={Boolean(editingStage)}
         deadlineDate={deadlineDate}
         deadlineTime={deadlineTime}
-        title="Edit Coordinator Evaluation Deadline"
+        title="Edit Mentor Evaluation Deadline"
         dateLabel="Evaluation Deadline Date"
         timeLabel="Evaluation Deadline Time"
         onDeadlineDateChange={setDeadlineDate}
