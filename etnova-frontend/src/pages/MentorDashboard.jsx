@@ -5,6 +5,8 @@ import { supabase } from "../config/supabaseClient";
 import ProfileMenu from "../components/ProfileMenu";
 import Modal from "../components/Modal";
 import MyClass from "./MyClass";
+import FeedbackBanner from "../components/FeedbackBanner";
+import EmptyStatePanel from "../components/EmptyStatePanel";
 import { getStatusMeta } from "../constants/statusConfig";
 import { EVALUATION_STAGE_OPTIONS, getWorkflowStageMeta } from "../constants/workflowConfig";
 
@@ -410,7 +412,7 @@ function ReviewModal({ project, onClose, onSubmit }) {
             <textarea rows={4} placeholder="Provide detailed feedback for the team..." className={`${cls} resize-none`}
               value={form.feedback} onChange={e => setForm({ ...form, feedback: e.target.value })} />
           </div>
-          {err && <p className="text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2">{err}</p>}
+          {err && <FeedbackBanner tone="error">{err}</FeedbackBanner>}
           <div className="flex gap-3">
             <button onClick={onClose} className="flex-1 border border-gray-200 text-gray-600 font-semibold py-3 rounded-xl hover:bg-gray-50 transition-all text-sm">Cancel</button>
             <button onClick={submit} disabled={saving}
@@ -782,7 +784,7 @@ function OverviewTab({ projects, evaluations, milestones, recentActivity, loadin
         <div className="xl:col-span-2"><WeeklyChart projects={projects} evaluations={evaluations} /></div>
         <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
           <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4">Recent Activity</p>
-          {recentActivity.length === 0 ? <p className="text-sm text-gray-400">No activity yet.</p> : (
+          {recentActivity.length === 0 ? (<EmptyStatePanel compact icon="history_toggle_off" title="No activity yet" description="Recent mentor actions will show up here once reviews and evaluations start coming in." className="border-0 bg-transparent px-0 py-6" />) : (
             <div className="space-y-4">
               {recentActivity.map((item, i) => (
                 <div key={i} className="flex gap-3">
@@ -801,7 +803,7 @@ function OverviewTab({ projects, evaluations, milestones, recentActivity, loadin
         <div className="xl:col-span-2 bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
           <p className="font-extrabold text-gray-800 text-base mb-1">Deadlines & Milestones</p>
           <p className="text-xs text-gray-400 mb-5">Read-only timeline controlled by admin.</p>
-          {milestones.length === 0 ? <p className="text-sm text-gray-400">No milestones set.</p> : (
+          {milestones.length === 0 ? (<EmptyStatePanel compact icon="event_busy" title="No milestones published" description="Ask the admin to publish workflow dates so mentors can plan reviews and follow-ups." className="border-0 bg-transparent px-0 py-6" />) : (
             <div className="space-y-3">
               {milestones.map((m, i) => {
                 const today = new Date(); const due = new Date(m.due_date);
@@ -843,7 +845,7 @@ function OverviewTab({ projects, evaluations, milestones, recentActivity, loadin
                 </div>
               );
             })}
-            {projects.length === 0 && <p className="text-sm text-gray-400">No teams assigned.</p>}
+            {projects.length === 0 && (<EmptyStatePanel compact icon="groups" title="No teams assigned" description="Assigned teams will appear here once admin allocation is complete." className="border-0 bg-transparent px-0 py-6" />)}
           </div>
         </div>
       </div>
@@ -1054,12 +1056,12 @@ function EvaluationTab({ projects, evaluations, setEvaluations, mentorId, loadin
             <textarea rows={4} placeholder="Detailed feedback for the team..." className={`${cls} resize-none`}
               value={form.feedback} onChange={e => setForm({ ...form, feedback: e.target.value })} />
           </div>
-          {err && <p className="text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2">{err}</p>}
+          {err && <FeedbackBanner tone="error">{err}</FeedbackBanner>}
           <button onClick={submit} disabled={saving}
             className="w-full bg-teal-400 hover:bg-teal-500 active:scale-95 text-white font-bold py-3 rounded-xl transition-all disabled:opacity-50">
             {saving ? "Submitting..." : "Submit Evaluation"}
           </button>
-          {ok && <p className="text-center text-sm font-semibold text-teal-600 flex items-center justify-center gap-1.5"><Icon.Check /> Evaluation submitted!</p>}
+          {ok && <FeedbackBanner tone="success">Evaluation submitted and added to the team history.</FeedbackBanner>}
         </div>
       </div>
       <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
@@ -1071,7 +1073,7 @@ function EvaluationTab({ projects, evaluations, setEvaluations, mentorId, loadin
           </select>
         </div>
         <div className="space-y-3 overflow-y-auto max-h-[540px] pr-1">
-          {filtered.length === 0 ? <p className="text-sm text-gray-400">No evaluations submitted yet.</p>
+          {filtered.length === 0 ? (<EmptyStatePanel compact icon="fact_check" title="No evaluations submitted yet" description="Once you evaluate a team, the latest review records will appear here for quick reference." className="border-0 bg-transparent px-0 py-6" />)
             : filtered.map((ev, index) => (
               <div key={ev.id || `${ev.project_id || "project"}-${ev.created_at || "time"}-${index}`} className="bg-gray-50 border border-gray-100 rounded-xl p-4">
                 <div className="flex justify-between items-center">
@@ -1361,3 +1363,6 @@ export default function MentorDashboard() {
     </div>
   );
 }
+
+
+
