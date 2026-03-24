@@ -417,14 +417,6 @@ export default function StudentDashboard() {
     [documents, evaluations, project]
   );
   const currentStage = workflowSnapshot.label;
-  const approvedIdea = useMemo(() => {
-    if (!project?.approved_idea_id) return null;
-    return {
-      title: project.title,
-      description: project.description,
-      technologies: Array.isArray(project.technology_stacks) ? project.technology_stacks : [],
-    };
-  }, [project?.approved_idea_id, project?.description, project?.technology_stacks, project?.title]);
 
   const nextDeadline = useMemo(() => {
     const now = new Date();
@@ -867,58 +859,7 @@ export default function StudentDashboard() {
           {/* Section 4: Project Tracker */}
           <ProjectTracker project={project} documents={documents} />
 
-          {/* Section 5: Idea Workspace Summary */}
-          <div className="glass-card-strong overflow-hidden">
-            <div className="px-4 sm:px-6 py-4 border-b border-white/70 flex items-center gap-2.5">
-              <div className="size-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: "rgba(245,158,11,0.12)" }}>
-                <span className="material-symbols-outlined text-sm" style={{ color: "#f59e0b" }}>lightbulb</span>
-              </div>
-              <h2 className="text-sm font-black text-slate-900">Idea Workspace</h2>
-              <span className="ml-auto text-[10px] font-bold text-slate-400 bg-slate-100/70 px-2 py-0.5 rounded-full">
-                {project?.approved_idea_id ? "Approved idea available" : "Idea iteration enabled"}
-              </span>
-            </div>
-            <div className="p-5 grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-5 items-start">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Current Idea State</p>
-                <h3 className="mt-2 text-xl font-black text-slate-900">
-                  {approvedIdea?.title || project?.title || "Draft idea pending"}
-                </h3>
-                <p className="mt-2 text-sm text-slate-600 leading-relaxed">
-                  {approvedIdea?.description || project?.description || "Create, refine, and submit idea versions from the dedicated workspace."}
-                </p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {(approvedIdea?.technologies || []).length > 0 ? (
-                    approvedIdea.technologies.map((item) => (
-                      <span key={item} className="rounded-full bg-white border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700">
-                        {item}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="text-xs text-slate-400">No technologies added yet.</span>
-                  )}
-                </div>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-white/70 p-4">
-                <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">What You Can Do</p>
-                <div className="mt-3 space-y-2 text-sm text-slate-600">
-                  <p>- Create multiple versions of project ideas</p>
-                  <p>- Submit drafts to mentor for review</p>
-                  <p>- Track approval, rejection, and revision feedback</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => goToStudentTab("ideas")}
-                  className="mt-5 w-full rounded-xl px-4 py-3 text-sm font-black text-black hover:opacity-90 transition-all"
-                  style={{ backgroundColor: "#00D2C4" }}
-                >
-                  Open Idea Workspace
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Section 6: Activity Feed + Workflow Calendar */}
+          {/* Section 5: Activity Feed + Workflow Calendar */}
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
 
             {/* Left: Recent Activity */}
@@ -956,28 +897,6 @@ export default function StudentDashboard() {
               <div className="p-5">
                 <DeadlineCalendar deadlines={deadlines} onNavigateTab={goToStudentTab} />
               </div>
-            </div>
-          </div>
-
-          {/* Section 7: Quick Navigation */}
-          <div className="glass-card-strong overflow-hidden">
-            <div className="px-4 sm:px-6 py-4 border-b border-white/70 flex items-center gap-2.5">
-              <div className="size-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: "rgba(0,210,196,0.12)" }}>
-                <span className="material-symbols-outlined text-sm" style={{ color: "#00D2C4" }}>apps</span>
-              </div>
-              <h2 className="text-sm font-black text-slate-900">Quick Navigation</h2>
-            </div>
-            <div className="p-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {STUDENT_QUICK_NAV_ITEMS.map((nav) => (
-                <button key={nav.id} type="button" onClick={() => goToStudentTab(nav.id)}
-                  className="flex flex-col items-center gap-2.5 py-5 px-3 rounded-xl border border-white/60 bg-white/40 hover:bg-white/70 hover:shadow-sm transition-all group">
-                  <div className="size-11 rounded-2xl flex items-center justify-center transition-transform group-hover:scale-110"
-                    style={{ backgroundColor: `${nav.color}12` }}>
-                    <span className="material-symbols-outlined text-xl" style={{ color: nav.color }}>{nav.icon}</span>
-                  </div>
-                  <p className="text-xs font-black text-slate-700">{nav.label}</p>
-                </button>
-              ))}
             </div>
           </div>
 
