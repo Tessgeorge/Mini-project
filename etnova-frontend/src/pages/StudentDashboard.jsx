@@ -10,13 +10,14 @@ import ProjectTracker from "../components/ProjectTracker";
 import supabase from "../config/supabaseClient";
 import { apiRequest } from "../config/apiClient";
 import { fetchStudentBootstrapData, invalidateStudentBootstrapCache } from "../services/studentData";
-
-const QUICK_NAV_ITEMS = [
-  { id: "project", icon: "folder_open", label: "My Project", color: "#00D2C4" },
-  { id: "team", icon: "group", label: "My Team", color: "#6366f1" },
-  { id: "submissions", icon: "upload_file", label: "Submissions", color: "#10b981" },
-  { id: "marks", icon: "grade", label: "Marks", color: "#f43f5e" },
-];
+import { STUDENT_PAGE_ROUTE_BY_ID, STUDENT_QUICK_NAV_ITEMS } from "../constants/studentNavigation";
+import {
+  getWorkflowActionLabel,
+  getWorkflowDestination,
+  getWorkflowSnapshot,
+  getWorkflowStageMeta,
+  normalizeWorkflowStage,
+} from "../constants/workflowConfig";
 
 // Pure Helpers
 function getGreeting() {
@@ -48,15 +49,6 @@ function fmtRelative(d) {
 function toDateKey(value) {
   if (!value) return "";
   return String(value).slice(0, 10);
-}
-
-function derivedStage(documents = []) {
-  const types = documents.map(d => d.document_type);
-  if (types.includes("presentation")) return "Final Review";
-  if (types.includes("report")) return "Second Review";
-  if (types.includes("progress_update")) return "First Review";
-  if (types.includes("abstract")) return "Abstract";
-  return "Initiated";
 }
 
 function isRejectedStatus(status) {
@@ -169,6 +161,9 @@ function DeadlineCalendar({ deadlines, onNavigateTab }) {
           const day = i + 1;
           const k = key(day);
           const dl = dlMap[k];
+          const stageKey = normalizeWorkflowStage(dl?.stageKey || dl?.stage);
+          const actionTab = dl ? getWorkflowDestination(stageKey, "student") : "submissions";
+          const actionLabel = dl ? getWorkflowActionLabel(stageKey, "student") : "Open";
           const isToday = k === todayKey;
           const isPast = k < todayKey;
           const isActive = active === k;
@@ -208,11 +203,11 @@ function DeadlineCalendar({ deadlines, onNavigateTab }) {
                   {isPast && <p className="text-[10px] text-slate-400 mt-1">Deadline passed</p>}
                   <button
                     type="button"
-                    onClick={() => onNavigateTab?.("submissions")}
+                    onClick={() => onNavigateTab?.(actionTab)}
                     className="mt-2.5 w-full py-1.5 rounded-lg text-[10px] font-black text-black transition-all hover:opacity-90"
                     style={{ backgroundColor: "#00D2C4" }}
                   >
-                    Go to Submissions
+                    {actionLabel}
                   </button>
                 </div>
               )}
@@ -224,7 +219,7 @@ function DeadlineCalendar({ deadlines, onNavigateTab }) {
       {/* Legend */}
       <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap gap-x-3 gap-y-1">
         {deadlines.map(dl => (
-          <div key={dl.stage} className="flex items-center gap-1">
+          <div key={`${dl.stage}-${dl.date}`} className="flex items-center gap-1">
             <div className="size-1.5 rounded-full" style={{ backgroundColor: "#00D2C4" }} />
             <span className="text-[10px] text-slate-400">{dl.stage}</span>
           </div>
@@ -246,8 +241,8 @@ function Onboarding({ profile, onCreate, onJoin }) {
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5 max-w-2xl">
         {[
-          { icon: "add_circle", title: "Create a Project Team", sub: "Start your project lifecycle and become the team leader.", label: "Create Project", dark: false, action: onCreate },
-          { icon: "group_add", title: "Join an Existing Team", sub: "Send a join request to a project that matches your interest.", label: "Browse Projects", dark: true, action: onJoin },
+          { icon: "add_circle", title: "Create a Project Team", sub: "Start your team now and refine the project idea later.", label: "Create Team", dark: false, action: onCreate },
+          { icon: "group_add", title: "Join an Existing Team", sub: "Send a join request to a team that matches your interest.", label: "Browse Teams", dark: true, action: onJoin },
         ].map(c => (
           <div key={c.title} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8">
             <div className="size-12 rounded-2xl flex items-center justify-center mb-5"
@@ -275,16 +270,7 @@ export default function StudentDashboard() {
   const hasInitializedRef = useRef(false);
   const goToStudentTab = useCallback(
     (tab) => {
-      const routeByTab = {
-        dashboard: "/student/dashboard",
-        team: "/student/team",
-        submissions: "/student/submissions",
-        marks: "/student/marks",
-        project: "/student/profile",
-        discussion: "/student/chat",
-        chat: "/student/chat",
-      };
-      navigate(routeByTab[tab] || "/student/dashboard");
+      navigate(STUDENT_PAGE_ROUTE_BY_ID[tab] || "/student/dashboard");
     },
     [navigate]
   );
@@ -337,7 +323,8 @@ export default function StudentDashboard() {
     const mappedDeadlines = (data || [])
       .filter((row) => Boolean(row.student_deadline_set_by_coordinator))
       .map((row) => ({
-        stage: row.stage_name || "Review Stage",
+        stageKey: normalizeWorkflowStage(row.stage_name),
+        stage: getWorkflowStageMeta(row.stage_name).label,
         date: toDateKey(row.deadline),
       }))
       .filter((row) => row.date);
@@ -425,7 +412,19 @@ export default function StudentDashboard() {
   const handleLogout = async () => { await supabase.auth.signOut(); navigate("/signin"); };
 
   // Derived values
-  const currentStage = useMemo(() => derivedStage(documents), [documents]);
+  const workflowSnapshot = useMemo(
+    () => getWorkflowSnapshot({ project, documents, evaluations }),
+    [documents, evaluations, project]
+  );
+  const currentStage = workflowSnapshot.label;
+  const approvedIdea = useMemo(() => {
+    if (!project?.approved_idea_id) return null;
+    return {
+      title: project.title,
+      description: project.description,
+      technologies: Array.isArray(project.technology_stacks) ? project.technology_stacks : [],
+    };
+  }, [project?.approved_idea_id, project?.description, project?.technology_stacks, project?.title]);
 
   const nextDeadline = useMemo(() => {
     const now = new Date();
@@ -433,11 +432,15 @@ export default function StudentDashboard() {
   }, [deadlines]);
 
   const daysLeft = nextDeadline ? daysUntil(nextDeadline.date) : null;
+  const nextDeadlineActionTab = nextDeadline ? getWorkflowDestination(nextDeadline.stageKey, "student") : "submissions";
+  const nextDeadlineActionLabel = nextDeadline ? getWorkflowActionLabel(nextDeadline.stageKey, "student") : "Open";
 
-  const totalScore = useMemo(() => {
-    const got = evaluations.reduce((s, e) => s + Number(e.obtained_marks || 0), 0);
-    const max = evaluations.reduce((s, e) => s + Number(e.max_marks || 0), 0);
-    return max > 0 ? `${got}/${max}` : "-";
+  const reviewScore = useMemo(() => {
+    const scores = evaluations
+      .map((entry) => Number(entry.score ?? entry.obtained_marks))
+      .filter((value) => !Number.isNaN(value));
+    if (scores.length === 0) return "-";
+    return `${Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length)}/100`;
   }, [evaluations]);
 
   const activeMembers = project?.team_members?.length ?? 0;
@@ -586,7 +589,7 @@ export default function StudentDashboard() {
   const searchResults = useMemo(() => {
     if (!normalizedSearch) return [];
 
-    const pageResults = QUICK_NAV_ITEMS
+    const pageResults = STUDENT_QUICK_NAV_ITEMS
       .filter((item) => `${item.label} ${item.id}`.toLowerCase().includes(normalizedSearch))
       .map((item) => ({
         id: `page-${item.id}`,
@@ -602,8 +605,8 @@ export default function StudentDashboard() {
         id: `deadline-${deadline.stage}`,
         icon: "event",
         label: `${deadline.stage} deadline`,
-        meta: `Due ${fmtShort(deadline.date)} - open Submissions`,
-        action: () => goToStudentTab("submissions"),
+        meta: `Due ${fmtShort(deadline.date)} - ${getWorkflowActionLabel(deadline.stageKey, "student")}`,
+        action: () => goToStudentTab(getWorkflowDestination(deadline.stageKey, "student")),
       }));
 
     const activityResults = activityFeed
@@ -714,6 +717,7 @@ export default function StudentDashboard() {
       <CreateProjectModal
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
+        leaderName={profile?.full_name}
         onSuccess={async () => {
           invalidateStudentBootstrapCache();
           await loadData();
@@ -787,15 +791,15 @@ export default function StudentDashboard() {
               </h1>
 
               <p className="text-base text-slate-500 mt-2 leading-relaxed max-w-xl">
-                Your project is currently in the{" "}
-                <span className="font-black text-slate-800">{currentStage}</span> stage.
+                Your team is currently in the{" "}
+                <span className="font-black text-slate-800">{currentStage}</span> step.
               </p>
 
               {/* Project title pill */}
               <div className="mt-4">
                 <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border border-slate-200 text-slate-600 bg-slate-50">
                   <span className="material-symbols-outlined text-xs">folder_open</span>
-                  {project?.title || "Untitled Project"}
+                  {project?.team_name || project?.title || "Untitled Team"}
                 </span>
               </div>
             </div>
@@ -818,11 +822,11 @@ export default function StudentDashboard() {
 
           {/* Section 2: KPI Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
-            <KPICard label="Current Phase" value={currentStage} sub="Academic lifecycle stage" icon="layers" color="#00D2C4" />
-            <KPICard label="Time Remaining" value={daysLeft !== null ? `${daysLeft}d` : "-"} sub={nextDeadline ? `Until ${nextDeadline.stage}` : "No deadline"} icon="schedule" color="#6366f1" />
-            <KPICard label="Team Status" value={`${activeMembers}/4`} sub={activeMembers >= 4 ? "Full team" : `${4 - activeMembers} slot${4 - activeMembers !== 1 ? "s" : ""} remaining`} icon="group" color="#10b981" />
-            <KPICard label="Total Score" value={totalScore} sub={evaluations.length > 0 ? `${evaluations.length} evaluation${evaluations.length !== 1 ? "s" : ""}` : "Not evaluated yet"} icon="grade" color="#f59e0b" />
-            <KPICard label="System Status" value={project.status === "approved" ? "Approved" : "Active"} sub={project.status === "approved" ? "Admin verified" : "In progress"} icon={project.status === "approved" ? "verified" : "check_circle"} color={project.status === "approved" ? "#10b981" : "#00D2C4"} />
+            <KPICard label="Current Step" value={currentStage} sub="Shared workflow stage" icon="layers" color="#00D2C4" />
+            <KPICard label="Next Deadline" value={daysLeft !== null ? `${daysLeft}d` : "-"} sub={nextDeadline ? `Until ${nextDeadline.stage}` : "No active deadline"} icon="schedule" color="#6366f1" />
+            <KPICard label="Team Capacity" value={`${activeMembers}/4`} sub={activeMembers >= 4 ? "Full team" : `${4 - activeMembers} slot${4 - activeMembers !== 1 ? "s" : ""} remaining`} icon="group" color="#10b981" />
+            <KPICard label="Review Score" value={reviewScore} sub={evaluations.length > 0 ? `${evaluations.length} review${evaluations.length !== 1 ? "s" : ""}` : "No mentor reviews yet"} icon="grade" color="#f59e0b" />
+            <KPICard label="Workflow Status" value={workflowSnapshot.isCompleted ? "Completed" : project?.approved_idea_id ? "In Progress" : "Idea Pending"} sub={workflowSnapshot.isCompleted ? "All review stages completed" : workflowSnapshot.description} icon={workflowSnapshot.isCompleted ? "task_alt" : project?.approved_idea_id ? "alt_route" : "pending"} color={workflowSnapshot.isCompleted ? "#10b981" : project?.approved_idea_id ? "#00D2C4" : "#f59e0b"} />
           </div>
 
           {/* Section 3: Priority Alert Banner */}
@@ -850,10 +854,10 @@ export default function StudentDashboard() {
               <p className={`flex-1 text-sm font-semibold ${alert.text}`}>{alert.msg}</p>
 
               {/* CTA button */}
-              <button type="button" onClick={() => goToStudentTab("submissions")}
+              <button type="button" onClick={() => goToStudentTab(nextDeadlineActionTab)}
                 className="flex-shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-xs font-black transition-all hover:opacity-90 hover:scale-[1.03] active:scale-95 whitespace-nowrap"
                 style={{ backgroundColor: alert.color, boxShadow: `0 3px 10px ${alert.color}40` }}>
-                Go to Submissions
+                {nextDeadlineActionLabel}
                 <span className="material-symbols-outlined text-sm">arrow_forward</span>
               </button>
             </div>
@@ -863,7 +867,58 @@ export default function StudentDashboard() {
           {/* Section 4: Project Tracker */}
           <ProjectTracker project={project} documents={documents} />
 
-          {/* Section 5: Activity Feed + Deadline Calendar */}
+          {/* Section 5: Idea Workspace Summary */}
+          <div className="glass-card-strong overflow-hidden">
+            <div className="px-4 sm:px-6 py-4 border-b border-white/70 flex items-center gap-2.5">
+              <div className="size-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: "rgba(245,158,11,0.12)" }}>
+                <span className="material-symbols-outlined text-sm" style={{ color: "#f59e0b" }}>lightbulb</span>
+              </div>
+              <h2 className="text-sm font-black text-slate-900">Idea Workspace</h2>
+              <span className="ml-auto text-[10px] font-bold text-slate-400 bg-slate-100/70 px-2 py-0.5 rounded-full">
+                {project?.approved_idea_id ? "Approved idea available" : "Idea iteration enabled"}
+              </span>
+            </div>
+            <div className="p-5 grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-5 items-start">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Current Idea State</p>
+                <h3 className="mt-2 text-xl font-black text-slate-900">
+                  {approvedIdea?.title || project?.title || "Draft idea pending"}
+                </h3>
+                <p className="mt-2 text-sm text-slate-600 leading-relaxed">
+                  {approvedIdea?.description || project?.description || "Create, refine, and submit idea versions from the dedicated workspace."}
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {(approvedIdea?.technologies || []).length > 0 ? (
+                    approvedIdea.technologies.map((item) => (
+                      <span key={item} className="rounded-full bg-white border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700">
+                        {item}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-xs text-slate-400">No technologies added yet.</span>
+                  )}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white/70 p-4">
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">What You Can Do</p>
+                <div className="mt-3 space-y-2 text-sm text-slate-600">
+                  <p>- Create multiple versions of project ideas</p>
+                  <p>- Submit drafts to mentor for review</p>
+                  <p>- Track approval, rejection, and revision feedback</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => goToStudentTab("ideas")}
+                  className="mt-5 w-full rounded-xl px-4 py-3 text-sm font-black text-black hover:opacity-90 transition-all"
+                  style={{ backgroundColor: "#00D2C4" }}
+                >
+                  Open Idea Workspace
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 6: Activity Feed + Workflow Calendar */}
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
 
             {/* Left: Recent Activity */}
@@ -889,13 +944,13 @@ export default function StudentDashboard() {
               </div>
             </div>
 
-            {/* Right: Deadline Calendar */}
+            {/* Right: Workflow Calendar */}
             <div className="glass-card-strong lg:col-span-2 overflow-visible">
               <div className="px-4 sm:px-6 py-4 border-b border-white/70 flex items-center gap-2.5">
                 <div className="size-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: "rgba(0,210,196,0.12)" }}>
                   <span className="material-symbols-outlined text-sm" style={{ color: "#00D2C4" }}>calendar_month</span>
                 </div>
-                <h2 className="text-sm font-black text-slate-900">Deadline Calendar</h2>
+                <h2 className="text-sm font-black text-slate-900">Workflow Calendar</h2>
                 <span className="ml-auto text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Read-only</span>
               </div>
               <div className="p-5">
@@ -904,7 +959,7 @@ export default function StudentDashboard() {
             </div>
           </div>
 
-          {/* Section 6: Quick Navigation */}
+          {/* Section 7: Quick Navigation */}
           <div className="glass-card-strong overflow-hidden">
             <div className="px-4 sm:px-6 py-4 border-b border-white/70 flex items-center gap-2.5">
               <div className="size-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: "rgba(0,210,196,0.12)" }}>
@@ -913,7 +968,7 @@ export default function StudentDashboard() {
               <h2 className="text-sm font-black text-slate-900">Quick Navigation</h2>
             </div>
             <div className="p-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {QUICK_NAV_ITEMS.map((nav) => (
+              {STUDENT_QUICK_NAV_ITEMS.map((nav) => (
                 <button key={nav.id} type="button" onClick={() => goToStudentTab(nav.id)}
                   className="flex flex-col items-center gap-2.5 py-5 px-3 rounded-xl border border-white/60 bg-white/40 hover:bg-white/70 hover:shadow-sm transition-all group">
                   <div className="size-11 rounded-2xl flex items-center justify-center transition-transform group-hover:scale-110"

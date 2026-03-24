@@ -332,24 +332,27 @@ export const getDashboardData = async (req, res) => {
 
 export const createProject = async (req, res) => {
   try {
-    const title = normalizeTextField(req.body?.title, { required: true, maxLength: 200 });
-    const domain = normalizeTextField(req.body?.domain, { required: true, maxLength: 120 });
+    const teamName = normalizeTextField(req.body?.team_name, { required: true, maxLength: 200 });
+    const title = normalizeTextField(req.body?.title, { maxLength: 200 });
+    const domain = normalizeTextField(req.body?.domain, { maxLength: 120 });
     const description = normalizeTextField(req.body?.description, { maxLength: 3000 });
     const abstract = normalizeTextField(req.body?.abstract, { maxLength: 3000 });
     const technologyStacks = normalizeTechnologyStacks(req.body?.technology_stacks);
 
-    if (!title) {
-      return res.status(400).json({ message: 'Project title is required' });
-    }
-    if (!domain) {
-      return res.status(400).json({ message: 'Project domain is required' });
+    if (!teamName) {
+      return res.status(400).json({ message: 'Team name is required' });
     }
 
-    const { data, error } = await supabase
+    const initialIdeaTitle = title || null;
+    const projectTitle = initialIdeaTitle || teamName;
+    const defaultDomain = domain || 'General';
+
+    const { data: projectRow, error } = await supabase
       .from('projects')
       .insert({
-        title,
-        domain,
+        title: projectTitle,
+        team_name: teamName,
+        domain: defaultDomain,
         description,
         abstract,
         technology_stacks: technologyStacks ?? [],
@@ -365,13 +368,48 @@ export const createProject = async (req, res) => {
     const { error: teamError } = await supabase
       .from('team_members')
       .insert({
-        project_id: data.id,
+        project_id: projectRow.id,
         student_id: req.user.id,
         role: 'leader'
       });
     if (teamError && teamError.code !== '23505') throw teamError;
 
-    res.status(201).json(data);
+    let createdIdea = null;
+    if (initialIdeaTitle || description || (technologyStacks || []).length) {
+      const { data: ideaRow, error: ideaError } = await supabase
+        .from('project_ideas')
+        .insert({
+          project_id: projectRow.id,
+          version_no: 1,
+          title: initialIdeaTitle || teamName,
+          description,
+          technologies: technologyStacks ?? [],
+          status: 'draft',
+          created_by: req.user.id,
+        })
+        .select()
+        .single();
+
+      if (ideaError) throw ideaError;
+      createdIdea = ideaRow;
+
+      const { error: syncError } = await supabase
+        .from('projects')
+        .update({
+          current_idea_id: ideaRow.id,
+          approved_idea_id: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', projectRow.id);
+
+      if (syncError) throw syncError;
+    }
+
+    res.status(201).json({
+      ...projectRow,
+      current_idea_id: createdIdea?.id || null,
+      approved_idea_id: null,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -585,11 +623,28 @@ export const deleteProject = async (req, res) => {
 export const approveProject = async (req, res) => {
   try {
     const { status, feedback } = req.body; // status: 'approved' or 'rejected'
+    const normalizedStatus = String(status || '').trim().toLowerCase();
+    if (!['approved', 'rejected'].includes(normalizedStatus)) {
+      return res.status(400).json({ message: 'Status must be approved or rejected' });
+    }
+
+    const { data: projectBefore, error: projectFetchError } = await supabase
+      .from('projects')
+      .select('id, title, current_idea_id, approved_idea_id')
+      .eq('id', req.params.id)
+      .single();
+
+    if (projectFetchError || !projectBefore) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
 
     const { data, error } = await supabase
       .from('projects')
       .update({
-        status,
+        status: normalizedStatus,
+        approved_idea_id: normalizedStatus === 'approved'
+          ? (projectBefore.current_idea_id || projectBefore.approved_idea_id || null)
+          : (projectBefore.approved_idea_id === projectBefore.current_idea_id ? null : projectBefore.approved_idea_id),
         updated_at: new Date().toISOString()
       })
       .eq('id', req.params.id)
@@ -597,6 +652,29 @@ export const approveProject = async (req, res) => {
       .single();
 
     if (error) throw error;
+
+    if (projectBefore.current_idea_id) {
+      const { error: ideaUpdateError } = await supabase
+        .from('project_ideas')
+        .update({
+          status: normalizedStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', projectBefore.current_idea_id);
+
+      if (ideaUpdateError) throw ideaUpdateError;
+
+      const { error: reviewInsertError } = await supabase
+        .from('idea_reviews')
+        .insert({
+          idea_id: projectBefore.current_idea_id,
+          reviewer_id: req.user.id,
+          action: normalizedStatus,
+          comment: feedback || null,
+        });
+
+      if (reviewInsertError) throw reviewInsertError;
+    }
 
     // Optionally create a feedback record
     if (feedback) {
@@ -625,11 +703,11 @@ export const approveProject = async (req, res) => {
       .filter(Boolean)
       .map((studentId) => ({
         user_id: studentId,
-        type: status === 'approved' ? 'project_approved' : 'project_rejected',
-        title: status === 'approved' ? 'Idea Accepted' : 'Idea Rejected',
+        type: normalizedStatus === 'approved' ? 'project_approved' : 'project_rejected',
+        title: normalizedStatus === 'approved' ? 'Idea Accepted' : 'Idea Rejected',
         message: feedbackText
-          ? `${actorName} ${status === 'approved' ? 'accepted' : 'rejected'} the idea for ${projectTitle}. Feedback: ${feedbackText}`
-          : `${actorName} ${status === 'approved' ? 'accepted' : 'rejected'} the idea for ${projectTitle}.`,
+          ? `${actorName} ${normalizedStatus === 'approved' ? 'accepted' : 'rejected'} the idea for ${projectTitle}. Feedback: ${feedbackText}`
+          : `${actorName} ${normalizedStatus === 'approved' ? 'accepted' : 'rejected'} the idea for ${projectTitle}.`,
       })));
 
     res.json(data);
@@ -733,6 +811,19 @@ export const getTeamMembers = async (req, res) => {
 export const uploadDocument = async (req, res) => {
   try {
     const { document_type, file_name, file_url, file_size } = req.body;
+    const { data: project, error: projectError } = await supabase
+      .from('projects')
+      .select('id, status, approved_idea_id')
+      .eq('id', req.params.id)
+      .single();
+
+    if (projectError || !project) {
+      return res.status(404).json({ message: 'Project not found.' });
+    }
+
+    if (!project.approved_idea_id && String(project.status || '').toLowerCase() !== 'approved') {
+      return res.status(400).json({ message: 'An idea must be approved before documents can be submitted.' });
+    }
 
     const { data, error } = await supabase
       .from('documents')
@@ -1183,6 +1274,7 @@ export const getPendingProjects = async (req, res) => {
       .select(`
         id,
         title,
+        team_name,
         domain,
         description,
         status,
@@ -1191,7 +1283,7 @@ export const getPendingProjects = async (req, res) => {
         team_members(student_id),
         creator:profiles!projects_created_by_fkey(id, full_name)
       `)
-      .eq('status', 'pending')
+      .not('status', 'in', '(approved,completed)')
       .order('created_at', { ascending: false });
 
     if (error) throw error;

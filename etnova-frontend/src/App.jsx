@@ -14,6 +14,7 @@ const AdminClasses = lazy(() => import('./pages/AdminClasses'))
 const AdminReviewStages = lazy(() => import('./pages/AdminReviewStages'))
 const StudentLayout = lazy(() => import('./components/StudentLayout'))
 const StudentDashboard = lazy(() => import('./pages/StudentDashboard'))
+const IdeaWorkspace = lazy(() => import('./pages/IdeaWorkspace'))
 const MyProject = lazy(() => import('./pages/MyProject'))
 const MyTeam = lazy(() => import('./pages/MyTeam'))
 const Submissions = lazy(() => import('./pages/Submissions'))
@@ -58,6 +59,7 @@ function App() {
           >
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<StudentDashboard />} />
+            <Route path="ideas" element={<IdeaWorkspace />} />
             <Route path="chat" element={<StudentDiscussion />} />
             <Route path="submissions" element={<Submissions />} />
             <Route path="profile" element={<MyProject />} />

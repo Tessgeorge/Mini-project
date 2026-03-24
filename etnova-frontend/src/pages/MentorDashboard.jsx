@@ -4,7 +4,9 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../config/supabaseClient";
 import ProfileMenu from "../components/ProfileMenu";
 import Modal from "../components/Modal";
-import MyClass from "./MyClass"; // ← ADDED
+import MyClass from "./MyClass";
+import { getStatusMeta } from "../constants/statusConfig";
+import { EVALUATION_STAGE_OPTIONS, getWorkflowStageMeta } from "../constants/workflowConfig";
 
 // ─── Icons ─────────────────────────────────────────────────────────────────
 const Icon = {
@@ -41,9 +43,13 @@ function normalizeMentorEvaluationRow(row) {
   if (!row) return row;
   return {
     ...row,
-    phase: row.phase || row.evaluation_type || "Phase 1",
+    phase: getWorkflowStageMeta(row.phase || row.evaluation_type).label,
     score: row.score ?? row.obtained_marks ?? 0,
   };
+}
+
+function getProjectDisplayName(project) {
+  return project?.team_name || project?.title || "Untitled Team";
 }
 
 async function fetchEvaluationsForMentor(mentorId) {
@@ -165,14 +171,23 @@ function resolveCoordinatorClassId(profile, projects) {
 }
 
 const STATUS_MAP = {
+  draft: { pill: "bg-slate-100 text-slate-700 border-slate-200", dot: "bg-slate-400", label: "Draft" },
+  submitted: { pill: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-400", label: "Submitted" },
+  revision_required: { pill: "bg-orange-50 text-orange-700 border-orange-200", dot: "bg-orange-400", label: "Revision Required" },
   active: { pill: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-500", label: "Active" },
   pending: { pill: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-400", label: "Pending" },
+  approved: { pill: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-500", label: "Approved" },
   completed: { pill: "bg-blue-50 text-blue-700 border-blue-200", dot: "bg-blue-500", label: "Completed" },
   rejected: { pill: "bg-red-50 text-red-600 border-red-200", dot: "bg-red-400", label: "Rejected" },
 };
 
 function StatusBadge({ status }) {
-  const s = STATUS_MAP[status?.toLowerCase()] || STATUS_MAP.pending;
+  const shared = getStatusMeta(status, { context: "project" });
+  const s = STATUS_MAP[status?.toLowerCase()] || {
+    pill: shared.pillClass,
+    dot: shared.dotClass,
+    label: shared.label,
+  };
   return (
     <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border ${s.pill}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />{s.label}
@@ -330,7 +345,7 @@ function ProgressRing({ pct, size = 56, stroke = 5 }) {
 }
 
 function ReviewModal({ project, onClose, onSubmit }) {
-  const [form, setForm] = useState({ phase: "Phase 1", score: "", feedback: "" });
+  const [form, setForm] = useState({ phase: EVALUATION_STAGE_OPTIONS[0], score: "", feedback: "" });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
 
@@ -350,7 +365,7 @@ function ReviewModal({ project, onClose, onSubmit }) {
           <div className="flex justify-between items-start">
             <div>
               <p className="text-xs font-bold uppercase tracking-widest text-teal-100 mb-1">Start Review</p>
-              <h3 className="font-extrabold text-white text-lg leading-tight">{project.title}</h3>
+              <h3 className="font-extrabold text-white text-lg leading-tight">{getProjectDisplayName(project)}</h3>
             </div>
             <button onClick={onClose} className="text-teal-100 hover:text-white mt-0.5"><Icon.X /></button>
           </div>
@@ -374,9 +389,9 @@ function ReviewModal({ project, onClose, onSubmit }) {
         <div className="px-6 py-5 space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-gray-500 mb-1.5">Phase</label>
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">Review Stage</label>
               <select className={cls} value={form.phase} onChange={e => setForm({ ...form, phase: e.target.value })}>
-                {["Phase 1", "Phase 2", "Phase 3", "Final Review"].map(p => <option key={p}>{p}</option>)}
+                {EVALUATION_STAGE_OPTIONS.map((stage) => <option key={stage}>{stage}</option>)}
               </select>
             </div>
             <div>
@@ -455,7 +470,7 @@ function MentorProfileModal({ profile, onClose, onSave, onSignOut, startEditing 
   const infoItems = [
     { label: "Full Name", value: form.full_name || "Not set" },
     { label: "Email", value: form.email || "Not set" },
-    { label: "Role", value: "Project Guide" },
+    { label: "Role", value: "Mentor" },
     { label: "Department", value: form.department || "-" },
   ];
 
@@ -707,7 +722,7 @@ function Topbar({ active, mentorName, onProfileClick, showMyClass }) {
         </div>
         <div className="text-sm text-left">
           <p className="font-semibold text-gray-800 leading-tight group-hover:text-teal-700 transition-colors">{mentorName || "Mentor"}</p>
-          <p className="text-xs text-gray-400">Project Guide</p>
+          <p className="text-xs text-gray-400">Mentor</p>
         </div>
         <div className="text-gray-300 group-hover:text-teal-400 transition-colors ml-1"><Icon.Edit /></div>
       </button>
@@ -720,7 +735,7 @@ function OverviewTab({ projects, evaluations, milestones, recentActivity, loadin
   const [reviewProject, setReviewProject] = useState(null);
   if (loading) return <Spinner />;
 
-  const pendingProjects = projects.filter(proj => !evaluations.some(ev => ev.project_id === proj.id));
+  const pendingTeams = projects.filter(proj => !evaluations.some(ev => ev.project_id === proj.id));
   const handleSubmitReview = async (data) => { await onSubmitReview(data); setReviewProject(null); };
   const avgScore = evaluations.length
     ? Math.round(evaluations.reduce((s, e) => s + Number(e.score), 0) / evaluations.length) : 0;
@@ -741,9 +756,9 @@ function OverviewTab({ projects, evaluations, milestones, recentActivity, loadin
           <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-1">Evaluation Panel</p>
           <p className="text-5xl font-extrabold text-gray-900 mt-2 mb-1">{evaluations.length}</p>
           <p className="text-sm text-gray-400 mb-5">
-            {pendingProjects.length > 0
-              ? `${pendingProjects.length} project${pendingProjects.length !== 1 ? "s" : ""} pending evaluation.`
-              : "All projects evaluated! 🎉"}
+            {pendingTeams.length > 0
+              ? `${pendingTeams.length} team${pendingTeams.length !== 1 ? "s" : ""} pending evaluation.`
+              : "All assigned teams evaluated."}
           </p>
           <button onClick={() => onNavigate("evaluation")}
             className="w-full bg-teal-400 hover:bg-teal-500 active:scale-95 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2">
@@ -822,32 +837,32 @@ function OverviewTab({ projects, evaluations, milestones, recentActivity, loadin
                 <div key={proj.id} className="flex items-center gap-3">
                   <ProgressRing pct={avg || 0} size={44} stroke={4} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-800 truncate">{proj.title}</p>
+                    <p className="text-sm font-semibold text-gray-800 truncate">{getProjectDisplayName(proj)}</p>
                     <p className={`text-xs font-bold ${avg ? scoreClr(avg) : "text-gray-400"}`}>{avg ? `${avg}/100` : "Not evaluated"}</p>
                   </div>
                 </div>
               );
             })}
-            {projects.length === 0 && <p className="text-sm text-gray-400">No projects assigned.</p>}
+            {projects.length === 0 && <p className="text-sm text-gray-400">No teams assigned.</p>}
           </div>
         </div>
       </div>
-      {pendingProjects.length > 0 && (
+      {pendingTeams.length > 0 && (
         <div id="pending-section" className="bg-white rounded-2xl border border-amber-100 shadow-sm overflow-hidden">
           <div className="flex items-center gap-3 px-6 py-4 bg-amber-50 border-b border-amber-100">
             <span className="text-amber-500"><Icon.Alert /></span>
             <div>
               <p className="font-extrabold text-gray-800">Pending Reviews</p>
-              <p className="text-xs text-gray-500">{pendingProjects.length} project{pendingProjects.length !== 1 ? "s" : ""} waiting for your evaluation</p>
+              <p className="text-xs text-gray-500">{pendingTeams.length} team{pendingTeams.length !== 1 ? "s" : ""} waiting for your evaluation</p>
             </div>
           </div>
           <div className="divide-y divide-gray-50">
-            {pendingProjects.map(proj => (
+            {pendingTeams.map(proj => (
               <div key={proj.id} className="flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors">
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600 font-extrabold text-sm flex-shrink-0">{proj.title?.[0] || "?"}</div>
+                  <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600 font-extrabold text-sm flex-shrink-0">{getProjectDisplayName(proj)?.[0] || "?"}</div>
                   <div>
-                    <p className="font-semibold text-gray-800">{proj.title}</p>
+                    <p className="font-semibold text-gray-800">{getProjectDisplayName(proj)}</p>
                     <div className="flex items-center gap-3 mt-0.5">
                       <span className="text-xs text-gray-400 flex items-center gap-1"><Icon.Clock />{proj.team_members?.length || 0} members</span>
                       <StatusBadge status={proj.status} />
@@ -869,8 +884,6 @@ function OverviewTab({ projects, evaluations, milestones, recentActivity, loadin
 }
 
 // ─── TEAMS TAB ──────────────────────────────────────────────────────────────
-const PHASES = ["Research", "Proposal", "Development", "Testing", "Final Pitch"];
-
 function FileIcon({ name }) {
   const ext = name?.split(".").pop()?.toLowerCase();
   const map = { pdf: ["#ef4444", "PDF"], pptx: ["#f97316", "PPT"], ppt: ["#f97316", "PPT"], xlsx: ["#22c55e", "XLS"], xls: ["#22c55e", "XLS"], docx: ["#3b82f6", "DOC"], doc: ["#3b82f6", "DOC"], zip: ["#8b5cf6", "ZIP"] };
@@ -884,12 +897,13 @@ function TeamsTab({ projects, evaluations, loading, onStartReview, mentorId, men
   if (loading) return <Spinner />;
 
   if (sel) {
-    const proj = projects.find(p => p.id === sel);
-    return (
-      <TeamWorkspace
-        proj={proj}
-        mentorId={mentorId}
-        mentorName={mentorName}
+      const proj = projects.find(p => p.id === sel);
+      return (
+        <TeamWorkspace
+          key={proj?.id || sel}
+          proj={proj}
+          mentorId={mentorId}
+          mentorName={mentorName}
         onBack={() => setSel(null)}
       />
     );
@@ -900,8 +914,8 @@ function TeamsTab({ projects, evaluations, loading, onStartReview, mentorId, men
       <div className="w-16 h-16 mx-auto rounded-full bg-teal-50 flex items-center justify-center mb-3">
         <svg width="28" height="28" fill="none" stroke="#14b8a6" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /></svg>
       </div>
-      <p className="text-gray-700 font-semibold">No projects assigned</p>
-      <p className="text-gray-400 text-sm mt-1">Contact admin to get assigned to a project.</p>
+      <p className="text-gray-700 font-semibold">No teams assigned</p>
+      <p className="text-gray-400 text-sm mt-1">Contact admin to get assigned to a team.</p>
     </div>
   ) : (
     <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
@@ -922,8 +936,10 @@ function TeamsTab({ projects, evaluations, loading, onStartReview, mentorId, men
                     <svg width="20" height="20" fill="none" stroke="#14b8a6" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-extrabold text-gray-900 leading-tight">{proj.title}</h3>
-                    {proj.abstract && <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{proj.abstract}</p>}
+                    <h3 className="font-extrabold text-gray-900 leading-tight">{getProjectDisplayName(proj)}</h3>
+                    {proj.team_name && proj.team_name !== proj.title && (
+                      <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{proj.title}</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -945,7 +961,7 @@ function TeamsTab({ projects, evaluations, loading, onStartReview, mentorId, men
               )}
               <div className="mb-4">
                 <div className="flex justify-between text-xs mb-1.5">
-                  <span className="text-gray-400 font-medium">Project Progress</span>
+                  <span className="text-gray-400 font-medium">Evaluation Score</span>
                   <span className="text-teal-600 font-bold">{avg ? `Score: ${avg}/100` : ""}</span>
                 </div>
                 <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -975,7 +991,7 @@ function TeamsTab({ projects, evaluations, loading, onStartReview, mentorId, men
 
 // ─── EVALUATION TAB ─────────────────────────────────────────────────────────
 function EvaluationTab({ projects, evaluations, setEvaluations, mentorId, loading }) {
-  const [form, setForm] = useState({ projectId: "", phase: "Phase 1", score: "", feedback: "" });
+  const [form, setForm] = useState({ projectId: "", phase: EVALUATION_STAGE_OPTIONS[0], score: "", feedback: "" });
   const [ok, setOk] = useState(false);
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
@@ -995,7 +1011,7 @@ function EvaluationTab({ projects, evaluations, setEvaluations, mentorId, loadin
         feedback: form.feedback,
       });
       setEvaluations(p => [data, ...p]);
-      setForm({ projectId: "", phase: "Phase 1", score: "", feedback: "" });
+      setForm({ projectId: "", phase: EVALUATION_STAGE_OPTIONS[0], score: "", feedback: "" });
       setOk(true); setTimeout(() => setOk(false), 2500);
     } catch (e) { setErr(e.message); }
     finally { setSaving(false); }
@@ -1010,16 +1026,16 @@ function EvaluationTab({ projects, evaluations, setEvaluations, mentorId, loadin
         <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-5">Submit Evaluation</p>
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Project</label>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Team</label>
             <select className={cls} value={form.projectId} onChange={e => setForm({ ...form, projectId: e.target.value })}>
-              <option value="">— Choose a project —</option>
-              {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+              <option value="">— Choose a team —</option>
+              {projects.map(p => <option key={p.id} value={p.id}>{getProjectDisplayName(p)}</option>)}
             </select>
           </div>
           <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Phase</label>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Review Stage</label>
             <select className={cls} value={form.phase} onChange={e => setForm({ ...form, phase: e.target.value })}>
-              {["Phase 1", "Phase 2", "Phase 3", "Final Review"].map(p => <option key={p}>{p}</option>)}
+              {EVALUATION_STAGE_OPTIONS.map((stage) => <option key={stage}>{stage}</option>)}
             </select>
           </div>
           <div>
@@ -1050,8 +1066,8 @@ function EvaluationTab({ projects, evaluations, setEvaluations, mentorId, loadin
         <div className="flex justify-between items-center mb-5">
           <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Evaluation Records</p>
           <select className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 bg-gray-50 focus:outline-none" value={filterProj} onChange={e => setFilterProj(e.target.value)}>
-            <option value="all">All Projects</option>
-            {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+            <option value="all">All Teams</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{getProjectDisplayName(p)}</option>)}
           </select>
         </div>
         <div className="space-y-3 overflow-y-auto max-h-[540px] pr-1">
@@ -1060,7 +1076,7 @@ function EvaluationTab({ projects, evaluations, setEvaluations, mentorId, loadin
               <div key={ev.id || `${ev.project_id || "project"}-${ev.created_at || "time"}-${index}`} className="bg-gray-50 border border-gray-100 rounded-xl p-4">
                 <div className="flex justify-between items-center">
                   <div>
-                    <span className="font-bold text-gray-800 text-sm">{projects.find(p => p.id === ev.project_id)?.title || "—"}</span>
+                    <span className="font-bold text-gray-800 text-sm">{getProjectDisplayName(projects.find(p => p.id === ev.project_id))}</span>
                     <span className="ml-2 text-xs bg-teal-50 text-teal-700 font-semibold px-2 py-0.5 rounded-full">{ev.phase}</span>
                   </div>
                   <div className="flex items-center gap-1.5">
@@ -1184,7 +1200,7 @@ export default function MentorDashboard() {
 
           const activity = (evalData || []).slice(0, 5).map(ev => {
             const proj = (projData || []).find(p => p.id === ev.project_id);
-            return { text: `Evaluation submitted for ${proj?.title || "a project"} (${ev.phase})`, time: getTimeAgo(ev.created_at) };
+            return { text: `Evaluation submitted for ${getProjectDisplayName(proj)} (${ev.phase})`, time: getTimeAgo(ev.created_at) };
           });
           setRecentActivity(activity);
         }
@@ -1247,7 +1263,7 @@ export default function MentorDashboard() {
       setEvaluations(p => [data, ...p]);
       const proj = projects.find(p => p.id === projectId);
       setRecentActivity(prev => [
-        { text: `Evaluation submitted for ${proj?.title || "a project"} (${phase})`, time: "Just now" },
+        { text: `Evaluation submitted for ${getProjectDisplayName(proj)} (${phase})`, time: "Just now" },
         ...prev.slice(0, 4),
       ]);
     } catch (e) { console.error(e); }
@@ -1300,7 +1316,7 @@ export default function MentorDashboard() {
                 infoItems={[
                   { label: "Full Name", value: mentorProfile?.full_name },
                   { label: "Email", value: mentorProfile?.email },
-                  { label: "Role", value: "Project Guide" },
+                  { label: "Role", value: "Mentor" },
                   { label: "Department", value: mentorProfile?.department || "-" },
                 ]}
               />
@@ -1345,4 +1361,3 @@ export default function MentorDashboard() {
     </div>
   );
 }
-

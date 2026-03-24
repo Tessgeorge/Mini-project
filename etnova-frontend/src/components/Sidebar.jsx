@@ -1,17 +1,9 @@
 import { NavLink } from "react-router-dom";
-
-const DEFAULT_NAV = [
-  { to: "/student/dashboard", label: "Dashboard", icon: "dashboard" },
-  { to: "/student/profile", label: "My Project", icon: "folder_open" },
-  { to: "/student/team", label: "My Team", icon: "group" },
-  { to: "/student/submissions", label: "Submissions", icon: "upload_file" },
-  { to: "/student/chat", label: "Discussion", icon: "forum" },
-  { to: "/student/marks", label: "Marks", icon: "grading" },
-];
+import { STUDENT_NAV_ITEMS } from "../constants/studentNavigation";
 
 export default function Sidebar({
   onLogout,
-  navItems = DEFAULT_NAV,
+  navItems = STUDENT_NAV_ITEMS,
   activeItem = "",
   onNavigate,
   portalSubtitle = "Academic Portal",

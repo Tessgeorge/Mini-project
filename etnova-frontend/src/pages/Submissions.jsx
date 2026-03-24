@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import supabase from '../config/supabaseClient';
 import { apiRequest } from '../config/apiClient';
 import { fetchStudentBootstrapData, invalidateStudentBootstrapCache } from '../services/studentData';
+import { getStatusMeta } from '../constants/statusConfig';
 
 const DOC_TYPES = [
     { value: 'abstract', label: 'Abstract' },
@@ -25,11 +26,12 @@ const isRejectedStatus = (status) => ["rejected", "needs_revision"].includes(Str
 
 /* ─── Status badge ──────────────────────────────────────────────────── */
 function StatusBadge({ status }) {
-    const s = (status || 'submitted').toLowerCase();
-    if (s === 'approved') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"><span className="size-1.5 rounded-full bg-emerald-500 inline-block" /> Approved</span>;
-    if (isRejectedStatus(s)) return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200"><span className="size-1.5 rounded-full bg-rose-500 inline-block" /> Rejected</span>;
-    if (s === 'submitted') return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200"><span className="size-1.5 rounded-full bg-amber-400 inline-block" /> Pending</span>;
-    return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-50 text-slate-500 border border-slate-200"><span className="size-1.5 rounded-full bg-slate-400 inline-block" /> {status || 'Unknown'}</span>;
+    const meta = getStatusMeta(status, { context: 'submission' });
+    return (
+        <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold border ${meta.pillClass}`}>
+            <span className={`size-1.5 rounded-full inline-block ${meta.dotClass}`} /> {meta.label}
+        </span>
+    );
 }
 
 /* ─── Doc type label ────────────────────────────────────────────────── */
@@ -155,6 +157,7 @@ export default function Submissions() {
         .map(t => getLatestDoc(t.value))
         .filter(Boolean)
         .sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
+    const ideaApproved = Boolean(project?.approved_idea_id) || String(project?.status || '').toLowerCase() === 'approved';
     const approvalFeedbackEntries = (project?.evaluations || [])
         .filter((entry) => entry.evaluation_type === 'approval_feedback')
         .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
@@ -185,6 +188,7 @@ export default function Submissions() {
     const handleFileChange = (e) => { const f = e.target.files?.[0]; if (f) setSelectedFile(f); };
 
     const handleUpload = async () => {
+        if (!ideaApproved) return setError('An idea must be approved before you can submit documents.');
         if (!docType) return setError('Please select a document type.');
         if (!selectedFile) return setError('Please select a file to upload.');
         if (!project?.id) return setError('No project found.');
@@ -242,8 +246,8 @@ export default function Submissions() {
         <div className="etnova-bg flex items-center justify-center py-24">
             <div className="text-center max-w-md">
                 <span className="material-symbols-outlined text-6xl text-slate-300 mb-4 block">upload_file</span>
-                <h2 className="text-xl font-black text-slate-900 mb-2">No Project Found</h2>
-                <p className="text-slate-600">Join or create a project to access submissions.</p>
+                <h2 className="text-xl font-black text-slate-900 mb-2">No Team Found</h2>
+                <p className="text-slate-600">Join or create a team to access submissions.</p>
             </div>
         </div>
     );
@@ -260,8 +264,11 @@ export default function Submissions() {
                         <span className="material-symbols-outlined text-white text-[18px]">upload_file</span>
                     </div>
                     <div>
-                        <h1 className="text-lg font-black text-slate-900 leading-none">Project Submissions</h1>
-                        <p className="text-xs text-slate-500 mt-0.5">{project.title}</p>
+                        <h1 className="text-lg font-black text-slate-900 leading-none">Team Submissions</h1>
+                        <p className="text-xs text-slate-500 mt-0.5">{project.team_name || project.title}</p>
+                        {project.approved_idea_id && project.team_name && project.team_name !== project.title ? (
+                            <p className="text-[11px] text-slate-400 mt-0.5">Approved idea: {project.title}</p>
+                        ) : null}
                     </div>
                     {/* Doc count pill */}
                     <div className="ml-auto flex items-center gap-2">
@@ -310,6 +317,11 @@ export default function Submissions() {
                             </div>
 
                             <div className="p-5 space-y-4">
+                                {!ideaApproved && (
+                                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                                        Your team needs an approved idea before abstract and other submissions can start.
+                                    </div>
+                                )}
                                 {/* Document type select */}
                                 <div>
                                     <label className="block text-xs font-bold text-slate-600 mb-1.5 uppercase tracking-wide">
@@ -320,6 +332,7 @@ export default function Submissions() {
                                         <select
                                             value={docType}
                                             onChange={e => setDocType(e.target.value)}
+                                            disabled={!ideaApproved}
                                             className="glass-input w-full pl-9 pr-9 py-2.5 text-sm text-slate-800 font-medium focus:outline-none appearance-none cursor-pointer"
                                         >
                                             <option value="">Select document type...</option>
@@ -343,13 +356,13 @@ export default function Submissions() {
                                         onDrop={handleDrop}
                                         onDragOver={handleDragOver}
                                         onDragLeave={handleDragLeave}
-                                        onClick={() => fileInputRef.current?.click()}
+                                        onClick={() => ideaApproved && fileInputRef.current?.click()}
                                         className={`relative border-2 border-dashed rounded-xl cursor-pointer transition-all duration-200 py-8 px-6 text-center ${isDragging ? 'border-[#00C4B4] bg-[rgba(0,196,180,0.05)]'
                                             : selectedFile ? 'border-emerald-300 bg-emerald-50/60'
                                                 : 'border-slate-200 bg-white/40 hover:border-[#00C4B4]/40 hover:bg-white/60'
                                             }`}
                                     >
-                                        <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,.pptx,.docx,.doc" onChange={handleFileChange} />
+                                        <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,.pptx,.docx,.doc" onChange={handleFileChange} disabled={!ideaApproved} />
                                         {selectedFile ? (
                                             <div className="flex flex-col items-center gap-2">
                                                 <div className="size-11 rounded-xl bg-emerald-100 flex items-center justify-center">
@@ -381,7 +394,7 @@ export default function Submissions() {
                                 <button
                                     type="button"
                                     onClick={handleUpload}
-                                    disabled={uploading}
+                                    disabled={uploading || !ideaApproved}
                                     className="btn-primary w-full py-2.5 text-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     {uploading ? (

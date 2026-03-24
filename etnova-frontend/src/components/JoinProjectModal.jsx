@@ -73,7 +73,7 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Join a Project" maxWidth="max-w-3xl">
+        <Modal isOpen={isOpen} onClose={onClose} title="Join a Team" maxWidth="max-w-3xl">
             <div className="p-6">
                 {error && (
                     <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center gap-2">
@@ -96,8 +96,8 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
                 ) : projects.length === 0 ? (
                     <div className="text-center py-12">
                         <span className="material-symbols-outlined text-6xl text-slate-300 mb-3">folder_off</span>
-                        <p className="text-slate-600 font-medium">No projects available to join</p>
-                        <p className="text-sm text-slate-500 mt-1">All projects are either full or you are already a member</p>
+                        <p className="text-slate-600 font-medium">No teams available to join</p>
+                        <p className="text-sm text-slate-500 mt-1">All teams are either full or you are already a member</p>
                     </div>
                 ) : (
                     <div className="space-y-3">
@@ -112,6 +112,9 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
                                     <div className="flex items-start justify-between gap-4">
                                         <div className="flex-1">
                                             <h3 className="font-black text-slate-900 mb-1">{project.title}</h3>
+                                            {project.team_name && project.team_name !== project.title && (
+                                                <p className="text-xs font-semibold text-slate-500 mb-1">Team: {project.team_name}</p>
+                                            )}
                                             <p className="text-sm text-slate-600 mb-2 line-clamp-2">{project.description}</p>
                                             <div className="flex items-center gap-4 text-xs text-slate-500">
                                                 <span className="flex items-center gap-1">

@@ -50,6 +50,14 @@ import {
   markNotificationRead,
   markAllNotificationsRead
 } from '../controllers/apiController.js';
+import {
+  getProjectIdeas,
+  createProjectIdea,
+  updateProjectIdea,
+  submitProjectIdea,
+  getMentorIdeas,
+  reviewProjectIdea,
+} from '../controllers/ideaController.js';
 import { authenticateUser, requireRole, requireCoordinator, canAccessProject } from '../middleware/supabaseAuth.js';
 
 const router = express.Router();
@@ -68,9 +76,15 @@ router.get('/projects', authenticateUser, getProjects); // Get projects based on
 router.get('/projects/:id', authenticateUser, canAccessProject(), getProjectById);
 router.put('/projects/:id', authenticateUser, requireRole(['student']), canAccessProject(), updateProject);
 router.delete('/projects/:id', authenticateUser, requireRole(['student', 'admin']), canAccessProject({ studentMustBeLeader: true }), deleteProject);
+router.get('/projects/:id/ideas', authenticateUser, canAccessProject(), getProjectIdeas);
+router.post('/projects/:id/ideas', authenticateUser, requireRole(['student']), canAccessProject(), createProjectIdea);
+router.put('/projects/:id/ideas/:ideaId', authenticateUser, requireRole(['student']), canAccessProject(), updateProjectIdea);
+router.post('/projects/:id/ideas/:ideaId/submit', authenticateUser, requireRole(['student']), canAccessProject(), submitProjectIdea);
 
 // Mentor routes
 router.put('/projects/:id/approve', authenticateUser, requireRole(['mentor', 'admin']), canAccessProject(), approveProject);
+router.get('/mentor/ideas', authenticateUser, requireRole(['mentor', 'admin']), getMentorIdeas);
+router.post('/mentor/ideas/:ideaId/review', authenticateUser, requireRole(['mentor', 'admin']), reviewProjectIdea);
 
 // ====== TEAM MANAGEMENT ROUTES ======
 router.post('/projects/:id/join', authenticateUser, requireRole(['student']), joinProject);

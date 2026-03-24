@@ -1,15 +1,7 @@
 import { Suspense, useEffect } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import Sidebar from "./Sidebar";
-
-const NAV_ITEMS = [
-  { to: "/student/dashboard", label: "Dashboard", icon: "dashboard" },
-  { to: "/student/team", label: "Team", icon: "group" },
-  { to: "/student/submissions", label: "Docs", icon: "upload_file" },
-  { to: "/student/marks", label: "Marks", icon: "grading" },
-  { to: "/student/chat", label: "Chat", icon: "forum" },
-  { to: "/student/profile", label: "Project", icon: "folder_open" },
-];
+import { STUDENT_NAV_ITEMS } from "../constants/studentNavigation";
 
 export default function StudentLayout({ onLogout }) {
   const location = useLocation();
@@ -24,6 +16,7 @@ export default function StudentLayout({ onLogout }) {
     const preload = () => {
       import("../pages/StudentDashboard");
       import("../pages/MyTeam");
+      import("../pages/IdeaWorkspace");
       import("../pages/Submissions");
       import("../pages/Marks");
       import("../pages/StudentDiscussion");
@@ -41,7 +34,7 @@ export default function StudentLayout({ onLogout }) {
 
   return (
     <div className="flex min-h-[100dvh] w-full etnova-bg overflow-hidden">
-      <Sidebar onLogout={onLogout} />
+      <Sidebar onLogout={onLogout} navItems={STUDENT_NAV_ITEMS} portalSubtitle="Student Portal" />
       <main className={`flex-1 min-h-0 md:ml-64 ${mainClasses}`}>
         <Suspense
           fallback={
@@ -53,25 +46,6 @@ export default function StudentLayout({ onLogout }) {
           <Outlet />
         </Suspense>
       </main>
-
-      <nav className="fixed md:hidden bottom-0 inset-x-0 border-t border-slate-200 bg-white z-30 pb-[env(safe-area-inset-bottom)]">
-        <div className="flex overflow-x-auto no-scrollbar">
-          {NAV_ITEMS.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                `min-w-[84px] flex-1 py-2.5 flex flex-col items-center gap-1 text-xs font-semibold ${
-                  isActive ? "text-teal-600" : "text-slate-500"
-                }`
-              }
-            >
-              <span className="material-symbols-outlined text-lg">{item.icon}</span>
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
-        </div>
-      </nav>
     </div>
   );
 }

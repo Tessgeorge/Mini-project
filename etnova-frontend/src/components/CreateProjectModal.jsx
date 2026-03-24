@@ -3,11 +3,10 @@ import Modal from './Modal';
 import { apiRequest } from '../config/apiClient';
 
 const INITIAL_FORM = {
-    title: '',
-    domain: '',
+    teamName: '',
+    initialIdea: '',
     technologyStacks: '',
     description: '',
-    abstract: '',
 };
 
 function parseTechnologyStacks(input) {
@@ -19,7 +18,7 @@ function parseTechnologyStacks(input) {
     )];
 }
 
-export default function CreateProjectModal({ isOpen, onClose, onSuccess }) {
+export default function CreateProjectModal({ isOpen, onClose, onSuccess, leaderName }) {
     const [formData, setFormData] = useState(INITIAL_FORM);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -37,11 +36,10 @@ export default function CreateProjectModal({ isOpen, onClose, onSuccess }) {
             await apiRequest('/projects', {
                 method: 'POST',
                 body: {
-                    title: formData.title,
-                    domain: formData.domain,
+                    team_name: formData.teamName,
+                    title: formData.initialIdea,
                     technology_stacks: parseTechnologyStacks(formData.technologyStacks),
                     description: formData.description,
-                    abstract: formData.abstract,
                 },
             });
 
@@ -58,7 +56,7 @@ export default function CreateProjectModal({ isOpen, onClose, onSuccess }) {
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Create New Project">
+        <Modal isOpen={isOpen} onClose={onClose} title="Create New Team">
             <form onSubmit={handleSubmit} className="p-6 space-y-5">
                 {error && (
                     <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -67,40 +65,63 @@ export default function CreateProjectModal({ isOpen, onClose, onSuccess }) {
                 )}
 
                 <div>
-                    <label htmlFor="title" className="block text-sm font-bold text-slate-900 mb-2">
-                        Project Title *
+                    <label htmlFor="teamName" className="block text-sm font-bold text-slate-900 mb-2">
+                        Team Name *
                     </label>
                     <input
                         type="text"
-                        id="title"
-                        name="title"
-                        value={formData.title}
+                        id="teamName"
+                        name="teamName"
+                        value={formData.teamName}
                         onChange={handleChange}
                         required
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900 placeholder:text-slate-400"
-                        placeholder="Enter your project title"
+                        placeholder="Enter your team name"
                     />
                 </div>
 
                 <div>
-                    <label htmlFor="domain" className="block text-sm font-bold text-slate-900 mb-2">
-                        Domain / Category *
+                    <label className="block text-sm font-bold text-slate-900 mb-2">
+                        Team Leader
+                    </label>
+                    <div className="w-full px-4 py-3 bg-slate-100 border border-slate-200 rounded-xl text-slate-600 text-sm">
+                        {leaderName || 'Current logged-in student'}
+                    </div>
+                </div>
+
+                <div>
+                    <label htmlFor="initialIdea" className="block text-sm font-bold text-slate-900 mb-2">
+                        Initial Idea
                     </label>
                     <input
                         type="text"
-                        id="domain"
-                        name="domain"
-                        value={formData.domain}
+                        id="initialIdea"
+                        name="initialIdea"
+                        value={formData.initialIdea}
                         onChange={handleChange}
-                        required
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900 placeholder:text-slate-400"
-                        placeholder="e.g., AI & ML, Web Development, Cyber Security"
+                        placeholder="Draft project idea title (optional)"
+                    />
+                </div>
+
+                <div>
+                    <label htmlFor="description" className="block text-sm font-bold text-slate-900 mb-2">
+                        Short Description
+                    </label>
+                    <textarea
+                        id="description"
+                        name="description"
+                        value={formData.description}
+                        onChange={handleChange}
+                        rows={3}
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900 placeholder:text-slate-400 resize-none"
+                        placeholder="Draft summary for your initial idea (optional)"
                     />
                 </div>
 
                 <div>
                     <label htmlFor="technologyStacks" className="block text-sm font-bold text-slate-900 mb-2">
-                        Technology Stacks
+                        Technologies
                     </label>
                     <input
                         type="text"
@@ -109,40 +130,9 @@ export default function CreateProjectModal({ isOpen, onClose, onSuccess }) {
                         value={formData.technologyStacks}
                         onChange={handleChange}
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900 placeholder:text-slate-400"
-                        placeholder="React, Node.js, Supabase (comma separated)"
+                        placeholder="React, Node.js, Python (optional)"
                     />
-                </div>
-
-                <div>
-                    <label htmlFor="description" className="block text-sm font-bold text-slate-900 mb-2">
-                        Description *
-                    </label>
-                    <textarea
-                        id="description"
-                        name="description"
-                        value={formData.description}
-                        onChange={handleChange}
-                        required
-                        rows={3}
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900 placeholder:text-slate-400 resize-none"
-                        placeholder="Brief description of your project"
-                    />
-                </div>
-
-                <div>
-                    <label htmlFor="abstract" className="block text-sm font-bold text-slate-900 mb-2">
-                        Abstract
-                    </label>
-                    <textarea
-                        id="abstract"
-                        name="abstract"
-                        value={formData.abstract}
-                        onChange={handleChange}
-                        rows={4}
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900 placeholder:text-slate-400 resize-none"
-                        placeholder="Detailed abstract of your project (optional for now)"
-                    />
-                    <p className="text-xs text-slate-500 mt-1">You can add or update this later</p>
+                    <p className="text-xs text-slate-500 mt-1">This creates a draft idea that can be refined later in Idea Workspace.</p>
                 </div>
 
                 <div className="flex gap-3 pt-4">
@@ -160,7 +150,7 @@ export default function CreateProjectModal({ isOpen, onClose, onSuccess }) {
                         style={{ backgroundColor: '#00D2C4' }}
                         disabled={loading}
                     >
-                        {loading ? 'Creating...' : 'Create Project'}
+                        {loading ? 'Creating...' : 'Create Team'}
                     </button>
                 </div>
             </form>

@@ -2,10 +2,19 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "../config/supabaseClient";
 import { apiRequest } from "../config/apiClient";
 import MentorDiscussion from "./MentorDiscussion";
+import MentorIdeaQueue from "../components/MentorIdeaQueue";
+import {
+  EVALUATION_STAGE_OPTIONS,
+  WORKFLOW_TIMELINE,
+  getWorkflowSnapshot,
+  getWorkflowStageMeta,
+} from "../constants/workflowConfig";
+import { getStatusMeta } from "../constants/statusConfig";
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 const Ic = {
   Overview: () => <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>,
+  Ideas: () => <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 0-4 12.74c.6.42 1 1.1 1 1.83V17h6v-.43c0-.73.4-1.41 1-1.83A7 7 0 0 0 12 2z" /></svg>,
   Submissions: () => <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></svg>,
   Feedback: () => <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>,
   Evaluation: () => <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>,
@@ -25,17 +34,13 @@ const Ic = {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 // 6 milestones as per admin workflow
-const PHASES = ["Idea", "Abstract", "0th Review", "1st Review", "2nd Review", "Final"];
+const PHASES = WORKFLOW_TIMELINE.map((stage) => stage.label);
 
 // Per-milestone metadata: tab to route to on click, tooltip requirement, week label
-const MILESTONE_META = [
-  { tab: "overview", req: "Project idea finalised and guide assigned by admin" },
-  { tab: "submissions", req: "Upload abstract, problem statement & literature survey" },
-  { tab: "evaluation", req: "0th review — concept validation & initial guide feedback" },
-  { tab: "evaluation", req: "1st review — prototype demo & progress evaluation" },
-  { tab: "evaluation", req: "2nd review — implementation completeness & testing check" },
-  { tab: "evaluation", req: "Final presentation, viva & full project demo to panel" },
-];
+const MILESTONE_META = WORKFLOW_TIMELINE.map((stage) => ({
+  tab: stage.mentorTab,
+  req: stage.description,
+}));
 
 const MC = ["#14b8a6", "#3b82f6", "#8b5cf6", "#f59e0b", "#ef4444", "#ec4899"];
 const RUBRIC = [
@@ -57,7 +62,7 @@ function normalizeTeamEvaluationRow(row) {
   if (!row) return row;
   return {
     ...row,
-    phase: row.phase || row.evaluation_type || "Phase 1",
+    phase: getWorkflowStageMeta(row.phase || row.evaluation_type).label,
     score: row.score ?? row.obtained_marks ?? 0,
   };
 }
@@ -143,6 +148,13 @@ function getLogoUrl(proj) {
   return proj?.logo_url || proj?.logo || proj?.project_logo || proj?.thumbnail_url || null;
 }
 function fmtSz2(b) { return fmtSz(b); }
+function getTeamDisplayName(proj) {
+  return proj?.team_name || proj?.title || "Untitled Team";
+}
+function getIdeaTitle(proj) {
+  if (!proj?.title || proj?.team_name === proj?.title) return "";
+  return proj.title;
+}
 
 const ST_PILL = {
   active: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -159,10 +171,11 @@ const ST_DOT = {
 };
 
 function Pill({ status }) {
-  const k = (status || "pending").toLowerCase().replace(/\s+/g, "_");
+  const meta = getStatusMeta(status, { context: "project" });
+  const k = meta.key;
   return (
-    <span className={"inline-flex items-center gap-2 text-sm font-bold px-3.5 py-1.5 rounded-full border shadow-sm " + (ST_PILL[k] || ST_PILL.pending)}>
-      <span className={"w-2 h-2 rounded-full " + (ST_DOT[k] || "bg-amber-400")} />{status || "Pending"}
+    <span className={"inline-flex items-center gap-2 text-sm font-bold px-3.5 py-1.5 rounded-full border shadow-sm " + (ST_PILL[k] || meta.pillClass || ST_PILL.pending)}>
+      <span className={"w-2 h-2 rounded-full " + (ST_DOT[k] || meta.dotClass || "bg-amber-400")} />{meta.label}
     </span>
   );
 }
@@ -190,7 +203,7 @@ function Spin() { return <div className="flex justify-center py-16"><div classNa
 
 // ─── Review / Rubric Modal ────────────────────────────────────────────────────
 function ReviewModal({ proj, onClose, onSubmit }) {
-  const [phase, setPhase] = useState("Phase 1");
+  const [phase, setPhase] = useState(EVALUATION_STAGE_OPTIONS[0]);
   const [sc, setSc] = useState({ problem_definition: 0, technical_approach: 0, implementation: 0, presentation: 0, viva: 0 });
   const [fb, setFb] = useState("");
   const [saving, setSaving] = useState(false);
@@ -209,13 +222,13 @@ function ReviewModal({ proj, onClose, onSubmit }) {
           <div className="flex justify-between items-start">
             <div>
               <p className="text-xs text-teal-300 font-bold uppercase tracking-widest mb-1">Add Review</p>
-              <h3 className="text-white font-extrabold text-lg leading-tight">{proj.title}</h3>
+              <h3 className="text-white font-extrabold text-lg leading-tight">{getTeamDisplayName(proj)}</h3>
             </div>
             <button onClick={onClose} className="text-slate-400 hover:text-white mt-1 transition-colors"><Ic.X /></button>
           </div>
           <select value={phase} onChange={e => setPhase(e.target.value)}
             className="mt-3 w-full bg-white/10 border border-white/20 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-teal-400">
-            {PHASES.map(p => <option key={p} className="text-gray-800 bg-white">{p}</option>)}
+            {EVALUATION_STAGE_OPTIONS.map((stage) => <option key={stage} className="text-gray-800 bg-white">{stage}</option>)}
           </select>
         </div>
         <div className="px-6 py-5 space-y-5">
@@ -611,7 +624,7 @@ function MentorAnnouncements({ projId, mentorId, mentorName }) {
                       </div>
                       <span className="text-[11px] text-gray-500 font-semibold">{mentorName || "Guide"}</span>
                       <span className="text-[11px] text-gray-300">·</span>
-                      <span className="text-[11px] text-gray-400">Project Guide</span>
+                      <span className="text-[11px] text-gray-400">Mentor</span>
                     </div>
                   </div>
                   {/* Actions */}
@@ -849,9 +862,9 @@ function UpcomingDeadlines({ phaseIdx, milestoneDates, reviewDeadlines = [] }) {
 // ══════════════════════════════════════════════════════════════════
 // TAB 1 — OVERVIEW
 // ══════════════════════════════════════════════════════════════════
-function TabOverview({ proj, evaluations, members, documents, onAddReview, onNavigateTab, mentorId, mentorName, milestoneDates, reviewDeadlines }) {
+function TabOverview({ proj, evaluations, members, documents, onAddReview, onNavigateTab, mentorId, mentorName, milestoneDates, reviewDeadlines, workflowSnapshot }) {
   const avg = evaluations.length ? Math.round(evaluations.reduce((s, e) => s + Number(e.score || 0), 0) / evaluations.length) : null;
-  const phaseIdx = Math.min([...new Set(evaluations.map(e => e.phase))].length, PHASES.length - 1);
+  const phaseIdx = workflowSnapshot.index;
 
   return (
     <div className="space-y-5">
@@ -861,7 +874,7 @@ function TabOverview({ proj, evaluations, members, documents, onAddReview, onNav
           { label: "Members", value: members.length, color: "text-teal-500", bg: "bg-teal-50", border: "border-teal-100" },
           { label: "Reviews", value: evaluations.length, color: "text-blue-500", bg: "bg-blue-50", border: "border-blue-100" },
           { label: "Avg Score", value: avg ? avg + "%" : "—", color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-100" },
-          { label: "Phase", value: PHASES[phaseIdx], color: "text-purple-600", bg: "bg-purple-50", border: "border-purple-100" },
+          { label: "Current Step", value: workflowSnapshot.label, color: "text-purple-600", bg: "bg-purple-50", border: "border-purple-100" },
         ].map(s => (
           <div key={s.label} className={`${s.bg} ${s.border} rounded-2xl p-4 border shadow-sm`}>
             <p className={"text-2xl font-extrabold " + s.color}>{s.value}</p>
@@ -997,13 +1010,14 @@ function TabSubmissions({ projId, members, mentorName }) {
   };
 
   const sStyle = (s) => {
-    const k = (s || "submitted").toLowerCase().replace(/\s+/g, "_");
+    const meta = getStatusMeta(s, { context: "submission" });
     return {
-      submitted: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200", dot: "bg-amber-400" },
-      under_review: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", dot: "bg-blue-500" },
-      approved: { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200", dot: "bg-emerald-500" },
-      rejected: { bg: "bg-red-50", text: "text-red-600", border: "border-red-200", dot: "bg-red-400" },
-    }[k] || { bg: "bg-gray-50", text: "text-gray-600", border: "border-gray-200", dot: "bg-gray-400" };
+      bg: meta.bgClass,
+      text: meta.textClass,
+      border: meta.borderClass,
+      dot: meta.dotClass,
+      label: meta.label,
+    };
   };
 
   const statuses = ["all", ...new Set(docs.map(d => d.status?.toLowerCase()).filter(Boolean))];
@@ -1065,7 +1079,7 @@ function TabSubmissions({ projId, members, mentorName }) {
                     {/* Status pill */}
                     <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border ${ss.bg} ${ss.text} ${ss.border}`}>
                       <span className={`w-1.5 h-1.5 rounded-full ${ss.dot}`} />
-                      {(doc.status || "submitted").replace(/_/g, " ")}
+                      {ss.label}
                     </span>
                     {/* Action icons */}
                     <div className="flex items-center gap-0.5">
@@ -1199,7 +1213,7 @@ function TabSubmissions({ projId, members, mentorName }) {
                   <div className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border ${sStyle(viewing.status).bg} ${sStyle(viewing.status).border}`}>
                     <span className={`w-2 h-2 rounded-full flex-shrink-0 ${sStyle(viewing.status).dot}`} />
                     <span className={`text-xs font-bold capitalize ${sStyle(viewing.status).text}`}>
-                      {(viewing.status || "submitted").replace(/_/g, " ")}
+                      {sStyle(viewing.status).label}
                     </span>
                   </div>
 
@@ -1277,7 +1291,7 @@ function TabSubmissions({ projId, members, mentorName }) {
 // ══════════════════════════════════════════════════════════════════
 function TabEvaluation({ projId, mentorId, mentorName, members, evaluations, setEvaluations, markingEnabled }) {
   const [showForm, setShowForm] = useState(false);
-  const [phase, setPhase] = useState(PHASES[0]);
+  const [phase, setPhase] = useState(EVALUATION_STAGE_OPTIONS[0]);
   const [sc, setSc] = useState({ problem_definition: 0, technical_approach: 0, implementation: 0, presentation: 0, viva: 0 });
   const [fb, setFb] = useState("");
   const [saving, setSaving] = useState(false);
@@ -1335,9 +1349,9 @@ function TabEvaluation({ projId, mentorId, mentorName, members, evaluations, set
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-1.5">Phase</label>
+              <label className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-1.5">Review Stage</label>
               <select value={phase} onChange={e => setPhase(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-teal-400">
-                {PHASES.map(p => <option key={p}>{p}</option>)}
+                {EVALUATION_STAGE_OPTIONS.map((stage) => <option key={stage}>{stage}</option>)}
               </select>
             </div>
             <div className={"rounded-xl flex items-center justify-center font-extrabold text-lg " + (total >= 80 ? "bg-emerald-50 text-emerald-700" : total >= 60 ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-600")}>
@@ -1428,6 +1442,7 @@ function TabActivity({ evaluations, documents }) {
 // ══════════════════════════════════════════════════════════════════
 const TABS = [
   { key: "overview", label: "Overview", Icon: Ic.Overview },
+  { key: "ideas", label: "Ideas", Icon: Ic.Ideas },
   { key: "submissions", label: "Submissions", Icon: Ic.Submissions },
   { key: "feedback", label: "Discussions", Icon: Ic.Feedback },
   { key: "evaluation", label: "Evaluation", Icon: Ic.Evaluation },
@@ -1443,10 +1458,6 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
   const [showReview, setShowReview] = useState(false);
   const [loading, setLoading] = useState(true);
   const [projectStatus, setProjectStatus] = useState(proj.status);
-  const [ideaDecisionBusy, setIdeaDecisionBusy] = useState("");
-  const [ideaFeedback, setIdeaFeedback] = useState("");
-  const [showIdeaFeedback, setShowIdeaFeedback] = useState(false);
-  const [ideaDecisionTarget, setIdeaDecisionTarget] = useState("");
   const members = proj.team_members || [];
   const markingEnabled = true;
 
@@ -1473,27 +1484,29 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
       setEvaluations(normalizedEvaluations);
       setDocuments(doc.data || []);
       // Build flat array indexed by phase_index [0..5]
-      const dates = Array(6).fill(null);
+      const dates = Array(WORKFLOW_TIMELINE.length).fill(null);
       (ms.data || []).forEach(r => { dates[r.phase_index] = r.due_date; });
       setMilestoneDates(dates);
       setReviewDeadlines((stages.data || []).map((row) => ({
         id: row.id,
-        title: `${proj.class_name || proj.batch || "Class"} - ${normalizeReviewStageName(row.stage_name)}`,
+        title: `${proj.class_name || proj.batch || "Class"} - ${getWorkflowStageMeta(row.stage_name).label}`,
         deadline: row.deadline,
       })));
       setLoading(false);
     });
   }, [proj.batch, proj.class_id, proj.class_name, proj.id]);
 
-  useEffect(() => {
-    setProjectStatus(proj.status);
-  }, [proj.status]);
+  const refreshProjectStatus = async () => {
+    const { data } = await supabase
+      .from("projects")
+      .select("status")
+      .eq("id", proj.id)
+      .maybeSingle();
 
-  useEffect(() => {
-    setIdeaFeedback("");
-    setShowIdeaFeedback(false);
-    setIdeaDecisionTarget("");
-  }, [proj.id]);
+    if (data?.status) {
+      setProjectStatus(data.status);
+    }
+  };
 
   const submitReview = async ({ phase, scores, total, feedback }) => {
     const data = await insertTeamEvaluation(mentorId, {
@@ -1522,34 +1535,19 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
     }
   };
 
-  const handleIdeaDecision = async (status) => {
-    if (!proj?.id || !status) return;
-    if (!showIdeaFeedback || ideaDecisionTarget !== status) {
-      setIdeaDecisionTarget(status);
-      setShowIdeaFeedback(true);
-      return;
-    }
-
-    setIdeaDecisionBusy(status);
-    try {
-      const updated = await apiRequest(`/projects/${proj.id}/approve`, {
-        method: "PUT",
-        body: { status, feedback: ideaFeedback.trim() || null },
-      });
-      setProjectStatus(updated?.status || status);
-      setShowIdeaFeedback(false);
-      setIdeaDecisionTarget("");
-    } finally {
-      setIdeaDecisionBusy("");
-    }
-  };
-
   const avg = evaluations.length ? Math.round(evaluations.reduce((s, e) => s + Number(e.score || 0), 0) / evaluations.length) : null;
-  const phaseIdx = Math.min([...new Set(evaluations.map(e => e.phase))].length, PHASES.length - 1);
-  const pct = Math.round((phaseIdx / (PHASES.length - 1)) * 100);
+  const workflowSnapshot = getWorkflowSnapshot({
+    project: { ...proj, status: projectStatus },
+    documents,
+    evaluations,
+  });
+  const phaseIdx = workflowSnapshot.index;
+  const pct = workflowSnapshot.progressPercent;
   const logoUrl = getLogoUrl(proj);
-  const projInitials = getInitials(proj?.title || "");
-  const projGradient = gradFromTitle(proj?.title || "");
+  const teamDisplayName = getTeamDisplayName(proj);
+  const ideaTitle = getIdeaTitle(proj);
+  const projInitials = getInitials(teamDisplayName);
+  const projGradient = gradFromTitle(teamDisplayName);
   const isDiscussionTab = tab === "feedback";
 
   return (
@@ -1561,9 +1559,9 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
           <nav className={`flex items-center gap-2 ${isDiscussionTab ? "text-xs mb-3" : "text-sm mb-5"}`}>
             <button onClick={onBack} className="text-teal-300 hover:text-teal-200 font-semibold transition-colors">Home</button>
             <span className="text-slate-500">/</span>
-            <button onClick={onBack} className="text-teal-300 hover:text-teal-200 font-semibold transition-colors">Projects</button>
+            <button onClick={onBack} className="text-teal-300 hover:text-teal-200 font-semibold transition-colors">Teams</button>
             <span className="text-slate-500">/</span>
-            <span className="text-slate-200 font-semibold truncate">{proj.title}</span>
+            <span className="text-slate-200 font-semibold truncate">{teamDisplayName}</span>
           </nav>
 
           {/* Project header row */}
@@ -1571,7 +1569,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
             <div className="flex items-start gap-4">
               <div className={`relative ${isDiscussionTab ? "w-11 h-11 rounded-xl" : "w-14 h-14 rounded-2xl"} border border-white/20 shadow-lg shadow-black/30 overflow-hidden flex items-center justify-center flex-shrink-0`}>
                 {logoUrl ? (
-                  <img src={logoUrl} alt={proj.title || "Project"} className="w-full h-full object-cover" />
+                  <img src={logoUrl} alt={teamDisplayName || "Team"} className="w-full h-full object-cover" />
                 ) : (
                   <div className={`w-full h-full flex items-center justify-center text-white font-black ${isDiscussionTab ? "text-xs" : "text-sm"} tracking-wide`} style={{ background: projGradient }}>
                     {projInitials}
@@ -1580,7 +1578,10 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
                 {!isDiscussionTab && <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-slate-900/80 border border-teal-300/30 text-[10px] text-teal-200 flex items-center justify-center">AI</span>}
               </div>
               <div>
-                <h1 className={`${isDiscussionTab ? "text-xl" : "text-2xl"} font-extrabold text-white leading-tight`}>{proj.title}</h1>
+                <h1 className={`${isDiscussionTab ? "text-xl" : "text-2xl"} font-extrabold text-white leading-tight`}>{teamDisplayName}</h1>
+                {!isDiscussionTab && ideaTitle && (
+                  <p className="text-slate-300 text-sm mt-1 max-w-xl line-clamp-1 leading-relaxed">Approved idea: {ideaTitle}</p>
+                )}
                 {!isDiscussionTab && proj.description && (
                   <p className="text-slate-300 text-sm mt-1 max-w-xl line-clamp-2 leading-relaxed">{proj.description}</p>
                 )}
@@ -1589,54 +1590,19 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
                 )}
                 <div className={`flex items-center gap-3 ${isDiscussionTab ? "mt-1.5" : "mt-2.5"} flex-wrap`}>
                   <Pill status={projectStatus} />
-                  <span className="text-xs text-slate-400">Phase: <span className="text-teal-400 font-semibold">{PHASES[phaseIdx]}</span></span>
+                  <span className="text-xs text-slate-400">Current step: <span className="text-teal-400 font-semibold">{workflowSnapshot.label}</span></span>
                   {avg && <span className={"text-xs font-bold " + sClr(avg)}>Avg: {avg}/100</span>}
                 </div>
-                {!isDiscussionTab && showIdeaFeedback && (
-                  <div className="mt-3 max-w-xl">
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-                      Guide Feedback
-                    </label>
-                    <textarea
-                      value={ideaFeedback}
-                      onChange={(e) => setIdeaFeedback(e.target.value)}
-                      rows={3}
-                      placeholder={ideaDecisionTarget === "rejected" ? "Add rejection feedback for the team..." : "Add acceptance feedback for the team..."}
-                      className="w-full rounded-xl border border-white/10 bg-white/10 px-3 py-2.5 text-sm text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-400/40"
-                    />
-                  </div>
-                )}
               </div>
             </div>
             {!isDiscussionTab && (
               <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
                 <button
                   type="button"
-                  onClick={() => handleIdeaDecision("approved")}
-                  disabled={ideaDecisionBusy !== ""}
-                  className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-bold transition-all ${projectStatus === "approved"
-                    ? "border-emerald-300 bg-emerald-100 text-emerald-800"
-                    : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"} disabled:cursor-not-allowed disabled:opacity-70`}
+                  onClick={() => setTab("ideas")}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 text-sm font-bold transition-all"
                 >
-                  {ideaDecisionBusy === "approved"
-                    ? "Accepting..."
-                    : showIdeaFeedback && ideaDecisionTarget === "approved"
-                      ? "Confirm Accept"
-                      : "Accept Idea"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleIdeaDecision("rejected")}
-                  disabled={ideaDecisionBusy !== ""}
-                  className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-bold transition-all ${projectStatus === "rejected"
-                    ? "border-rose-300 bg-rose-100 text-rose-800"
-                    : "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"} disabled:cursor-not-allowed disabled:opacity-70`}
-                >
-                  {ideaDecisionBusy === "rejected"
-                    ? "Rejecting..."
-                    : showIdeaFeedback && ideaDecisionTarget === "rejected"
-                      ? "Confirm Reject"
-                      : "Reject Idea"}
+                  <Ic.Ideas /> Review Ideas
                 </button>
                 <button onClick={() => setShowReview(true)}
                   className="flex items-center justify-center gap-2 bg-teal-400 hover:bg-teal-300 active:scale-95 text-slate-900 text-sm font-bold px-5 py-2.5 rounded-xl transition-all">
@@ -1689,7 +1655,16 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
       {/* Tab content */}
       {loading ? <Spin /> : (
         <>
-          {tab === "overview" && <TabOverview proj={proj} evaluations={evaluations} members={members} documents={documents} onAddReview={() => setShowReview(true)} onNavigateTab={setTab} mentorId={mentorId} mentorName={mentorName} milestoneDates={milestoneDates} reviewDeadlines={reviewDeadlines} />}
+          {tab === "overview" && <TabOverview proj={{ ...proj, status: projectStatus }} evaluations={evaluations} members={members} documents={documents} onAddReview={() => setShowReview(true)} onNavigateTab={setTab} mentorId={mentorId} mentorName={mentorName} milestoneDates={milestoneDates} reviewDeadlines={reviewDeadlines} workflowSnapshot={workflowSnapshot} />}
+          {tab === "ideas" && (
+            <MentorIdeaQueue
+              onRefresh={refreshProjectStatus}
+              projectId={proj.id}
+              hideFilters
+              title="Team Ideas"
+              subtitle={`Review idea versions for ${teamDisplayName || "this team"}.`}
+            />
+          )}
           {tab === "submissions" && <TabSubmissions projId={proj.id} members={members} mentorName={mentorName} />}
           {tab === "feedback" && (
             <MentorDiscussion
@@ -1697,7 +1672,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
               mentorId={mentorId}
               members={members}
               mentorName={mentorName}
-              projectTitle={proj.title}
+              projectTitle={teamDisplayName}
             />
           )}
           {tab === "evaluation" && <TabEvaluation projId={proj.id} mentorId={mentorId} mentorName={mentorName} members={members} evaluations={evaluations} setEvaluations={setEvaluations} markingEnabled={markingEnabled} />}
@@ -1708,4 +1683,5 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
     </div>
   );
 }
+
 
