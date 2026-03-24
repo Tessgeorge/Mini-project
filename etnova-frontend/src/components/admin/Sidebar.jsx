@@ -3,7 +3,7 @@ import Sidebar from "../Sidebar";
 const ADMIN_NAV_ITEMS = [
   { id: "dashboard", label: "Dashboard", icon: "dashboard" },
   { id: "mentor-management", label: "Mentor Management", icon: "groups" },
-  { id: "guide-allocation", label: "Guide Allocation", icon: "shuffle" },
+  { id: "guide-allocation", label: "Mentor Allocation", icon: "shuffle" },
   { id: "review-management", label: "Review Management", icon: "grading" },
 ];
 

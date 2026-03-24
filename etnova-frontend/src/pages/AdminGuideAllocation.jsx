@@ -21,6 +21,10 @@ function isMentorProfile(row) {
   return row && typeof row.id === "string";
 }
 
+function getTeamDisplayName(project) {
+  return project?.team_name || project?.title || "Untitled Team";
+}
+
 export default function AdminGuideAllocation() {
   const navigate = useNavigate();
   const [classes, setClasses] = useState([]);
@@ -84,6 +88,7 @@ export default function AdminGuideAllocation() {
       .select(`
         id,
         title,
+        team_name,
         guide_id,
         team_members (
           project_id,
@@ -136,7 +141,7 @@ export default function AdminGuideAllocation() {
 
       return {
         id: project.id,
-        title: project.title || "Untitled Project",
+        title: getTeamDisplayName(project),
         guide_id: project.guide_id || null,
         class_id: classSection || null,
         class_name: classSection,
@@ -313,7 +318,7 @@ export default function AdminGuideAllocation() {
       if (updateError) throw updateError;
 
       setSelectedGuides((prev) => ({ ...prev, [projectId]: "" }));
-      setNotice(nextGuideId ? "Guide assigned successfully." : "Guide unassigned successfully.");
+      setNotice(nextGuideId ? "Mentor assigned successfully." : "Mentor unassigned successfully.");
       await fetchProjects();
     } catch (err) {
       setError(err.message || "Failed to assign guide.");
@@ -381,14 +386,14 @@ export default function AdminGuideAllocation() {
         <TopNavbar
           adminName={ADMIN_NAME}
           academicYearLabel="2026 - S6 Mini Project"
-          pageTitle="Guide Allocation"
+          pageTitle="Mentor Allocation"
         />
 
         <div className="p-4 md:p-6 lg:p-8 space-y-6">
           <section className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-semibold text-slate-800">Guide Allocation</h1>
-              <p className="text-slate-500 mt-1">Interactive guide assignment powered by Supabase</p>
+              <h1 className="text-2xl font-semibold text-slate-800">Mentor Allocation</h1>
+              <p className="text-slate-500 mt-1">Interactive mentor assignment powered by Supabase</p>
             </div>
             <div className="flex flex-wrap gap-3">
               <button
@@ -421,7 +426,7 @@ export default function AdminGuideAllocation() {
 
           <section className="bg-white/90 rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-200/70">
-              <h2 className="text-lg font-semibold text-slate-800">Project Allocation Table</h2>
+              <h2 className="text-lg font-semibold text-slate-800">Team Allocation Table</h2>
               <div className="mt-3 flex items-center gap-3">
                 <label className="text-sm text-slate-600 font-medium" htmlFor="class-filter">Class Filter</label>
                 <select
@@ -441,8 +446,8 @@ export default function AdminGuideAllocation() {
               <table className="w-full min-w-[920px] text-sm">
                 <thead className="bg-slate-100/70 text-slate-600">
                   <tr>
-                    <th className="px-6 py-3 text-left font-semibold">Project Name</th>
-                    <th className="px-6 py-3 text-left font-semibold">Assigned Guide</th>
+                    <th className="px-6 py-3 text-left font-semibold">Team Name</th>
+                    <th className="px-6 py-3 text-left font-semibold">Assigned Mentor</th>
                     <th className="px-6 py-3 text-left font-semibold">Status</th>
                     <th className="px-6 py-3 text-left font-semibold">Action</th>
                   </tr>
@@ -460,7 +465,7 @@ export default function AdminGuideAllocation() {
                     return (
                       <tr key={project.id} className="hover:bg-slate-50">
                         <td className="px-6 py-4">
-                          <p className="font-medium text-slate-800">{project.title}</p>
+                          <p className="font-medium text-slate-800">{getTeamDisplayName(project)}</p>
                           <p className="text-xs text-slate-500 mt-0.5">{project.class_name || classNameById.get(project.class_id) || "-"}</p>
                         </td>
                         <td className="px-6 py-4 text-slate-700">{assignedGuide}</td>
@@ -478,7 +483,7 @@ export default function AdminGuideAllocation() {
                               onChange={(event) => setSelectedGuides((prev) => ({ ...prev, [project.id]: event.target.value }))}
                               className="glass-input rounded-lg px-3 py-2 text-sm text-slate-700"
                             >
-                              <option value="">Select guide</option>
+                              <option value="">Select mentor</option>
                               <option value={NONE_GUIDE_VALUE}>None (Unassign)</option>
                               {mentors.map((mentor) => {
                                 const optionAllowed = canAssignMentor(project, mentor.id);
@@ -505,7 +510,7 @@ export default function AdminGuideAllocation() {
                   })}
                   {filteredProjects.length === 0 && !loading ? (
                     <tr>
-                      <td colSpan={4} className="px-6 py-8 text-center text-sm text-slate-500">No projects found.</td>
+                      <td colSpan={4} className="px-6 py-8 text-center text-sm text-slate-500">No teams found.</td>
                     </tr>
                   ) : null}
                 </tbody>
@@ -515,23 +520,23 @@ export default function AdminGuideAllocation() {
 
           <section className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <div className="rounded-lg bg-white/90 border border-slate-200/70 p-3">
-              <p className="text-xs text-slate-500">Total Projects</p>
+              <p className="text-xs text-slate-500">Total Teams</p>
               <p className="text-xl font-semibold text-slate-800">{summary.totalProjects}</p>
             </div>
             <div className="rounded-lg bg-white/90 border border-slate-200/70 p-3">
-              <p className="text-xs text-slate-500">Assigned Projects</p>
+              <p className="text-xs text-slate-500">Assigned Teams</p>
               <p className="text-xl font-semibold text-emerald-700">{summary.assignedProjects}</p>
             </div>
             <div className="rounded-lg bg-white/90 border border-slate-200/70 p-3">
-              <p className="text-xs text-slate-500">Unassigned Projects</p>
+              <p className="text-xs text-slate-500">Unassigned Teams</p>
               <p className="text-xl font-semibold text-rose-700">{summary.unassignedProjects}</p>
             </div>
             <div className="rounded-lg bg-white/90 border border-slate-200/70 p-3">
-              <p className="text-xs text-slate-500">Total Guides</p>
+              <p className="text-xs text-slate-500">Total Mentors</p>
               <p className="text-xl font-semibold text-slate-800">{summary.totalGuides}</p>
             </div>
             <div className="rounded-lg bg-white/90 border border-slate-200/70 p-3">
-              <p className="text-xs text-slate-500">Fully Occupied</p>
+              <p className="text-xs text-slate-500">Fully Occupied Mentors</p>
               <p className="text-xl font-semibold text-amber-700">{summary.fullGuides}</p>
             </div>
           </section>

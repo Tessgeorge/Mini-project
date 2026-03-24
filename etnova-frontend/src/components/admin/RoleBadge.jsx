@@ -4,12 +4,18 @@ const ROLE_STYLES = {
   Coordinator: "bg-violet-100 text-violet-700 border-violet-200",
 };
 
+const ROLE_LABELS = {
+  Guide: "Guide Mentor",
+  Evaluator: "Evaluator",
+  Coordinator: "Coordinator",
+};
+
 export default function RoleBadge({ role }) {
   const tone = ROLE_STYLES[role] || "bg-gray-100 text-gray-700 border-gray-200";
 
   return (
     <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold border ${tone}`}>
-      {role}
+      {ROLE_LABELS[role] || role}
     </span>
   );
 }

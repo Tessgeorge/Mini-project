@@ -26,7 +26,7 @@ export default function TeamTable({
             <tr>
               <th className="px-6 py-3 text-left font-semibold">Team Name</th>
               <th className="px-6 py-3 text-left font-semibold">Class</th>
-              <th className="px-6 py-3 text-left font-semibold">Current Guide</th>
+              <th className="px-6 py-3 text-left font-semibold">Current Mentor</th>
               <th className="px-6 py-3 text-left font-semibold">Allocation Status</th>
               <th className="px-6 py-3 text-left font-semibold">Action</th>
             </tr>
@@ -51,7 +51,7 @@ export default function TeamTable({
                         onChange={(event) => onGuideChange(team.id, event.target.value)}
                         className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/40"
                       >
-                        <option value="">Select guide</option>
+                        <option value="">Select mentor</option>
                         <option value={noneGuideValue}>None (Unassign)</option>
                         {guides.map((guide) => {
                           const optionAllowed = canAssignGuide(team.id, guide.id);

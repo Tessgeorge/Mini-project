@@ -12,8 +12,8 @@ import ProfileMenu from "../components/ProfileMenu";
 
 const ADMIN_NAME = "Meenakshi";
 const KPI_DATA = [
-  { title: "Total Projects", value: "0", hint: "CSE S6 Mini Project", borderClass: "border-t-teal-500", icon: "teams" },
-  { title: "Total Guides", value: "41", hint: "Department mentors active", borderClass: "border-t-sky-500", icon: "guides" },
+  { title: "Total Teams", value: "0", hint: "CSE S6 Mini Project", borderClass: "border-t-teal-500", icon: "teams" },
+  { title: "Total Mentors", value: "41", hint: "Department mentors active", borderClass: "border-t-sky-500", icon: "guides" },
   { title: "Results Published", value: "Not Yet", hint: "Awaiting final approval", borderClass: "border-t-rose-500", icon: "published" },
 ];
 const STAGE_ORDER = ["Idea", "Abstract", "Zeroth Review", "First Review", "Second Review", "Final Review"];
@@ -58,6 +58,10 @@ function formatStageSubline(stage) {
   const date = new Date(stage.deadline);
   if (Number.isNaN(date.getTime())) return "Pending";
   return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+}
+
+function getTeamDisplayName(project) {
+  return project?.team_name || project?.title || "Untitled Team";
 }
 
 export default function AdminDashboard() {
@@ -147,7 +151,7 @@ export default function AdminDashboard() {
       const [projectsRes, mentorsRes, classesRes] = await Promise.all([
         supabase
           .from("projects")
-          .select("id, title, guide_id, status, class_id, team_members(id, student_id, profiles:student_id(class_section))"),
+          .select("id, title, team_name, guide_id, status, class_id, team_members(id, student_id, profiles:student_id(class_section))"),
         supabase.from("profiles").select("id, full_name, role").eq("role", "mentor"),
         supabase.from("classes").select("id, class_name"),
       ]);
@@ -273,7 +277,7 @@ export default function AdminDashboard() {
       const activeReviewStage = classActiveStageMap[resolvedClass] || "-";
       return {
         id: project.id,
-        name: project.title || "Untitled Project",
+        name: getTeamDisplayName(project),
         class: resolvedClass,
         stage: activeReviewStage,
         submissionStatus,
@@ -316,9 +320,9 @@ export default function AdminDashboard() {
       KPI_DATA.map((item) =>
         item.title === "Active Review Stage"
           ? { ...item, value: activeReviewStage }
-          : item.title === "Total Projects"
+          : item.title === "Total Teams"
             ? { ...item, value: String(projects.length), hint: `${assignedProjects} assigned, ${unassignedProjects} unassigned` }
-            : item.title === "Total Guides"
+            : item.title === "Total Mentors"
               ? {
                 ...item,
                 value: String(mentors.length),
@@ -393,7 +397,7 @@ export default function AdminDashboard() {
           <section className="glass-card p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
               <h1 className="text-2xl font-semibold text-slate-800">Good Evening, Dr. {adminName}</h1>
-              <p className="text-slate-500 mt-1 text-sm">{adminDepartment} Department - Project Evaluation Control Panel</p>
+              <p className="text-slate-500 mt-1 text-sm">{adminDepartment} Department - Team Review Control Panel</p>
             </div>
             <div className="text-sm sm:text-right text-slate-500">
               <p className="font-semibold text-slate-700">Today</p>
@@ -408,14 +412,14 @@ export default function AdminDashboard() {
           {loading ? <p className="text-sm text-slate-500">Loading live dashboard data...</p> : null}
 
           <SectionCard
-            title="Unassigned Projects"
+            title="Unassigned Teams"
             action={(
               <button
                 type="button"
                 onClick={() => navigate("/admin/guide-allocation")}
                 className="bg-teal-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-teal-700 transition-colors"
               >
-                Allocate Guide
+                Allocate Mentor
               </button>
             )}
           >
@@ -423,7 +427,7 @@ export default function AdminDashboard() {
               <div className="space-y-3">
                 {unassignedProjectRows.slice(0, 5).map((project) => (
                   <div key={project.id} className="flex items-center justify-between rounded-lg border border-slate-200/70 bg-white/70 px-3 py-2">
-                    <p className="text-sm font-medium text-slate-800 truncate pr-3">{project.title || "Untitled Project"}</p>
+                    <p className="text-sm font-medium text-slate-800 truncate pr-3">{getTeamDisplayName(project)}</p>
                     <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-100 text-rose-700">
                       Unassigned
                     </span>
@@ -442,7 +446,7 @@ export default function AdminDashboard() {
                 ) : null}
               </div>
             ) : (
-              <p className="text-sm text-slate-600">All projects have been allocated a guide.</p>
+              <p className="text-sm text-slate-600">All teams have been allocated a mentor.</p>
             )}
           </SectionCard>
 

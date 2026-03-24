@@ -3,8 +3,8 @@ import SectionCard from "./SectionCard";
 export default function AllocationCard({ guides, onRunRandomAllocation }) {
   return (
     <SectionCard
-      title="Guide Allocation Overview"
-      subtitle="Max 2 Teams Per Guide Enforced"
+      title="Mentor Allocation Overview"
+      subtitle="Max 2 Teams Per Mentor Enforced"
       action={(
         <button
           type="button"

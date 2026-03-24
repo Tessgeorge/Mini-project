@@ -20,6 +20,10 @@ function projectClassName(project) {
   return project.classes?.class_name || "Unknown Class";
 }
 
+function getTeamDisplayName(project) {
+  return project?.team_name || project?.title || "Untitled Team";
+}
+
 async function fetchMentorEvaluationsByMentorId(mentorId) {
   const evaluatorColumns = mentorEvalColumnStrategy ? [mentorEvalColumnStrategy] : ["evaluator_id", "guide_id"];
 
@@ -31,6 +35,7 @@ async function fetchMentorEvaluationsByMentorId(mentorId) {
         projects:project_id (
           id,
           title,
+          team_name,
           class_id,
           classes:class_id (
             class_name
@@ -242,6 +247,7 @@ export default function AdminMentorManagement() {
           .select(`
             id,
             title,
+            team_name,
             status,
             class_id,
             classes:class_id (
@@ -260,7 +266,7 @@ export default function AdminMentorManagement() {
         const guidanceRows = (guidanceRes.data || []).map((row) => ({
           id: row.id,
           projectId: row.id,
-          title: row.title || "Untitled Project",
+          title: getTeamDisplayName(row),
           className: projectClassName(row),
           status: row.status || "active",
         }));
@@ -268,7 +274,7 @@ export default function AdminMentorManagement() {
         const evaluationRows = (evaluationData || []).map((row) => ({
           id: row.id,
           stage: row.evaluation_type || row.phase || "Unknown Stage",
-          title: row.projects?.title || "Untitled Project",
+          title: getTeamDisplayName(row.projects),
           className: projectClassName(row.projects),
           completed:
             row.score !== null
@@ -548,7 +554,7 @@ export default function AdminMentorManagement() {
           <section className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
             <div>
               <h1 className="text-2xl font-semibold text-slate-800">Mentor Management</h1>
-              <p className="text-slate-500 mt-1">Manage Mentor Roles and Department Privileges</p>
+              <p className="text-slate-500 mt-1">Manage mentor roles, team assignments, and coordinator privileges</p>
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
@@ -558,7 +564,7 @@ export default function AdminMentorManagement() {
                 className="glass-input rounded-xl px-3 py-2.5 text-sm text-slate-700"
               >
                 <option value="All">All</option>
-                <option value="Guide">Guide</option>
+                <option value="Guide">Guide Mentor</option>
                 <option value="Coordinator">Coordinator</option>
               </select>
               <input
@@ -573,7 +579,7 @@ export default function AdminMentorManagement() {
 
           <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
             <MentorStatCard title="Total Mentors" value={stats.totalMentors} icon="mentors" borderClass="border-t-teal-500" />
-            <MentorStatCard title="Total Guides" value={stats.totalGuides} icon="guide" borderClass="border-t-cyan-500" />
+            <MentorStatCard title="Guide Mentors" value={stats.totalGuides} icon="guide" borderClass="border-t-cyan-500" />
             <MentorStatCard title="Total Coordinators" value={stats.totalCoordinators} icon="coordinator" borderClass="border-t-violet-500" />
           </section>
 
@@ -615,7 +621,7 @@ export default function AdminMentorManagement() {
             {workloadOpen ? (
               <div className="p-6 space-y-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                  <MentorStatCard title="Total Guidance Teams" value={guidanceTeams} icon="guide" borderClass="border-t-teal-500" />
+                  <MentorStatCard title="Assigned Teams" value={guidanceTeams} icon="guide" borderClass="border-t-teal-500" />
                   <div>
                     <MentorStatCard title="Coordination Assignments" value={coordinatorAssignments} icon="coordinator" borderClass="border-t-violet-500" />
                     {coordinatorClassName && (
@@ -629,7 +635,7 @@ export default function AdminMentorManagement() {
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <section className="rounded-xl border border-slate-200/70 bg-slate-50/70 p-4">
-                    <h3 className="text-sm font-semibold text-slate-800">Guidance Load (Max 2)</h3>
+                    <h3 className="text-sm font-semibold text-slate-800">Team Allocation Load (Max 2)</h3>
                     <div className="mt-3 h-2.5 rounded-full bg-slate-200 overflow-hidden">
                       <div className={`h-full rounded-full ${
                         guidancePercent >= 100 ? "bg-rose-500" : guidancePercent >= 50 ? "bg-amber-500" : "bg-emerald-500"
