@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import Modal from './Modal';
 import { apiRequest } from '../config/apiClient';
-import FeedbackBanner from './FeedbackBanner';
 
 const INITIAL_FORM = {
     teamName: '',
@@ -31,17 +30,13 @@ export default function CreateProjectModal({ isOpen, onClose, onSuccess, leaderN
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
-        if (!formData.teamName.trim()) {
-            setError('Team name is required.');
-            return;
-        }
         setLoading(true);
 
         try {
             await apiRequest('/projects', {
                 method: 'POST',
                 body: {
-                    team_name: formData.teamName.trim(),
+                    team_name: formData.teamName,
                     title: formData.initialIdea,
                     technology_stacks: parseTechnologyStacks(formData.technologyStacks),
                     description: formData.description,
@@ -64,14 +59,10 @@ export default function CreateProjectModal({ isOpen, onClose, onSuccess, leaderN
         <Modal isOpen={isOpen} onClose={onClose} title="Create New Team">
             <form onSubmit={handleSubmit} className="p-6 space-y-5">
                 {error && (
-                    <FeedbackBanner tone="error">
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                         {error}
-                    </FeedbackBanner>
+                    </div>
                 )}
-
-                <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
-                    Team formation stays lightweight here. Your initial idea is saved as a draft and can be refined later in Idea Workspace.
-                </div>
 
                 <div>
                     <label htmlFor="teamName" className="block text-sm font-bold text-slate-900 mb-2">
@@ -87,7 +78,6 @@ export default function CreateProjectModal({ isOpen, onClose, onSuccess, leaderN
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900 placeholder:text-slate-400"
                         placeholder="Enter your team name"
                     />
-                    <p className="text-xs text-slate-500 mt-1">Use a stable team name. The approved idea can change later without affecting the team.</p>
                 </div>
 
                 <div>
@@ -112,7 +102,6 @@ export default function CreateProjectModal({ isOpen, onClose, onSuccess, leaderN
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900 placeholder:text-slate-400"
                         placeholder="Draft project idea title (optional)"
                     />
-                    <p className="text-xs text-slate-500 mt-1">Optional. Leave this blank if your team wants to brainstorm after mentor discussion.</p>
                 </div>
 
                 <div>
@@ -128,7 +117,6 @@ export default function CreateProjectModal({ isOpen, onClose, onSuccess, leaderN
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900 placeholder:text-slate-400 resize-none"
                         placeholder="Draft summary for your initial idea (optional)"
                     />
-                    <p className="text-xs text-slate-500 mt-1">Keep this short. You can add full problem statements and revisions inside Idea Workspace.</p>
                 </div>
 
                 <div>

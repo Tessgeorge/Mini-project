@@ -7,8 +7,6 @@ import ReviewTimeline from "../components/admin/ReviewTimeline";
 import StageTable from "../components/admin/StageTable";
 import DeadlineModal from "../components/admin/DeadlineModal";
 import StageStatCard from "../components/admin/StageStatCard";
-import FeedbackBanner from "../components/FeedbackBanner";
-import EmptyStatePanel from "../components/EmptyStatePanel";
 
 const ADMIN_NAME = "Meenakshi";
 
@@ -756,20 +754,14 @@ export default function AdminReviewManagement() {
             </div>
           </section>
 
-          {error ? <FeedbackBanner tone="error">{error}</FeedbackBanner> : null}
-
-          {classes.length === 0 ? (
-            <EmptyStatePanel
-              icon="school"
-              title="No classes available yet"
-              description="Create classes first so review stages and mentor deadlines can be configured for each batch."
-              className="bg-white shadow-sm"
-            />
+          {error ? (
+            <section className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {error}
+            </section>
           ) : null}
 
           <section className="bg-white/90 rounded-2xl shadow-sm border border-slate-200/70 p-6">
             <h2 className="text-lg font-semibold text-slate-800 mb-4">Class Review Timeline</h2>
-            <p className="text-sm text-slate-500 mb-4">This timeline is the source of truth for stage availability, deadline control, and coordinator follow-up.</p>
             <ReviewTimeline
               stages={stages}
               selectedClass={selectedClassName}
@@ -818,5 +810,3 @@ export default function AdminReviewManagement() {
     </div>
   );
 }
-
-

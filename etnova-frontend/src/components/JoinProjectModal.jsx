@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
 import Modal from './Modal';
 import { apiRequest } from '../config/apiClient';
-import FeedbackBanner from './FeedbackBanner';
-import EmptyStatePanel from './EmptyStatePanel';
 
 export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
     const [projects, setProjects] = useState([]);
@@ -77,31 +75,30 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="Join a Team" maxWidth="max-w-3xl">
             <div className="p-6">
-                <p className="text-sm text-slate-500 mb-4">
-                    Browse teams that still have open member slots. Your request goes to the team leader for approval.
-                </p>
                 {error && (
-                    <FeedbackBanner tone="error" className="mb-4">
+                    <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center gap-2">
+                        <span className="material-symbols-outlined text-base">error</span>
                         {error}
-                    </FeedbackBanner>
+                    </div>
                 )}
                 {successMsg && (
-                    <FeedbackBanner tone="success" className="mb-4">
+                    <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 flex items-center gap-2">
+                        <span className="material-symbols-outlined text-base">check_circle</span>
                         {successMsg}
-                    </FeedbackBanner>
+                    </div>
                 )}
 
                 {loading ? (
-                    <div className="text-center py-12 rounded-2xl border border-slate-200 bg-slate-50/70">
+                    <div className="text-center py-12">
                         <div className="inline-block size-8 border-4 border-teal-200 border-t-teal-600 rounded-full animate-spin"></div>
-                        <p className="text-sm text-slate-500 mt-3">Loading available teams...</p>
+                        <p className="text-sm text-slate-500 mt-3">Loading available projects...</p>
                     </div>
                 ) : projects.length === 0 ? (
-                    <EmptyStatePanel
-                        icon="group_off"
-                        title="No teams available to join"
-                        description="All visible teams are either full, already requested, or you are already a member."
-                    />
+                    <div className="text-center py-12">
+                        <span className="material-symbols-outlined text-6xl text-slate-300 mb-3">folder_off</span>
+                        <p className="text-slate-600 font-medium">No teams available to join</p>
+                        <p className="text-sm text-slate-500 mt-1">All teams are either full or you are already a member</p>
+                    </div>
                 ) : (
                     <div className="space-y-3">
                         {projects.map((project) => {
@@ -118,7 +115,7 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
                                             {project.team_name && project.team_name !== project.title && (
                                                 <p className="text-xs font-semibold text-slate-500 mb-1">Team: {project.team_name}</p>
                                             )}
-                                            <p className="text-sm text-slate-600 mb-2 line-clamp-2">{project.description || "No draft idea summary has been added yet."}</p>
+                                            <p className="text-sm text-slate-600 mb-2 line-clamp-2">{project.description}</p>
                                             <div className="flex items-center gap-4 text-xs text-slate-500">
                                                 <span className="flex items-center gap-1">
                                                     <span className="material-symbols-outlined text-sm">person</span>

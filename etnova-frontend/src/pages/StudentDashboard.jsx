@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import TopBar from "../components/TopBar";
 import ProfileMenu from "../components/ProfileMenu";
@@ -7,8 +7,6 @@ import CreateProjectModal from "../components/CreateProjectModal";
 import JoinProjectModal from "../components/JoinProjectModal";
 import ProfileSettingsModal from "../components/ProfileSettingsModal";
 import ProjectTracker from "../components/ProjectTracker";
-import FeedbackBanner from "../components/FeedbackBanner";
-import EmptyStatePanel from "../components/EmptyStatePanel";
 import supabase from "../config/supabaseClient";
 import { apiRequest } from "../config/apiClient";
 import { fetchStudentBootstrapData, invalidateStudentBootstrapCache } from "../services/studentData";
@@ -237,7 +235,7 @@ function Onboarding({ profile, onCreate, onJoin }) {
     <div className="px-4 sm:px-6 md:px-8 py-8 sm:py-10">
       <div className="mb-8">
         <h1 className="text-2xl font-black text-slate-900">
-          {getGreeting()}{profile?.full_name ? `, ${profile.full_name.split(" ")[0]}` : ""}??!
+          {getGreeting()}{profile?.full_name ? `, ${profile.full_name.split(" ")[0]}` : ""}👋!
         </h1>
         <p className="text-sm text-slate-500 mt-1">Get started by creating or joining a project team.</p>
       </div>
@@ -781,7 +779,7 @@ export default function StudentDashboard() {
                 <span style={{ color: "#00897B" }}>
                   {profile?.full_name?.split(" ")[0] || "Student"}
                 </span>
-                &nbsp;??!
+                &nbsp;👋!
               </h1>
 
               <p className="text-base text-slate-500 mt-2 leading-relaxed max-w-xl">
@@ -907,6 +905,4 @@ export default function StudentDashboard() {
     </div>
   );
 }
-
-
 

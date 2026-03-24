@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiRequest } from "../config/apiClient";
 import { getStatusMeta } from "../constants/statusConfig";
-import FeedbackBanner from "./FeedbackBanner";
-import EmptyStatePanel from "./EmptyStatePanel";
 
 const EDITABLE_STATUSES = new Set(["draft", "revision_required", "rejected"]);
 
@@ -195,7 +193,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
         </span>
       </div>
 
-      <div className="p-5 sm:p-6 space-y-6">
+      <div className="p-4 sm:p-6 space-y-5">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
           <div className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-4">
             <p className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-400">Team Name</p>
@@ -216,10 +214,10 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
         </div>
 
         {error ? (
-          <FeedbackBanner tone="error">{error}</FeedbackBanner>
+          <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
         ) : null}
         {notice ? (
-          <FeedbackBanner tone="success">{notice}</FeedbackBanner>
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div>
         ) : null}
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
@@ -238,15 +236,12 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
             </div>
 
             {loading ? (
-              <div className="px-4 py-8 text-sm text-slate-500">Loading idea versions...</div>
+              <div className="px-4 py-8 text-sm text-slate-500">Loading ideas...</div>
             ) : ideas.length === 0 ? (
-              <div className="p-4">
-                <EmptyStatePanel
-                  compact
-                  icon="lightbulb_circle"
-                  title="No idea versions yet"
-                  description="Start with a draft version here, then refine and resubmit it as mentor feedback comes in."
-                />
+              <div className="px-4 py-8 text-center">
+                <span className="material-symbols-outlined text-4xl text-slate-300">lightbulb_circle</span>
+                <p className="mt-2 text-sm font-semibold text-slate-700">No ideas yet</p>
+                <p className="text-xs text-slate-500 mt-1">Create the first draft and iterate with your mentor.</p>
               </div>
             ) : (
               <div className="divide-y divide-slate-100">
@@ -260,7 +255,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-sm font-black text-slate-900 truncate">{idea.title}</p>
-                        <p className="text-xs text-slate-500 mt-1">Version {idea.version_no} - {formatDateTime(idea.created_at)}</p>
+                        <p className="text-xs text-slate-500 mt-1">Version {idea.version_no} · {formatDateTime(idea.created_at)}</p>
                       </div>
                       <IdeaStatusBadge status={idea.status} />
                     </div>
@@ -298,7 +293,6 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20"
                     placeholder="Enter idea title"
                   />
-                  <p className="mt-1.5 text-xs text-slate-500">Use a clear, review-ready title. Keep it stable for this version even if the team later creates a new revision.</p>
                 </div>
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Description</label>
@@ -309,7 +303,6 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 resize-none"
                     placeholder="Describe the problem, objective, and expected outcome"
                   />
-                  <p className="mt-1.5 text-xs text-slate-500">Summarize the problem, the planned solution, and why this version is worth reviewing now.</p>
                 </div>
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Technologies</label>
@@ -319,7 +312,6 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20"
                     placeholder="React, Node.js, Python"
                   />
-                  <p className="mt-1.5 text-xs text-slate-500">Optional. Add comma-separated tools or frameworks only if they are already part of this idea version.</p>
                 </div>
                 <div className="flex gap-3">
                   <button
@@ -342,22 +334,15 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                 </div>
               </div>
             ) : !selectedIdea ? (
-              <div className="p-4">
-                <EmptyStatePanel
-                  compact
-                  icon="touch_app"
-                  title="Select an idea version"
-                  description="Choose a version from the left to review details, mentor feedback, and submission status."
-                />
-              </div>
+              <div className="p-6 text-sm text-slate-500">Select an idea version to view details.</div>
             ) : (
               <div className="p-4 sm:p-5 space-y-5">
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                   <div>
                     <h3 className="text-xl font-black text-slate-900">{selectedIdea.title}</h3>
                     <p className="text-xs text-slate-500 mt-1">
-                      Version {selectedIdea.version_no} - Created {formatDateTime(selectedIdea.created_at)}
-                      {selectedIdea.submitted_at ? ` - Submitted ${formatDateTime(selectedIdea.submitted_at)}` : ""}
+                      Version {selectedIdea.version_no} · Created {formatDateTime(selectedIdea.created_at)}
+                      {selectedIdea.submitted_at ? ` · Submitted ${formatDateTime(selectedIdea.submitted_at)}` : ""}
                     </p>
                   </div>
                   <IdeaStatusBadge status={selectedIdea.status} />
@@ -396,7 +381,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                     <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <IdeaStatusBadge status={selectedIdea.latest_review.action} />
-                        <span className="text-xs text-slate-500">by {selectedIdea.latest_review.reviewer?.full_name || "Mentor"} - {formatDateTime(selectedIdea.latest_review.created_at)}</span>
+                        <span className="text-xs text-slate-500">by {selectedIdea.latest_review.reviewer?.full_name || "Mentor"} · {formatDateTime(selectedIdea.latest_review.created_at)}</span>
                       </div>
                       <p className="mt-3 text-sm text-slate-700 leading-relaxed">
                         {selectedIdea.latest_review.comment || "No comment added for this review."}
@@ -435,5 +420,3 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     </div>
   );
 }
-
-

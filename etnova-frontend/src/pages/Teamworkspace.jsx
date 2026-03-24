@@ -3,7 +3,6 @@ import { supabase } from "../config/supabaseClient";
 import { apiRequest } from "../config/apiClient";
 import MentorDiscussion from "./MentorDiscussion";
 import MentorIdeaQueue from "../components/MentorIdeaQueue";
-import EmptyStatePanel from "../components/EmptyStatePanel";
 import {
   EVALUATION_STAGE_OPTIONS,
   WORKFLOW_TIMELINE,
@@ -1303,12 +1302,11 @@ function TabEvaluation({ projId, mentorId, mentorName, members, evaluations, set
   const total = Object.values(sc).reduce((s, v) => s + Number(v), 0);
 
   if (!markingEnabled) return (
-    <EmptyStatePanel
-      icon="lock"
-      title="Evaluation not yet enabled"
-      description="Admin has not opened marking for this team yet. You will be able to score and comment once this stage is available."
-      className="bg-white shadow-sm"
-    />
+    <div className="bg-white rounded-2xl p-14 border border-gray-100 shadow-sm text-center">
+      <div className="w-16 h-16 mx-auto rounded-full bg-gray-100 flex items-center justify-center mb-4 text-3xl">🔒</div>
+      <p className="font-bold text-gray-700 text-lg">Evaluation Not Yet Enabled</p>
+      <p className="text-sm text-gray-400 mt-2 max-w-xs mx-auto">Admin hasn't enabled marking for this team. You'll be notified when it becomes available.</p>
+    </div>
   );
 
   const submit = async () => {
@@ -1392,13 +1390,7 @@ function TabEvaluation({ projId, mentorId, mentorName, members, evaluations, set
         </div>
       )}
       {evaluations.length === 0 && !showForm && (
-        <EmptyStatePanel
-          compact
-          icon="fact_check"
-          title="No evaluations yet"
-          description="Add the first evaluation for this team once their current review stage is ready to be graded."
-          className="bg-white shadow-sm"
-        />
+        <div className="bg-white rounded-2xl p-10 border border-gray-100 text-center"><p className="text-gray-400 text-sm">No evaluations yet. Click "Add Evaluation" to begin.</p></div>
       )}
       <div className="space-y-3">
         {evaluations.map((ev, i) => (
@@ -1427,15 +1419,7 @@ function TabActivity({ evaluations, documents }) {
   return (
     <div className="space-y-4">
       <p className="text-xs font-bold uppercase tracking-widest text-gray-400">{items.length} Event{items.length !== 1 ? "s" : ""}</p>
-      {items.length === 0 && (
-        <EmptyStatePanel
-          compact
-          icon="history"
-          title="No activity recorded yet"
-          description="Team uploads, reviews, and evaluation events will appear here as the workflow progresses."
-          className="bg-white shadow-sm"
-        />
-      )}
+      {items.length === 0 && <div className="bg-white rounded-2xl p-12 border border-gray-100 text-center"><p className="text-gray-400 text-sm">No activity recorded yet.</p></div>}
       <div className="relative">
         {items.length > 1 && <div className="absolute left-[15px] top-4 bottom-4 w-0.5 bg-gray-100 z-0" />}
         <div className="space-y-3">
@@ -1703,8 +1687,6 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
     </div>
   );
 }
-
-
 
 
 
