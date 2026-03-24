@@ -688,7 +688,7 @@ export default function MyTeam() {
       id: "mentor-assigned",
       icon: "school",
       text: `Mentor assigned: ${mentorContact.full_name}`,
-      sub: project?.guide ? "Mentor assigned by admin dashboard" : "Administrative assignment",
+      sub: project?.guide ? "Guide assigned by admin dashboard" : "Administrative assignment",
       time: project.updated_at || project.created_at,
     });
     if (coordinatorContact) items.push({
@@ -746,12 +746,12 @@ export default function MyTeam() {
           <span className="material-symbols-outlined text-4xl text-slate-400">group_off</span>
         </div>
         <h2 className="text-xl font-black text-slate-900 mb-2">No Team Found</h2>
-        <p className="text-slate-500 text-sm">Join or create a team to view your team structure here.</p>
+        <p className="text-slate-500 text-sm">Join or create a project to view your team structure here.</p>
       </div>
     </div>
   );
 
-  const teamName = project?.team_name || project?.title || "My Team";
+  const teamName = project.title ? `${project.title} Team` : "My Team";
   const teamId = `TM-${project.id?.slice(0, 8)?.toUpperCase()}`;
 
   return (
@@ -766,7 +766,7 @@ export default function MyTeam() {
             </div>
             <div>
               <h1 className="text-lg font-black text-slate-900 leading-none">My Team</h1>
-              <p className="text-xs text-slate-500 mt-0.5">{project?.title && project.team_name && project.title !== project.team_name ? `Current idea: ${project.title}` : "Team workspace"}</p>
+              <p className="text-xs text-slate-500 mt-0.5">{project.title}</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -1026,12 +1026,12 @@ export default function MyTeam() {
               {
                 icon: "group",
                 title: "Team Size",
-                desc: "Maximum 4 members per team. Teams under 2 members cannot submit.",
+                desc: "Maximum 4 members per project team. Teams under 2 members cannot submit.",
               },
               {
                 icon: "edit_off",
                 title: "Editing Policy",
-                desc: "Member changes are disabled once the team workflow is approved by a mentor or administrator.",
+                desc: "Member changes are disabled once a Proposal is approved by the mentor or admin.",
               },
               {
                 icon: "lock",

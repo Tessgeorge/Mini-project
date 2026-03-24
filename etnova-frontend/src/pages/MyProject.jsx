@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import EditProjectModal from "../components/EditProjectModal";
-import { getStatusMeta } from "../constants/statusConfig";
-import { getWorkflowStageMeta } from "../constants/workflowConfig";
 import {
   fetchStudentBootstrapData,
   invalidateStudentBootstrapCache,
@@ -50,17 +48,41 @@ function FieldBlock({ label, children }) {
 }
 
 function StatusBadge({ status }) {
-  const meta = getStatusMeta(status, { context: "project" });
-  const icon =
-    meta.key === "approved" ? "verified"
-      : meta.key === "completed" ? "task_alt"
-        : meta.key === "rejected" ? "cancel"
-          : "hourglass_top";
+  const normalized = (status || "pending").toLowerCase();
+  const map = {
+    pending: {
+      cls: "bg-amber-50 text-amber-700 border-amber-200",
+      icon: "hourglass_top",
+      label: "In Progress",
+    },
+    active: {
+      cls: "bg-amber-50 text-amber-700 border-amber-200",
+      icon: "hourglass_top",
+      label: "In Progress",
+    },
+    approved: {
+      cls: "bg-emerald-50 text-emerald-700 border-emerald-200",
+      icon: "verified",
+      label: "Approved",
+    },
+    completed: {
+      cls: "bg-blue-50 text-blue-700 border-blue-200",
+      icon: "task_alt",
+      label: "Completed",
+    },
+    rejected: {
+      cls: "bg-rose-50 text-rose-700 border-rose-200",
+      icon: "cancel",
+      label: "Rejected",
+    },
+  };
+
+  const { cls, icon, label } = map[normalized] || map.pending;
 
   return (
-    <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border ${meta.pillClass}`}>
+    <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border ${cls}`}>
       <span className="material-symbols-outlined text-sm">{icon}</span>
-      {meta.label}
+      {label}
     </span>
   );
 }
@@ -77,15 +99,6 @@ function Avatar({ name, size = 9 }) {
       {initial}
     </div>
   );
-}
-
-function getTeamDisplayName(project) {
-  return project?.team_name || project?.title || "My Team";
-}
-
-function getIdeaDisplayName(project) {
-  if (!project?.title || project?.team_name === project?.title) return "Not finalized";
-  return project.title;
 }
 
 export default function MyProject() {
@@ -112,7 +125,7 @@ export default function MyProject() {
     })();
   }, []);
 
-  const teamName = getTeamDisplayName(project);
+  const teamName = project?.title ? `${project.title} Team` : "My Team";
   const mentorContact = project?.guide || project?.mentor || null;
   const department =
     profile?.department || project?.team_members?.[0]?.profiles?.department || "-";
@@ -133,34 +146,23 @@ export default function MyProject() {
   const checklist = useMemo(() => {
     const docs = project?.documents || [];
     const evals = project?.evaluations || [];
-    const evaluationStages = new Set(
-      evals
-        .map((item) => getWorkflowStageMeta(item.phase || item.evaluation_type).key)
-        .filter(Boolean)
-    );
     return [
       {
-        label: "Idea Approved",
-        sub: "Your team has an approved idea and can move ahead in the workflow",
-        done: Boolean(project?.approved_idea_id) || ["approved", "completed"].includes(String(project?.status || "").toLowerCase()),
-        icon: "lightbulb",
-      },
-      {
-        label: "Abstract Submitted",
-        sub: "Abstract uploaded and ready for mentor review",
-        done: docs.some((d) => d.document_type === "abstract"),
+        label: "Proposal Submitted",
+        sub: "Initial project brief submitted for review",
+        done: docs.some((d) => ["proposal", "abstract", "srs"].includes(d.document_type)),
         icon: "description",
       },
       {
-        label: "Review Cycle Started",
-        sub: "At least one formal review stage has been recorded",
-        done: evaluationStages.has("zeroth_review") || evaluationStages.has("first_review") || evaluationStages.has("second_review") || evaluationStages.has("final_review"),
+        label: "Mid-Review Completed",
+        sub: "Progress evaluation conducted by mentor",
+        done: evals.some((e) => e.evaluation_type === "mid_review"),
         icon: "rate_review",
       },
       {
-        label: "Final Review Completed",
-        sub: "All closing submissions and mentor review are complete",
-        done: evaluationStages.has("final_review") && docs.some((d) => ["final_report", "presentation"].includes(d.document_type)),
+        label: "Final Submitted",
+        sub: "Final report and presentation uploaded",
+        done: docs.some((d) => ["final_report", "presentation"].includes(d.document_type)),
         icon: "task_alt",
       },
     ];
@@ -176,7 +178,7 @@ export default function MyProject() {
       <div className="min-h-screen etnova-bg flex items-center justify-center">
         <div className="text-center">
           <div className="inline-block size-12 border-4 border-slate-200 border-t-[#00D2C4] rounded-full animate-spin" />
-          <p className="mt-4 text-slate-600 font-medium">Loading team overview...</p>
+          <p className="mt-4 text-slate-600 font-medium">Loading project record...</p>
         </div>
       </div>
     );
@@ -189,9 +191,9 @@ export default function MyProject() {
           <div className="size-20 rounded-2xl mx-auto mb-5 flex items-center justify-center bg-slate-100">
             <span className="material-symbols-outlined text-4xl text-slate-400">folder_off</span>
           </div>
-          <h2 className="text-xl font-black text-slate-900 mb-2">No Team Found</h2>
+          <h2 className="text-xl font-black text-slate-900 mb-2">No Project Found</h2>
           <p className="text-slate-500 text-sm leading-relaxed">
-            Join or create a team to view its official overview here.
+            Join or create a project to view its official academic record here.
           </p>
         </div>
       </div>
@@ -207,8 +209,8 @@ export default function MyProject() {
               <span className="material-symbols-outlined text-black">folder_open</span>
             </div>
             <div>
-              <h1 className="text-lg font-black text-slate-900 leading-none">Team Overview</h1>
-              <p className="text-xs text-slate-500 mt-0.5">Team profile and approved idea details</p>
+              <h1 className="text-lg font-black text-slate-900 leading-none">My Project</h1>
+              <p className="text-xs text-slate-500 mt-0.5">Official academic identity record</p>
             </div>
           </div>
           <StatusBadge status={project.status} />
@@ -226,10 +228,10 @@ export default function MyProject() {
         <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="h-1" style={{ background: "linear-gradient(90deg,#00D2C4,#00a89d)" }} />
           <div className="p-4 sm:p-6">
-              <SectionHead
-                icon="article"
-                title="Team Overview"
-                badge={
+            <SectionHead
+              icon="article"
+              title="Project Overview"
+              badge={
                 canEditProject ? (
                   <button
                     type="button"
@@ -238,7 +240,7 @@ export default function MyProject() {
                     style={{ backgroundColor: "#00D2C4" }}
                   >
                     <span className="material-symbols-outlined text-sm">edit</span>
-                    Edit Details
+                    Edit Project
                   </button>
                 ) : null
               }
@@ -246,16 +248,16 @@ export default function MyProject() {
 
             <div className="mb-6 p-5 rounded-xl border border-white/60 bg-white/40">
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                Team Name
+                Project Title
               </p>
-              <h3 className="text-xl font-black text-slate-900">{teamName}</h3>
+              <h3 className="text-xl font-black text-slate-900">{project.title}</h3>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
               <FieldBlock label="Academic Year">{getAcademicYear()}</FieldBlock>
               <FieldBlock label="Department">{department}</FieldBlock>
               <FieldBlock label="Domain / Category">{project.domain || "Not specified"}</FieldBlock>
-              <FieldBlock label="Team ID">
+              <FieldBlock label="Project ID">
                 <span className="font-mono text-xs text-slate-600">
                   {`PRJ-${project.id?.slice(0, 8)?.toUpperCase()}`}
                 </span>
@@ -264,15 +266,15 @@ export default function MyProject() {
 
             <div className="border-t border-slate-100 pt-4 grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Current Idea</p>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Description</p>
                 <p className="text-sm text-slate-700 leading-relaxed">
-                  {getIdeaDisplayName(project)}
+                  {project.description || "Description not added yet."}
                 </p>
               </div>
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Idea Description</p>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Abstract</p>
                 <p className="text-sm text-slate-700 leading-relaxed">
-                  {project.description || "Description not added yet."}
+                  {project.abstract || "Abstract not added yet."}
                 </p>
               </div>
             </div>
@@ -369,7 +371,7 @@ export default function MyProject() {
                   <div>
                     <p className="text-sm font-black text-slate-700">Pending Assignment</p>
                     <p className="text-xs text-slate-400 mt-1">
-                      A mentor will be assigned by the administrator.
+                      A guide will be assigned by the administrator.
                     </p>
                   </div>
                 </div>
@@ -386,7 +388,7 @@ export default function MyProject() {
                     </div>
                     <div className="space-y-2 pt-1">
                       {[
-                        { label: "Role", value: "Mentor" },
+                        { label: "Role", value: project?.guide ? "Project Guide" : "Mentor" },
                         { label: "Email", value: mentorContact.email || "-" },
                         { label: "Department", value: mentorContact.department || "-" },
                       ].map((row) => (
@@ -404,7 +406,7 @@ export default function MyProject() {
         </div>
 
         <section className="glass-card-strong p-4 sm:p-6">
-          <SectionHead icon="checklist" title="Workflow Checklist" />
+          <SectionHead icon="checklist" title="Project Timeline Checklist" />
           <div className="relative">
             <div className="absolute left-[17px] top-6 bottom-6 w-px bg-slate-100" />
             <div className="space-y-5">

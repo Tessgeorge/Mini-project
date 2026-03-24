@@ -1,8 +1,4 @@
 const EDITABLE_ROLES = ["Guide", "Coordinator"];
-const ROLE_LABELS = {
-  Guide: "Guide Mentor",
-  Coordinator: "Coordinator",
-};
 
 export default function EditRoleModal({
   mentor,
@@ -38,7 +34,7 @@ export default function EditRoleModal({
                 onChange={() => onToggleRole(role)}
                 className="size-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500"
               />
-              <span>{ROLE_LABELS[role] || role}</span>
+              <span>{role}</span>
             </label>
           ))}
         </div>

@@ -13,8 +13,8 @@ export default function AllocationSummary({ stats }) {
       <SummaryCard label="Total Teams" value={stats.totalTeams} borderClass="border-t-teal-500" />
       <SummaryCard label="Assigned Teams" value={stats.assignedTeams} borderClass="border-t-emerald-500" />
       <SummaryCard label="Unassigned Teams" value={stats.unassignedTeams} borderClass="border-t-rose-500" />
-      <SummaryCard label="Total Mentors" value={stats.totalGuides} borderClass="border-t-sky-500" />
-      <SummaryCard label="Fully Occupied Mentors" value={stats.fullyOccupiedGuides} borderClass="border-t-amber-500" />
+      <SummaryCard label="Total Guides" value={stats.totalGuides} borderClass="border-t-sky-500" />
+      <SummaryCard label="Fully Occupied Guides" value={stats.fullyOccupiedGuides} borderClass="border-t-amber-500" />
     </section>
   );
 }
