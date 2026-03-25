@@ -15,7 +15,7 @@ export default function Sidebar({
 
   return (
     <>
-      <aside className="glass-sidebar w-64 flex flex-col justify-between p-6 fixed h-full z-20 hidden md:flex">
+      <aside className="glass-sidebar w-64 flex flex-col justify-between p-6 fixed inset-y-0 left-0 h-[100dvh] z-20 hidden md:flex overflow-hidden">
         <div className="flex flex-col gap-8">
           <div className="flex items-center gap-3">
             <div

@@ -2,6 +2,9 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import TeamWorkspace from "./Teamworkspace";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../config/supabaseClient";
+import AppFrame from "../components/AppFrame";
+import AppSidebar from "../components/Sidebar";
+import AppTopBar from "../components/TopBar";
 import ProfileMenu from "../components/ProfileMenu";
 import Modal from "../components/Modal";
 import MyClass from "./MyClass";
@@ -1290,63 +1293,92 @@ export default function MentorDashboard() {
     setMyClassData(await loadCoordinatorClassData(coordinatorClassId));
   };
 
-  const handleSignOut = async () => { await supabase.auth.signOut(); navigate("/"); };
+  const handleSignOut = async () => { await supabase.auth.signOut(); navigate("/signin"); };
+  const mentorNavItems = isCoordinatorWithClass
+    ? [
+        { id: "overview", label: "Dashboard", icon: "dashboard" },
+        { id: "teams", label: "Teams", icon: "groups" },
+        { id: "evaluation", label: "Evaluations", icon: "grading" },
+        { id: "my-class", label: "My Class", icon: "apartment" },
+      ]
+    : [
+        { id: "overview", label: "Dashboard", icon: "dashboard" },
+        { id: "teams", label: "Teams", icon: "groups" },
+        { id: "evaluation", label: "Evaluations", icon: "grading" },
+      ];
+  const activeNavItem = active.startsWith("my-class") ? "my-class" : active;
+  const activeTitle = active === "teams"
+    ? "Assigned Teams"
+    : active === "evaluation"
+      ? "Evaluation Center"
+      : active.startsWith("my-class")
+        ? "My Class"
+        : "Mentor Dashboard";
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
-      <Sidebar active={active} setActive={setActive} onSignOut={handleSignOut} showMyClass={isCoordinatorWithClass} />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="relative">
-          <Topbar
-            active={active}
-            mentorName={mentorProfile?.full_name}
-            showMyClass={isCoordinatorWithClass}
-            onProfileClick={() => setShowProfileMenu(v => !v)}
+    <AppFrame
+      sidebar={(
+        <AppSidebar
+          navItems={mentorNavItems}
+          activeItem={activeNavItem}
+          onNavigate={(next) => setActive(next === "my-class" ? "my-class-overview" : next)}
+          onLogout={handleSignOut}
+          portalSubtitle="Mentor Portal"
+          showMobileNav={false}
+        />
+      )}
+      header={(
+        <AppTopBar
+          title={activeTitle}
+          subtitle="Home"
+          profile={{ full_name: mentorProfile?.full_name || "Mentor" }}
+          onProfileClick={() => setShowProfileMenu(v => !v)}
+          showSearch={false}
+          notificationCount={0}
+        />
+      )}
+      headerOverlay={showProfileMenu ? (
+        <div className="fixed top-14 right-2 sm:right-6 md:right-8 z-50">
+          <ProfileMenu
+            profile={mentorProfile}
+            isOpen={showProfileMenu}
+            onClose={() => setShowProfileMenu(false)}
+            onLogout={handleSignOut}
+            onEditProfile={() => { setShowProfileMenu(false); setShowProfileEditor(true); }}
+            roleLabel="Mentor"
+            roleIcon="school"
+            infoItems={[
+              { label: "Full Name", value: mentorProfile?.full_name },
+              { label: "Email", value: mentorProfile?.email },
+              { label: "Role", value: "Mentor" },
+              { label: "Department", value: mentorProfile?.department || "-" },
+            ]}
           />
-          {showProfileMenu && (
-            <div className="fixed top-14 right-2 sm:right-6 md:right-8 z-50">
-              <ProfileMenu
-                profile={mentorProfile}
-                isOpen={showProfileMenu}
-                onClose={() => setShowProfileMenu(false)}
-                onLogout={handleSignOut}
-                onEditProfile={() => { setShowProfileMenu(false); setShowProfileEditor(true); }}
-                roleLabel="Mentor"
-                roleIcon="school"
-                infoItems={[
-                  { label: "Full Name", value: mentorProfile?.full_name },
-                  { label: "Email", value: mentorProfile?.email },
-                  { label: "Role", value: "Mentor" },
-                  { label: "Department", value: mentorProfile?.department || "-" },
-                ]}
-              />
-            </div>
-          )}
         </div>
-        <main className="flex-1 overflow-y-auto p-8">
-          {active === "overview" && (
-            <OverviewTab projects={projects} evaluations={evaluations} milestones={milestones}
-              recentActivity={recentActivity} loading={loading} onNavigate={setActive} onSubmitReview={handleSubmitReview} />
-          )}
-          {active === "teams" && (
-            <TeamsTab projects={projects} evaluations={evaluations} loading={loading}
-              onStartReview={handleSubmitReview} mentorId={mentorProfile?.id} mentorName={mentorProfile?.full_name} />
-          )}
-          {active === "evaluation" && (
-            <EvaluationTab projects={projects} evaluations={evaluations} setEvaluations={setEvaluations}
-              mentorId={mentorProfile?.id} loading={loading} />
-          )}
-          {/* ── My Class sub-pages ── */}
-          {["my-class-overview","my-class-teams","my-class-submissions","my-class-reviews"].includes(active) && isCoordinatorWithClass && (
-            <MyClass
-              classData={myClassData}
-              loading={myClassLoading}
-              onSaveStudentDeadline={handleSaveStudentDeadline}
-              activeSubPage={active.replace("my-class-", "")}
-              onNavigate={(sub) => setActive("my-class-" + sub)}
-            />
-          )}
-        </main>
+      ) : null}
+    >
+      <div className="p-4 md:p-6 lg:p-8 space-y-6">
+        {active === "overview" && (
+          <OverviewTab projects={projects} evaluations={evaluations} milestones={milestones}
+            recentActivity={recentActivity} loading={loading} onNavigate={setActive} onSubmitReview={handleSubmitReview} />
+        )}
+        {active === "teams" && (
+          <TeamsTab projects={projects} evaluations={evaluations} loading={loading}
+            onStartReview={handleSubmitReview} mentorId={mentorProfile?.id} mentorName={mentorProfile?.full_name} />
+        )}
+        {active === "evaluation" && (
+          <EvaluationTab projects={projects} evaluations={evaluations} setEvaluations={setEvaluations}
+            mentorId={mentorProfile?.id} loading={loading} />
+        )}
+        {["my-class-overview","my-class-teams","my-class-submissions","my-class-reviews"].includes(active) && isCoordinatorWithClass && (
+          <MyClass
+            classData={myClassData}
+            loading={myClassLoading}
+            onSaveStudentDeadline={handleSaveStudentDeadline}
+            activeSubPage={active.replace("my-class-", "")}
+            onNavigate={(sub) => setActive("my-class-" + sub)}
+          />
+        )}
       </div>
 
       {showProfileEditor && mentorProfile && (
@@ -1358,6 +1390,6 @@ export default function MentorDashboard() {
           startEditing
         />
       )}
-    </div>
+    </AppFrame>
   );
 }

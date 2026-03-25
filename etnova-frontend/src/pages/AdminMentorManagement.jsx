@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import supabase from "../lib/supabase";
 import useAdminAuth from "../hooks/useAdminAuth";
+import AppFrame from "../components/AppFrame";
 import Sidebar from "../components/admin/Sidebar";
 import TopNavbar from "../components/admin/TopNavbar";
 import MentorStatCard from "../components/admin/MentorStatCard";
@@ -530,21 +531,23 @@ export default function AdminMentorManagement() {
     : 0;
 
   return (
-    <div className="min-h-screen etnova-bg">
-      <Sidebar
-        activeItem="mentor-management"
-        onSignOut={handleSignOut}
-        onNavigate={handleNavigate}
-      />
-
-      <main className="flex-1 min-h-0 md:ml-64 h-[100dvh] overflow-y-auto">
+    <AppFrame
+      sidebar={(
+        <Sidebar
+          activeItem="mentor-management"
+          onSignOut={handleSignOut}
+          onNavigate={handleNavigate}
+        />
+      )}
+      header={(
         <TopNavbar
           adminName={ADMIN_NAME}
           academicYearLabel="2026 - S6 Mini Project"
           pageTitle="Mentor Management"
         />
-
-        <div className="p-4 md:p-6 lg:p-8 space-y-6">
+      )}
+    >
+      <div className="p-4 md:p-6 lg:p-8 space-y-6">
           <section className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
             <div>
               <h1 className="text-2xl font-semibold text-slate-800">Mentor Management</h1>
@@ -652,8 +655,7 @@ export default function AdminMentorManagement() {
               </div>
             ) : null}
           </section>
-        </div>
-      </main>
+      </div>
 
       <EditRoleModal
         mentor={editingMentor}
@@ -670,6 +672,6 @@ export default function AdminMentorManagement() {
         }}
         onSave={handleSaveRoles}
       />
-    </div>
+    </AppFrame>
   );
 }

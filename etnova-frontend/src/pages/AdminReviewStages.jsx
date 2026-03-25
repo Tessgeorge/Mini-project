@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import supabase from "../lib/supabase";
 import useAdminAuth from "../hooks/useAdminAuth";
 import { emitAdminDataUpdated } from "../utils/adminLiveSync";
+import AppFrame from "../components/AppFrame";
 import Sidebar from "../components/admin/Sidebar";
 import TopNavbar from "../components/admin/TopNavbar";
 
@@ -204,16 +205,16 @@ export default function AdminReviewStages() {
   };
 
   return (
-    <div className="min-h-screen etnova-bg">
-      <Sidebar activeItem="review-management" onSignOut={handleSignOut} onNavigate={handleNavigate} />
-
-      <main className="flex-1 min-h-0 md:ml-64 h-[100dvh] overflow-y-auto">
+    <AppFrame
+      sidebar={<Sidebar activeItem="review-management" onSignOut={handleSignOut} onNavigate={handleNavigate} />}
+      header={(
         <TopNavbar
           adminName="Meenakshi"
           academicYearLabel="2026 - S6 Mini Project"
           pageTitle="Review Stages"
         />
-
+      )}
+    >
       <section className="p-6">
       <div className="max-w-7xl mx-auto bg-white/90 rounded-2xl shadow-sm border border-slate-200/70 p-6 space-y-6">
         <div>
@@ -274,7 +275,6 @@ export default function AdminReviewStages() {
         </div>
       </div>
       </section>
-      </main>
-    </div>
+    </AppFrame>
   );
 }
