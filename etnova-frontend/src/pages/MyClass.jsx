@@ -55,11 +55,30 @@ function sortReviewStages(rows) {
       student_deadline_set_by_coordinator: Boolean(cur?.student_deadline_set_by_coordinator || row?.student_deadline_set_by_coordinator),
     });
   }
-  return REVIEW_STAGE_ORDER.map((stageName, index) => {
-    const matched = grouped.get(stageName);
-    if (matched) return { ...matched, stage_name: stageName, stage_order: Number.isFinite(Number(matched?.stage_order)) ? Number(matched.stage_order) : index, is_active: Boolean(matched?.is_active), student_deadline_set_by_coordinator: Boolean(matched?.student_deadline_set_by_coordinator) };
-    return { id: `canonical-${index}`, stage_name: stageName, stage_order: index, deadline: null, coordinator_deadline: null, is_active: false, student_deadline_set_by_coordinator: false };
-  }).sort((a, b) => {
+
+  const normalizedRows = Array.from(grouped.entries()).map(([stageName, matched]) => ({
+    ...matched,
+    stage_name: stageName,
+    stage_order: Number.isFinite(Number(matched?.stage_order)) ? Number(matched.stage_order) : reviewStageOrderIndex(stageName),
+    is_active: Boolean(matched?.is_active),
+    student_deadline_set_by_coordinator: Boolean(matched?.student_deadline_set_by_coordinator),
+  }));
+
+  const missingCanonical = REVIEW_STAGE_ORDER
+    .filter((stageName) => !grouped.has(stageName))
+    .map((stageName, index) => ({
+      id: `canonical-${index}`,
+      stage_name: stageName,
+      stage_order: reviewStageOrderIndex(stageName),
+      deadline: null,
+      coordinator_deadline: null,
+      is_active: false,
+      is_completed: false,
+      is_locked: false,
+      student_deadline_set_by_coordinator: false,
+    }));
+
+  return [...normalizedRows, ...missingCanonical].sort((a, b) => {
     const oa = Number.isFinite(Number(a?.stage_order)) ? Number(a.stage_order) : reviewStageOrderIndex(a?.stage_name);
     const ob = Number.isFinite(Number(b?.stage_order)) ? Number(b.stage_order) : reviewStageOrderIndex(b?.stage_name);
     return oa !== ob ? oa - ob : String(normalizeReviewStageName(a?.stage_name)).localeCompare(String(normalizeReviewStageName(b?.stage_name)));

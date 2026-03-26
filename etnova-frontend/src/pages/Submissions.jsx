@@ -7,10 +7,11 @@ import { getStatusMeta } from '../constants/statusConfig';
 const DOC_TYPES = [
     { value: 'abstract', label: 'Abstract' },
     { value: 'srs', label: 'SRS (Software Requirements Specification)' },
-    { value: 'proposal', label: 'Project Proposal' },
-    { value: 'report', label: 'Progress Report' },
-    { value: 'final_report', label: 'Final Report' },
-    { value: 'presentation', label: 'Presentation / PPT' },
+    { value: 'sdd', label: 'SDD (Software Design Document)' },
+    { value: 'zeroth_review_ppt', label: 'Zeroth Review PPT / Presentation' },
+    { value: 'first_review_ppt', label: '1st Review PPT / Presentation' },
+    { value: 'final_review_ppt', label: 'Final Review PPT / Presentation' },
+    { value: 'project_final_report', label: 'Project Final Report' },
 ];
 
 const GUIDELINES = [
@@ -36,8 +37,24 @@ function StatusBadge({ status }) {
 
 /* ─── Doc type label ────────────────────────────────────────────────── */
 function DocTypeLabel({ type }) {
-    const icons = { abstract: 'description', proposal: 'assignment', report: 'article', final_report: 'task_alt', presentation: 'slideshow', srs: 'list_alt' };
-    const labels = { abstract: 'Abstract', proposal: 'Proposal', report: 'Progress Report', final_report: 'Final Report', presentation: 'Presentation', srs: 'SRS' };
+    const icons = {
+        abstract: 'description',
+        srs: 'list_alt',
+        sdd: 'schema',
+        zeroth_review_ppt: 'slideshow',
+        first_review_ppt: 'slideshow',
+        final_review_ppt: 'slideshow',
+        project_final_report: 'task_alt',
+    };
+    const labels = {
+        abstract: 'Abstract',
+        srs: 'SRS',
+        sdd: 'SDD',
+        zeroth_review_ppt: 'Zeroth Review PPT / Presentation',
+        first_review_ppt: '1st Review PPT / Presentation',
+        final_review_ppt: 'Final Review PPT / Presentation',
+        project_final_report: 'Project Final Report',
+    };
     return (
         <div className="flex items-center gap-2.5">
             <div className="size-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: 'rgba(0,196,180,0.10)' }}>
@@ -157,7 +174,7 @@ export default function Submissions() {
         .map(t => getLatestDoc(t.value))
         .filter(Boolean)
         .sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
-    const ideaApproved = Boolean(project?.approved_idea_id) || String(project?.status || '').toLowerCase() === 'approved';
+    const ideaApproved = Boolean(project?.approved_idea_id);
     const approvalFeedbackEntries = (project?.evaluations || [])
         .filter((entry) => entry.evaluation_type === 'approval_feedback')
         .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));

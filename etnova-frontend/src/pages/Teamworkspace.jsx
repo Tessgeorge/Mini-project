@@ -3,13 +3,18 @@ import { supabase } from "../config/supabaseClient";
 import { apiRequest } from "../config/apiClient";
 import MentorDiscussion from "./MentorDiscussion";
 import MentorIdeaQueue from "../components/MentorIdeaQueue";
+import ProjectDiaryPanel from "../components/ProjectDiaryPanel";
 import {
   EVALUATION_STAGE_OPTIONS,
   WORKFLOW_TIMELINE,
+  getWorkflowActionLabel,
+  getWorkflowDestination,
   getWorkflowSnapshot,
   getWorkflowStageMeta,
+  normalizeWorkflowStage,
 } from "../constants/workflowConfig";
 import { getStatusMeta } from "../constants/statusConfig";
+import { ADMIN_DATA_SYNC_KEY } from "../utils/adminLiveSync";
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 const Ic = {
@@ -65,6 +70,25 @@ function normalizeTeamEvaluationRow(row) {
     phase: getWorkflowStageMeta(row.phase || row.evaluation_type).label,
     score: row.score ?? row.obtained_marks ?? 0,
   };
+}
+
+function toLocalDateKey(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function daysUntil(dateStr) {
+  return Math.ceil((new Date(dateStr) - new Date()) / 86400000);
+}
+
+function fmtShort(d) {
+  if (!d) return "-";
+  return new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
 async function insertTeamEvaluation(mentorId, payload) {
@@ -649,22 +673,181 @@ function MentorAnnouncements({ projId, mentorId, mentorName }) {
 }
 
 // ─── 📅 Upcoming Deadlines ────────────────────────────────────────────────────
-function UpcomingDeadlines({ phaseIdx, milestoneDates, reviewDeadlines = [] }) {
+function UpcomingDeadlines({ phaseIdx, milestoneDates, reviewDeadlines = [], onNavigateTab }) {
   const today = new Date();
   const [view, setView] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [active, setActive] = useState(null);
   const classDeadlineItems = (reviewDeadlines || [])
-    .filter((item) => Boolean(item?.deadline))
-    .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime())
-    .slice(0, 4);
+    .filter((item) => Boolean(item?.date))
+    .sort((a, b) => new Date(a.deadline || a.date).getTime() - new Date(b.deadline || b.date).getTime());
+
+  const calendarFirstDOW = new Date(view.y, view.m, 1).getDay();
+  const calendarTotalDays = new Date(view.y, view.m + 1, 0).getDate();
+  const calendarMonthLabel = new Date(view.y, view.m, 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
+  const calendarTodayKey = today.toISOString().slice(0, 10);
+  const deadlineMap = classDeadlineItems.reduce((acc, item) => {
+    if (!acc[item.date]) acc[item.date] = [];
+    acc[item.date].push(item);
+    return acc;
+  }, {});
+  const legendDeadlines = classDeadlineItems.filter((deadline, index, arr) => (
+    arr.findIndex((item) => `${item.stage}-${item.date}` === `${deadline.stage}-${deadline.date}`) === index
+  ));
+  const remainingMilestones = Math.max(0, PHASES.length - phaseIdx);
+
+  const keyForDay = (day) => `${view.y}-${String(view.m + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const goPrevMonth = () => {
+    setView((v) => {
+      const d = new Date(v.y, v.m - 1, 1);
+      return { y: d.getFullYear(), m: d.getMonth() };
+    });
+    setActive(null);
+  };
+  const goNextMonth = () => {
+    setView((v) => {
+      const d = new Date(v.y, v.m + 1, 1);
+      return { y: d.getFullYear(), m: d.getMonth() };
+    });
+    setActive(null);
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="flex items-center gap-2.5 px-5 py-4 border-b border-gray-100">
+        <div className="w-8 h-8 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-base">📅</div>
+        <p className="font-bold text-gray-800 text-sm">Upcoming Deadlines</p>
+        <span className="ml-auto text-xs text-gray-400">
+          {classDeadlineItems.length > 0 ? `${classDeadlineItems.length} class deadlines` : `${remainingMilestones} left`}
+        </span>
+      </div>
+
+      <div className="p-5">
+        <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+          <div className="mb-4 flex items-center justify-between">
+            <button onClick={goPrevMonth} className="size-7 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 hover:bg-slate-50 transition-all">
+              <span className="material-symbols-outlined text-sm">chevron_left</span>
+            </button>
+            <p className="text-xs font-black text-slate-800">{calendarMonthLabel}</p>
+            <button onClick={goNextMonth} className="size-7 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 hover:bg-slate-50 transition-all">
+              <span className="material-symbols-outlined text-sm">chevron_right</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-7 mb-2">
+            {["S", "M", "T", "W", "T", "F", "S"].map((d, index) => (
+              <p key={`${d}-${index}`} className="text-center text-[10px] font-bold text-slate-400">{d}</p>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7 gap-y-1">
+            {Array.from({ length: calendarFirstDOW }).map((_, i) => <div key={`e${i}`} />)}
+            {Array.from({ length: calendarTotalDays }).map((_, i) => {
+              const day = i + 1;
+              const dateKey = keyForDay(day);
+              const dayDeadlines = deadlineMap[dateKey] || [];
+              const primaryDeadline = dayDeadlines[0];
+              const isToday = dateKey === calendarTodayKey;
+              const isPast = dateKey < calendarTodayKey;
+              const isActive = active === dateKey;
+              const hasDeadline = dayDeadlines.length > 0;
+
+              return (
+                <div key={day} className="relative flex flex-col items-center">
+                  <button
+                    type="button"
+                    onClick={() => hasDeadline && setActive(isActive ? null : dateKey)}
+                    className={`size-7 rounded-lg text-[11px] font-bold flex items-center justify-center transition-all ${
+                      isToday
+                        ? "bg-slate-900 text-white"
+                        : hasDeadline
+                          ? "cursor-pointer hover:scale-105 font-black"
+                          : "text-slate-500 hover:bg-slate-50"
+                    }`}
+                    style={hasDeadline ? {
+                      backgroundColor: "rgba(0,210,196,0.15)",
+                      color: isPast ? "#94a3b8" : "#00897B",
+                      outline: isActive ? "2px solid #00D2C4" : "1.5px solid rgba(0,210,196,0.3)",
+                    } : {}}
+                  >
+                    {day}
+                  </button>
+                  {hasDeadline && <div className="mt-0.5 size-1 rounded-full" style={{ backgroundColor: isPast ? "#cbd5e1" : "#00D2C4" }} />}
+
+                  {isActive && hasDeadline && (
+                    <div className="absolute top-9 left-1/2 -translate-x-1/2 z-30 w-56 bg-white border border-slate-200 rounded-xl shadow-xl p-3 text-left space-y-2">
+                      <div className="text-[10px] text-slate-500 font-semibold">Due {fmtShort(primaryDeadline?.deadline || primaryDeadline?.date)}</div>
+                      {dayDeadlines.map((dl) => {
+                        const stageKey = normalizeWorkflowStage(dl?.stageKey || dl?.stage);
+                        const actionTab = getWorkflowDestination(stageKey, "mentor");
+                        const actionLabel = getWorkflowActionLabel(stageKey, "mentor");
+                        return (
+                          <div key={`${dl.stage}-${dl.deadline || dl.date}`} className="rounded-lg border border-slate-100 p-2">
+                            <div className="flex items-center gap-1.5">
+                              <span className="material-symbols-outlined text-sm" style={{ color: "#00D2C4" }}>event</span>
+                              <p className="text-[11px] font-black text-slate-900">{dl.stage}</p>
+                            </div>
+                            {!isPast && (
+                              <p className="text-[10px] font-bold mt-1" style={{ color: "#00897B" }}>
+                                {daysUntil(dl.deadline || dl.date)} day{daysUntil(dl.deadline || dl.date) !== 1 ? "s" : ""} left
+                              </p>
+                            )}
+                            {isPast && <p className="text-[10px] text-slate-400 mt-1">Deadline passed</p>}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onNavigateTab?.(actionTab);
+                                setActive(null);
+                              }}
+                              className="mt-2 w-full py-1.5 rounded-lg text-[10px] font-black text-black transition-all hover:opacity-90"
+                              style={{ backgroundColor: "#00D2C4" }}
+                            >
+                              {actionLabel}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {legendDeadlines.length > 0 ? (
+            <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap gap-x-3 gap-y-1">
+              {legendDeadlines.map((dl) => (
+                <div key={`${dl.stage}-${dl.date}`} className="flex items-center gap-1">
+                  <div className="size-1.5 rounded-full" style={{ backgroundColor: "#00D2C4" }} />
+                  <span className="text-[10px] text-slate-400">{dl.stage}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-white px-3 py-2.5">
+              <p className="text-xs text-slate-400">No coordinator-set class deadlines are available yet for this team.</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="px-5 py-3 bg-gray-50 border-t border-gray-100">
+        <p className="text-xs text-gray-400 flex items-center gap-1.5">
+          <Ic.Info />
+          {classDeadlineItems.length > 0
+            ? "Coordinator-set student deadlines for this project's class"
+            : (milestoneDates?.some(Boolean) ? "Deadlines set by admin" : "No deadlines set yet - contact admin")} · {remainingMilestones} milestone{remainingMilestones !== 1 ? "s" : ""} remaining
+        </p>
+      </div>
+    </div>
+  );
 
   if (classDeadlineItems.length > 0) {
     const firstDOW = new Date(view.y, view.m, 1).getDay();
     const totalDays = new Date(view.y, view.m + 1, 0).getDate();
     const monthLabel = new Date(view.y, view.m, 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
-    const todayKey = today.toISOString().slice(0, 10);
+    const todayKey = toLocalDateKey(today);
     const deadlineMap = classDeadlineItems.reduce((acc, item) => {
-      const key = item.deadline.slice(0, 10);
+      const key = toLocalDateKey(item.deadline);
       if (!acc[key]) acc[key] = [];
       acc[key].push(item);
       return acc;
@@ -888,8 +1071,14 @@ function TabOverview({ proj, evaluations, members, documents, onAddReview, onNav
         <div className="xl:col-span-2 space-y-5">
           {/* 6-phase milestone timeline */}
           <MilestoneTimeline phaseIdx={phaseIdx} onTabSwitch={onNavigateTab} milestoneDates={milestoneDates} />
-          {/* Action Required */}
-          <MentorAnnouncements projId={proj.id} mentorId={mentorId} mentorName={mentorName} />
+          <ProjectDiaryPanel
+            project={{ ...proj, team_members: members }}
+            currentUserId={mentorId}
+            currentUserName={mentorName}
+            mentorId={mentorId}
+            mentorName={mentorName}
+            role="mentor"
+          />
         </div>
 
         {/* Right 1/3 */}
@@ -914,9 +1103,10 @@ function TabOverview({ proj, evaluations, members, documents, onAddReview, onNav
           </div>
 
           {/* Upcoming Deadlines */}
-          <UpcomingDeadlines phaseIdx={phaseIdx} milestoneDates={milestoneDates} reviewDeadlines={reviewDeadlines} />
+          <UpcomingDeadlines phaseIdx={phaseIdx} milestoneDates={milestoneDates} reviewDeadlines={reviewDeadlines} onNavigateTab={onNavigateTab} />
         </div>
       </div>
+
     </div>
   );
 }
@@ -1461,6 +1651,32 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
   const members = proj.team_members || [];
   const markingEnabled = true;
 
+  const mapClassReviewDeadlines = (rows) => {
+    const latestByStage = new Map();
+    (rows || [])
+      .filter((row) => Boolean(row?.deadline) && !row?.is_locked)
+      .forEach((row) => {
+        const stageLabel = getWorkflowStageMeta(row.stage_name).label;
+        const prev = latestByStage.get(stageLabel);
+        const rowTs = new Date(row.deadline || 0).getTime();
+        const prevTs = prev ? new Date(prev.deadline || 0).getTime() : -1;
+        if (!prev || rowTs > prevTs || (rowTs === prevTs && String(row.id || "") > String(prev.id || ""))) {
+          latestByStage.set(stageLabel, row);
+        }
+      });
+
+    return Array.from(latestByStage.values())
+      .map((row) => ({
+        id: row.id,
+        stageKey: normalizeWorkflowStage(row.stage_name),
+        stage: getWorkflowStageMeta(row.stage_name).label,
+        deadline: row.deadline,
+        date: toLocalDateKey(row.deadline),
+      }))
+      .filter((row) => Boolean(row.date))
+      .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
+  };
+
   // Supabase fetch
   useEffect(() => {
     setLoading(true);
@@ -1471,7 +1687,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
       proj.class_id
         ? supabase
           .from("review_stages")
-          .select("id, stage_name, deadline, student_deadline_set_by_coordinator")
+          .select("id, stage_name, deadline, student_deadline_set_by_coordinator, is_locked")
           .eq("class_id", proj.class_id)
           .eq("student_deadline_set_by_coordinator", true)
           .not("deadline", "is", null)
@@ -1487,14 +1703,50 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
       const dates = Array(WORKFLOW_TIMELINE.length).fill(null);
       (ms.data || []).forEach(r => { dates[r.phase_index] = r.due_date; });
       setMilestoneDates(dates);
-      setReviewDeadlines((stages.data || []).map((row) => ({
-        id: row.id,
-        title: `${proj.class_name || proj.batch || "Class"} - ${getWorkflowStageMeta(row.stage_name).label}`,
-        deadline: row.deadline,
-      })));
+      setReviewDeadlines(mapClassReviewDeadlines(stages.data || []));
       setLoading(false);
     });
   }, [proj.batch, proj.class_id, proj.class_name, proj.id]);
+
+  useEffect(() => {
+    if (!proj.class_id) return undefined;
+
+    const refreshClassDeadlines = async () => {
+      const { data } = await supabase
+        .from("review_stages")
+        .select("id, stage_name, deadline, student_deadline_set_by_coordinator, is_locked")
+        .eq("class_id", proj.class_id)
+        .eq("student_deadline_set_by_coordinator", true)
+        .not("deadline", "is", null)
+        .order("deadline", { ascending: true });
+      setReviewDeadlines(mapClassReviewDeadlines(data || []));
+    };
+
+    const channel = supabase
+      .channel(`guide-class-deadlines-${proj.class_id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "review_stages", filter: `class_id=eq.${proj.class_id}` },
+        async () => {
+          await refreshClassDeadlines();
+        }
+      )
+      .subscribe();
+
+    const onAdminDataUpdated = () => { refreshClassDeadlines(); };
+    const onStorage = (event) => {
+      if (event.key === ADMIN_DATA_SYNC_KEY) refreshClassDeadlines();
+    };
+
+    window.addEventListener("admin-data-updated", onAdminDataUpdated);
+    window.addEventListener("storage", onStorage);
+
+    return () => {
+      supabase.removeChannel(channel);
+      window.removeEventListener("admin-data-updated", onAdminDataUpdated);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [proj.class_id, proj.class_name, proj.batch]);
 
   const refreshProjectStatus = async () => {
     const { data } = await supabase
@@ -1603,10 +1855,6 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
                   className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 text-sm font-bold transition-all"
                 >
                   <Ic.Ideas /> Review Ideas
-                </button>
-                <button onClick={() => setShowReview(true)}
-                  className="flex items-center justify-center gap-2 bg-teal-400 hover:bg-teal-300 active:scale-95 text-slate-900 text-sm font-bold px-5 py-2.5 rounded-xl transition-all">
-                  <Ic.Star /> Add Review
                 </button>
               </div>
             )}

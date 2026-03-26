@@ -11,6 +11,7 @@ import supabase from "../config/supabaseClient";
 import { apiRequest } from "../config/apiClient";
 import { fetchStudentBootstrapData, invalidateStudentBootstrapCache } from "../services/studentData";
 import { STUDENT_PAGE_ROUTE_BY_ID, STUDENT_QUICK_NAV_ITEMS } from "../constants/studentNavigation";
+import { ADMIN_DATA_SYNC_KEY } from "../utils/adminLiveSync";
 import {
   getWorkflowActionLabel,
   getWorkflowDestination,
@@ -48,7 +49,12 @@ function fmtRelative(d) {
 
 function toDateKey(value) {
   if (!value) return "";
-  return String(value).slice(0, 10);
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 function isRejectedStatus(status) {
@@ -115,8 +121,21 @@ function DeadlineCalendar({ deadlines, onNavigateTab }) {
 
   const dlMap = useMemo(() => {
     const map = {};
-    deadlines.forEach(dl => { map[dl.date] = dl; });
+    deadlines.forEach((dl) => {
+      if (!map[dl.date]) map[dl.date] = [];
+      map[dl.date].push(dl);
+    });
     return map;
+  }, [deadlines]);
+
+  const legendDeadlines = useMemo(() => {
+    const seen = new Set();
+    return deadlines.filter((deadline) => {
+      const key = `${deadline.stage}-${deadline.date}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }, [deadlines]);
 
   function key(day) {
@@ -160,24 +179,23 @@ function DeadlineCalendar({ deadlines, onNavigateTab }) {
         {Array.from({ length: totalDays }).map((_, i) => {
           const day = i + 1;
           const k = key(day);
-          const dl = dlMap[k];
-          const stageKey = normalizeWorkflowStage(dl?.stageKey || dl?.stage);
-          const actionTab = dl ? getWorkflowDestination(stageKey, "student") : "submissions";
-          const actionLabel = dl ? getWorkflowActionLabel(stageKey, "student") : "Open";
+          const dayDeadlines = dlMap[k] || [];
+          const primaryDeadline = dayDeadlines[0];
           const isToday = k === todayKey;
           const isPast = k < todayKey;
           const isActive = active === k;
+          const hasDeadline = dayDeadlines.length > 0;
 
           return (
             <div key={day} className="relative flex flex-col items-center">
               <button
                 type="button"
-                onClick={() => dl && setActive(isActive ? null : k)}
+                onClick={() => hasDeadline && setActive(isActive ? null : k)}
                 className={`size-7 rounded-lg text-[11px] font-bold flex items-center justify-center transition-all
                   ${isToday ? "bg-slate-900 text-white" :
-                    dl ? "cursor-pointer hover:scale-105 font-black" :
+                    hasDeadline ? "cursor-pointer hover:scale-105 font-black" :
                       "text-slate-500 hover:bg-slate-50"}`}
-                style={dl ? {
+                style={hasDeadline ? {
                   backgroundColor: "rgba(0,210,196,0.15)",
                   color: isPast ? "#94a3b8" : "#00897B",
                   outline: isActive ? "2px solid #00D2C4" : "1.5px solid rgba(0,210,196,0.3)"
@@ -185,30 +203,42 @@ function DeadlineCalendar({ deadlines, onNavigateTab }) {
               >
                 {day}
               </button>
-              {dl && <div className="mt-0.5 size-1 rounded-full" style={{ backgroundColor: isPast ? "#cbd5e1" : "#00D2C4" }} />}
+              {hasDeadline && <div className="mt-0.5 size-1 rounded-full" style={{ backgroundColor: isPast ? "#cbd5e1" : "#00D2C4" }} />}
 
               {/* Popover */}
-              {isActive && dl && (
-                <div className="absolute top-9 left-1/2 -translate-x-1/2 z-30 w-44 bg-white border border-slate-200 rounded-xl shadow-xl p-3 text-left">
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    <span className="material-symbols-outlined text-sm" style={{ color: "#00D2C4" }}>event</span>
-                    <p className="text-[11px] font-black text-slate-900">{dl.stage}</p>
-                  </div>
-                  <p className="text-[10px] text-slate-500">Due {fmtShort(dl.date)}</p>
-                  {!isPast && (
-                    <p className="text-[10px] font-bold mt-1" style={{ color: "#00897B" }}>
-                      {daysUntil(dl.date)} day{daysUntil(dl.date) !== 1 ? "s" : ""} left
-                    </p>
-                  )}
-                  {isPast && <p className="text-[10px] text-slate-400 mt-1">Deadline passed</p>}
-                  <button
-                    type="button"
-                    onClick={() => onNavigateTab?.(actionTab)}
-                    className="mt-2.5 w-full py-1.5 rounded-lg text-[10px] font-black text-black transition-all hover:opacity-90"
-                    style={{ backgroundColor: "#00D2C4" }}
-                  >
-                    {actionLabel}
-                  </button>
+              {isActive && hasDeadline && (
+                <div className="absolute top-9 left-1/2 -translate-x-1/2 z-30 w-56 bg-white border border-slate-200 rounded-xl shadow-xl p-3 text-left space-y-2">
+                  <div className="text-[10px] text-slate-500 font-semibold">Due {fmtShort(primaryDeadline?.deadline || primaryDeadline?.date)}</div>
+                  {dayDeadlines.map((dl) => {
+                    const stageKey = normalizeWorkflowStage(dl?.stageKey || dl?.stage);
+                    const actionTab = getWorkflowDestination(stageKey, "student");
+                    const actionLabel = getWorkflowActionLabel(stageKey, "student");
+                    return (
+                      <div key={`${dl.stage}-${dl.deadline || dl.date}`} className="rounded-lg border border-slate-100 p-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="material-symbols-outlined text-sm" style={{ color: "#00D2C4" }}>event</span>
+                          <p className="text-[11px] font-black text-slate-900">{dl.stage}</p>
+                        </div>
+                        {!isPast && (
+                          <p className="text-[10px] font-bold mt-1" style={{ color: "#00897B" }}>
+                            {daysUntil(dl.deadline || dl.date)} day{daysUntil(dl.deadline || dl.date) !== 1 ? "s" : ""} left
+                          </p>
+                        )}
+                        {isPast && <p className="text-[10px] text-slate-400 mt-1">Deadline passed</p>}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onNavigateTab?.(actionTab);
+                            setActive(null);
+                          }}
+                          className="mt-2 w-full py-1.5 rounded-lg text-[10px] font-black text-black transition-all hover:opacity-90"
+                          style={{ backgroundColor: "#00D2C4" }}
+                        >
+                          {actionLabel}
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -218,7 +248,7 @@ function DeadlineCalendar({ deadlines, onNavigateTab }) {
 
       {/* Legend */}
       <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap gap-x-3 gap-y-1">
-        {deadlines.map(dl => (
+        {legendDeadlines.map(dl => (
           <div key={`${dl.stage}-${dl.date}`} className="flex items-center gap-1">
             <div className="size-1.5 rounded-full" style={{ backgroundColor: "#00D2C4" }} />
             <span className="text-[10px] text-slate-400">{dl.stage}</span>
@@ -312,22 +342,38 @@ export default function StudentDashboard() {
 
     const { data, error: deadlineError } = await supabase
       .from("review_stages")
-      .select("stage_name, deadline, is_active, is_completed, is_locked, student_deadline_set_by_coordinator")
+      .select("id, class_id, stage_name, deadline, coordinator_deadline, is_locked")
       .eq("class_id", classId)
+      .eq("student_deadline_set_by_coordinator", true)
+      .not("deadline", "is", null)
       .order("deadline", { ascending: true });
 
     if (deadlineError) {
       throw new Error(deadlineError.message || "Failed to load review deadlines.");
     }
 
-    const mappedDeadlines = (data || [])
-      .filter((row) => Boolean(row.student_deadline_set_by_coordinator))
+    const latestByStage = new Map();
+    (data || [])
+      .filter((row) => Boolean(row.deadline) && !row.is_locked)
+      .forEach((row) => {
+        const stageKey = String(row.stage_name || "").trim().toLowerCase();
+        const prev = latestByStage.get(stageKey);
+        const rowTs = new Date(row.deadline || 0).getTime();
+        const prevTs = prev ? new Date(prev.deadline || 0).getTime() : -1;
+        if (!prev || rowTs > prevTs || (rowTs === prevTs && String(row.id || "") > String(prev.id || ""))) {
+          latestByStage.set(stageKey, row);
+        }
+      });
+
+    const mappedDeadlines = Array.from(latestByStage.values())
       .map((row) => ({
         stageKey: normalizeWorkflowStage(row.stage_name),
         stage: getWorkflowStageMeta(row.stage_name).label,
+        deadline: row.deadline,
         date: toDateKey(row.deadline),
       }))
-      .filter((row) => row.date);
+      .filter((row) => row.date)
+      .sort((a, b) => new Date(a.deadline || a.date) - new Date(b.deadline || b.date));
 
     setDeadlines(mappedDeadlines);
   }, []);
@@ -342,6 +388,7 @@ export default function StudentDashboard() {
       setProfile(p);
       setNotifications(initialNotifications);
 
+      const proj = list?.[0] || null;
       let resolvedClassId = p?.class_id || "";
       if (!resolvedClassId && p?.id) {
         const { data: profileRow, error: profileError } = await supabase
@@ -353,10 +400,11 @@ export default function StudentDashboard() {
           resolvedClassId = profileRow?.class_id || "";
         }
       }
+      if (!resolvedClassId && proj?.class_id) {
+        resolvedClassId = proj.class_id;
+      }
       setStudentClassId(resolvedClassId);
       await loadClassDeadlines(resolvedClassId);
-
-      const proj = list?.[0];
       if (!proj?.id) {
         setProject(null);
         setDocuments([]);
@@ -409,6 +457,32 @@ export default function StudentDashboard() {
     };
   }, [loadClassDeadlines, studentClassId]);
 
+  useEffect(() => {
+    if (!studentClassId) return undefined;
+
+    const refreshDeadlines = async () => {
+      try {
+        await loadClassDeadlines(studentClassId);
+      } catch (error) {
+        console.error("Failed to sync deadlines from admin update:", error);
+      }
+    };
+
+    const onAdminDataUpdated = () => {
+      refreshDeadlines();
+    };
+    const onStorage = (event) => {
+      if (event.key === ADMIN_DATA_SYNC_KEY) refreshDeadlines();
+    };
+
+    window.addEventListener("admin-data-updated", onAdminDataUpdated);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("admin-data-updated", onAdminDataUpdated);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [loadClassDeadlines, studentClassId]);
+
   const handleLogout = async () => { await supabase.auth.signOut(); navigate("/signin"); };
 
   // Derived values
@@ -420,10 +494,10 @@ export default function StudentDashboard() {
 
   const nextDeadline = useMemo(() => {
     const now = new Date();
-    return deadlines.find(d => new Date(d.date) >= now) || null;
+    return deadlines.find(d => new Date(d.deadline || d.date) >= now) || null;
   }, [deadlines]);
 
-  const daysLeft = nextDeadline ? daysUntil(nextDeadline.date) : null;
+  const daysLeft = nextDeadline ? daysUntil(nextDeadline.deadline || nextDeadline.date) : null;
   const nextDeadlineActionTab = nextDeadline ? getWorkflowDestination(nextDeadline.stageKey, "student") : "submissions";
   const nextDeadlineActionLabel = nextDeadline ? getWorkflowActionLabel(nextDeadline.stageKey, "student") : "Open";
 

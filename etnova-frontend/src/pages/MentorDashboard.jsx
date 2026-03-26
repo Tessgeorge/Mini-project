@@ -10,6 +10,7 @@ import Modal from "../components/Modal";
 import MyClass from "./MyClass";
 import { getStatusMeta } from "../constants/statusConfig";
 import { EVALUATION_STAGE_OPTIONS, getWorkflowStageMeta } from "../constants/workflowConfig";
+import { ADMIN_DATA_SYNC_KEY, emitAdminDataUpdated } from "../utils/adminLiveSync";
 
 // ─── Icons ─────────────────────────────────────────────────────────────────
 const Icon = {
@@ -271,22 +272,32 @@ function sortReviewStages(rows) {
       student_deadline_set_by_coordinator: Boolean(current?.student_deadline_set_by_coordinator || row?.student_deadline_set_by_coordinator),
     });
   }
-  return REVIEW_STAGE_ORDER.map((stageName, index) => {
-    const matched = grouped.get(stageName);
-    if (matched) {
-      return {
-        ...matched, stage_name: stageName,
-        stage_order: Number.isFinite(Number(matched?.stage_order)) ? Number(matched.stage_order) : index,
-        is_active: Boolean(matched?.is_active),
-        student_deadline_set_by_coordinator: Boolean(matched?.student_deadline_set_by_coordinator),
-      };
-    }
-    return {
-      id: `canonical-${index}`, stage_name: stageName, stage_order: index,
-      deadline: null, coordinator_deadline: null, is_active: false,
+
+  const normalizedRows = Array.from(grouped.entries()).map(([stageName, matched]) => ({
+    ...matched,
+    stage_name: stageName,
+    stage_order: Number.isFinite(Number(matched?.stage_order))
+      ? Number(matched.stage_order)
+      : reviewStageOrderIndex(stageName),
+    is_active: Boolean(matched?.is_active),
+    student_deadline_set_by_coordinator: Boolean(matched?.student_deadline_set_by_coordinator),
+  }));
+
+  const missingCanonical = REVIEW_STAGE_ORDER
+    .filter((stageName) => !grouped.has(stageName))
+    .map((stageName, index) => ({
+      id: `canonical-${index}`,
+      stage_name: stageName,
+      stage_order: reviewStageOrderIndex(stageName),
+      deadline: null,
+      coordinator_deadline: null,
+      is_active: false,
+      is_completed: false,
+      is_locked: false,
       student_deadline_set_by_coordinator: false,
-    };
-  }).sort((a, b) => {
+    }));
+
+  return [...normalizedRows, ...missingCanonical].sort((a, b) => {
     const orderA = Number.isFinite(Number(a?.stage_order)) ? Number(a.stage_order) : reviewStageOrderIndex(a?.stage_name);
     const orderB = Number.isFinite(Number(b?.stage_order)) ? Number(b.stage_order) : reviewStageOrderIndex(b?.stage_name);
     if (orderA !== orderB) return orderA - orderB;
@@ -1117,7 +1128,7 @@ export default function MentorDashboard() {
       supabase.from("classes").select("id, class_name").eq("id", classId).single(),
       supabase.from("projects").select("id, title, guide_id, status").eq("class_id", classId),
       supabase.from("review_stages")
-        .select("id, stage_name, deadline, coordinator_deadline, stage_order, is_active, student_deadline_set_by_coordinator")
+        .select("id, stage_name, deadline, coordinator_deadline, stage_order, is_active, is_completed, is_locked, student_deadline_set_by_coordinator")
         .eq("class_id", classId).order("stage_order", { ascending: true }),
     ]);
 
@@ -1234,14 +1245,40 @@ export default function MentorDashboard() {
 
   useEffect(() => {
     if (!mentorProfile?.is_coordinator || !coordinatorClassId) return undefined;
+    let refreshTimer = null;
     const refreshMyClassData = async () => {
       try { setMyClassData(await loadCoordinatorClassData(coordinatorClassId)); } catch (error) { console.error(error); }
     };
+    const queueRefresh = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(async () => {
+        await refreshMyClassData();
+      }, 250);
+    };
     const channel = supabase.channel(`mentor-my-class-review-stages-${coordinatorClassId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "review_stages", filter: `class_id=eq.${coordinatorClassId}` },
-        async () => { await refreshMyClassData(); })
+        async () => { queueRefresh(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "projects", filter: `class_id=eq.${coordinatorClassId}` },
+        async () => { queueRefresh(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "evaluations" },
+        async () => { queueRefresh(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "team_members" },
+        async () => { queueRefresh(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" },
+        async () => { queueRefresh(); })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    const onAdminDataUpdated = () => { queueRefresh(); };
+    const onStorage = (event) => {
+      if (event.key === ADMIN_DATA_SYNC_KEY) queueRefresh();
+    };
+    window.addEventListener("admin-data-updated", onAdminDataUpdated);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      window.removeEventListener("admin-data-updated", onAdminDataUpdated);
+      window.removeEventListener("storage", onStorage);
+      supabase.removeChannel(channel);
+    };
   }, [coordinatorClassId, loadCoordinatorClassData, mentorProfile?.is_coordinator]);
 
   function getTimeAgo(ts) {
@@ -1290,6 +1327,7 @@ export default function MentorDashboard() {
       })
       .eq("id", stageId).eq("class_id", coordinatorClassId);
     if (error) throw new Error(error.message || "Failed to update student deadline.");
+    emitAdminDataUpdated();
     setMyClassData(await loadCoordinatorClassData(coordinatorClassId));
   };
 
