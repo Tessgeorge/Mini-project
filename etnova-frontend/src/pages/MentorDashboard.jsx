@@ -2,9 +2,6 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import TeamWorkspace from "./Teamworkspace";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../config/supabaseClient";
-import AppFrame from "../components/AppFrame";
-import AppSidebar from "../components/Sidebar";
-import AppTopBar from "../components/TopBar";
 import ProfileMenu from "../components/ProfileMenu";
 import Modal from "../components/Modal";
 import MyClass from "./MyClass";
@@ -620,7 +617,7 @@ function Sidebar({ active, setActive, onSignOut, showMyClass }) {
   ];
 
   return (
-	    <aside className="w-72 min-h-screen bg-white border-r border-slate-100 flex flex-col shadow-[0_8px_30px_rgba(15,23,42,0.06)] flex-shrink-0">
+	    <aside className="w-72 h-[100dvh] fixed inset-y-0 left-0 bg-white border-r border-slate-100 flex flex-col shadow-[0_8px_30px_rgba(15,23,42,0.06)] flex-shrink-0 overflow-hidden z-20">
 	      <div className="flex items-center gap-3 px-6 py-6 border-b border-slate-100">
 	        <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#00D2C4] to-[#00a89d] flex items-center justify-center shadow-sm">
 	          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1294,70 +1291,39 @@ export default function MentorDashboard() {
   };
 
   const handleSignOut = async () => { await supabase.auth.signOut(); navigate("/signin"); };
-  const mentorNavItems = isCoordinatorWithClass
-    ? [
-        { id: "overview", label: "Dashboard", icon: "dashboard" },
-        { id: "teams", label: "Teams", icon: "groups" },
-        { id: "evaluation", label: "Evaluations", icon: "grading" },
-        { id: "my-class", label: "My Class", icon: "apartment" },
-      ]
-    : [
-        { id: "overview", label: "Dashboard", icon: "dashboard" },
-        { id: "teams", label: "Teams", icon: "groups" },
-        { id: "evaluation", label: "Evaluations", icon: "grading" },
-      ];
-  const activeNavItem = active.startsWith("my-class") ? "my-class" : active;
-  const activeTitle = active === "teams"
-    ? "Assigned Teams"
-    : active === "evaluation"
-      ? "Evaluation Center"
-      : active.startsWith("my-class")
-        ? "My Class"
-        : "Mentor Dashboard";
 
   return (
-    <AppFrame
-      sidebar={(
-        <AppSidebar
-          navItems={mentorNavItems}
-          activeItem={activeNavItem}
-          onNavigate={(next) => setActive(next === "my-class" ? "my-class-overview" : next)}
-          onLogout={handleSignOut}
-          portalSubtitle="Mentor Portal"
-          showMobileNav={false}
-        />
-      )}
-      header={(
-        <AppTopBar
-          title={activeTitle}
-          subtitle="Home"
-          profile={{ full_name: mentorProfile?.full_name || "Mentor" }}
-          onProfileClick={() => setShowProfileMenu(v => !v)}
-          showSearch={false}
-          notificationCount={0}
-        />
-      )}
-      headerOverlay={showProfileMenu ? (
-        <div className="fixed top-14 right-2 sm:right-6 md:right-8 z-50">
-          <ProfileMenu
-            profile={mentorProfile}
-            isOpen={showProfileMenu}
-            onClose={() => setShowProfileMenu(false)}
-            onLogout={handleSignOut}
-            onEditProfile={() => { setShowProfileMenu(false); setShowProfileEditor(true); }}
-            roleLabel="Mentor"
-            roleIcon="school"
-            infoItems={[
-              { label: "Full Name", value: mentorProfile?.full_name },
-              { label: "Email", value: mentorProfile?.email },
-              { label: "Role", value: "Mentor" },
-              { label: "Department", value: mentorProfile?.department || "-" },
-            ]}
+    <div className="flex h-[100dvh] bg-gray-50 overflow-hidden">
+      <Sidebar active={active} setActive={setActive} onSignOut={handleSignOut} showMyClass={isCoordinatorWithClass} />
+      <div className="flex-1 min-w-0 ml-72 h-[100dvh] flex flex-col overflow-hidden">
+        <div className="relative">
+          <Topbar
+            active={active}
+            mentorName={mentorProfile?.full_name}
+            showMyClass={isCoordinatorWithClass}
+            onProfileClick={() => setShowProfileMenu(v => !v)}
           />
+          {showProfileMenu && (
+            <div className="fixed top-14 right-2 sm:right-6 md:right-8 z-50">
+              <ProfileMenu
+                profile={mentorProfile}
+                isOpen={showProfileMenu}
+                onClose={() => setShowProfileMenu(false)}
+                onLogout={handleSignOut}
+                onEditProfile={() => { setShowProfileMenu(false); setShowProfileEditor(true); }}
+                roleLabel="Mentor"
+                roleIcon="school"
+                infoItems={[
+                  { label: "Full Name", value: mentorProfile?.full_name },
+                  { label: "Email", value: mentorProfile?.email },
+                  { label: "Role", value: "Mentor" },
+                  { label: "Department", value: mentorProfile?.department || "-" },
+                ]}
+              />
+            </div>
+          )}
         </div>
-      ) : null}
-    >
-      <div className="p-4 md:p-6 lg:p-8 space-y-6">
+        <main className="flex-1 overflow-y-auto p-8">
         {active === "overview" && (
           <OverviewTab projects={projects} evaluations={evaluations} milestones={milestones}
             recentActivity={recentActivity} loading={loading} onNavigate={setActive} onSubmitReview={handleSubmitReview} />
@@ -1379,6 +1345,7 @@ export default function MentorDashboard() {
             onNavigate={(sub) => setActive("my-class-" + sub)}
           />
         )}
+        </main>
       </div>
 
       {showProfileEditor && mentorProfile && (
@@ -1390,6 +1357,6 @@ export default function MentorDashboard() {
           startEditing
         />
       )}
-    </AppFrame>
+    </div>
   );
 }
