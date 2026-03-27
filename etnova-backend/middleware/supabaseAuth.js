@@ -156,12 +156,36 @@ const hasReviewerAccessForProject = async ({ project, userId }) => {
   const projectScope = await resolveProjectReviewerScope(project);
   if (!projectScope?.class_id) return false;
 
-  const { data, error } = await supabaseAdmin
-    .from('reviewer_access')
-    .select('id, batch')
-    .eq('class_id', projectScope.class_id)
-    .eq('mentor_id', userId)
-    .limit(20);
+  let data = null;
+  let error = null;
+  {
+    const result = await supabaseAdmin
+      .from('reviewer_access')
+      .select('id, batch')
+      .eq('class_id', projectScope.class_id)
+      .eq('mentor_id', userId)
+      .limit(20);
+    data = result.data;
+    error = result.error;
+  }
+
+  if (error) {
+    const missingBatchColumn =
+      error.code === 'PGRST204' ||
+      /batch/i.test(error.message || '') ||
+      /batch/i.test(error.details || '');
+
+    if (missingBatchColumn) {
+      const fallback = await supabaseAdmin
+        .from('reviewer_access')
+        .select('id')
+        .eq('class_id', projectScope.class_id)
+        .eq('mentor_id', userId)
+        .limit(20);
+      data = (fallback.data || []).map((row) => ({ ...row, batch: null }));
+      error = fallback.error;
+    }
+  }
 
   if (error) throw error;
   const accessRows = data || [];

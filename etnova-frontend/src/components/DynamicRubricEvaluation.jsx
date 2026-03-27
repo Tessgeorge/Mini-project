@@ -124,7 +124,7 @@ export default function DynamicRubricEvaluation({ projectId, members = [], mode 
         }
       }
 
-      const feedbackEntries = stage === "guide"
+      const feedbackEntries = (stage === "guide" || stage === "review")
         ? (stageData.students || []).map((student) => {
           const feedback = String(feedbackDraft?.[student.student_id] || "").trim();
           return feedback ? { student_id: student.student_id, feedback } : null;
@@ -224,7 +224,7 @@ export default function DynamicRubricEvaluation({ projectId, members = [], mode 
           <p className="text-sm font-bold text-gray-800">Entry Grid</p>
           <p className="text-xs text-gray-400 mt-1">
             {stage === "review"
-              ? "All students in the selected project appear here with the active review rubrics. Individual feedback reaches only the corresponding student."
+              ? "All students in the selected project appear here with the active review rubrics. Saved feedback reaches only the corresponding student."
               : "Add individual feedback here to send it directly to each student with your name."}
           </p>
         </div>

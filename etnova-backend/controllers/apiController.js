@@ -657,10 +657,32 @@ export const getMyReviewerAccess = async (req, res) => {
       return res.json([]);
     }
 
-    const { data, error } = await supabaseAdmin
-      .from('reviewer_access')
-      .select('class_id, stage, batch, is_open, updated_at')
-      .eq('mentor_id', req.user.id);
+    let data = null;
+    let error = null;
+    {
+      const result = await supabaseAdmin
+        .from('reviewer_access')
+        .select('class_id, stage, batch, is_open, updated_at')
+        .eq('mentor_id', req.user.id);
+      data = result.data;
+      error = result.error;
+    }
+
+    if (error) {
+      const missingBatchColumn =
+        error.code === 'PGRST204' ||
+        /batch/i.test(error.message || '') ||
+        /batch/i.test(error.details || '');
+
+      if (missingBatchColumn) {
+        const fallback = await supabaseAdmin
+          .from('reviewer_access')
+          .select('class_id, stage, is_open, updated_at')
+          .eq('mentor_id', req.user.id);
+        data = (fallback.data || []).map((row) => ({ ...row, batch: null }));
+        error = fallback.error;
+      }
+    }
 
     if (error) throw error;
     res.json(data || []);
