@@ -2,7 +2,11 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 export default function ProtectedRoute({ allowedRoles, children }) {
-  const { user, role, loading } = useAuth()
+  const auth = useAuth() || {}
+  const user = auth.user ?? null
+  const role = auth.role ?? null
+  const loading = Boolean(auth.loading)
+  const normalizedAllowedRoles = Array.isArray(allowedRoles) ? allowedRoles : []
 
   if (loading) {
     return (
@@ -16,7 +20,7 @@ export default function ProtectedRoute({ allowedRoles, children }) {
     return <Navigate to="/signin" replace />
   }
 
-  if (allowedRoles && !allowedRoles.includes(role)) {
+  if (normalizedAllowedRoles.length > 0 && !normalizedAllowedRoles.includes(role)) {
     return <Navigate to="/signin" replace />
   }
 

@@ -4,6 +4,7 @@ import { apiRequest } from "../config/apiClient";
 import MentorDiscussion from "./MentorDiscussion";
 import MentorIdeaQueue from "../components/MentorIdeaQueue";
 import ProjectDiaryPanel from "../components/ProjectDiaryPanel";
+import DynamicRubricEvaluation from "../components/DynamicRubricEvaluation";
 import {
   EVALUATION_STAGE_OPTIONS,
   WORKFLOW_TIMELINE,
@@ -1479,7 +1480,7 @@ function TabSubmissions({ projId, members, mentorName }) {
 // ══════════════════════════════════════════════════════════════════
 // TAB 4 — EVALUATION (unchanged)
 // ══════════════════════════════════════════════════════════════════
-function TabEvaluation({ projId, mentorId, mentorName, members, evaluations, setEvaluations, markingEnabled }) {
+function LegacyTabEvaluation({ projId, mentorId, mentorName, members, evaluations, setEvaluations, markingEnabled }) {
   const [showForm, setShowForm] = useState(false);
   const [phase, setPhase] = useState(EVALUATION_STAGE_OPTIONS[0]);
   const [sc, setSc] = useState({ problem_definition: 0, technical_approach: 0, implementation: 0, presentation: 0, viva: 0 });
@@ -1596,6 +1597,18 @@ function TabEvaluation({ projId, mentorId, mentorName, members, evaluations, set
 // ══════════════════════════════════════════════════════════════════
 // TAB 5 — ACTIVITY (unchanged)
 // ══════════════════════════════════════════════════════════════════
+function TabEvaluation({ projId, members, markingEnabled }) {
+  if (!markingEnabled) return (
+    <div className="bg-white rounded-2xl p-14 border border-gray-100 shadow-sm text-center">
+      <div className="w-16 h-16 mx-auto rounded-full bg-gray-100 flex items-center justify-center mb-4 text-lg font-bold text-gray-500">Lock</div>
+      <p className="font-bold text-gray-700 text-lg">Evaluation Not Yet Enabled</p>
+      <p className="text-sm text-gray-400 mt-2 max-w-xs mx-auto">Admin hasn't enabled marking for this team. You'll be notified when it becomes available.</p>
+    </div>
+  );
+
+  return <DynamicRubricEvaluation projectId={projId} members={members} />;
+}
+
 function TabActivity({ evaluations, documents }) {
   const items = [
     ...evaluations.map(e => ({ emoji: "🎯", time: e.created_at, title: "Evaluation submitted — " + e.phase, sub: "Score: " + (e.score || 0) + "/100", color: "bg-blue-50 border-blue-100", dot: "bg-blue-400" })),
@@ -1903,7 +1916,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
       {/* Tab content */}
       {loading ? <Spin /> : (
         <>
-          {tab === "overview" && <TabOverview proj={{ ...proj, status: projectStatus }} evaluations={evaluations} members={members} documents={documents} onAddReview={() => setShowReview(true)} onNavigateTab={setTab} mentorId={mentorId} mentorName={mentorName} milestoneDates={milestoneDates} reviewDeadlines={reviewDeadlines} workflowSnapshot={workflowSnapshot} />}
+          {tab === "overview" && <TabOverview proj={{ ...proj, status: projectStatus }} evaluations={evaluations} members={members} documents={documents} onAddReview={() => setTab("evaluation")} onNavigateTab={setTab} mentorId={mentorId} mentorName={mentorName} milestoneDates={milestoneDates} reviewDeadlines={reviewDeadlines} workflowSnapshot={workflowSnapshot} />}
           {tab === "ideas" && (
             <MentorIdeaQueue
               onRefresh={refreshProjectStatus}

@@ -348,6 +348,10 @@ export default function AdminGuideAllocation() {
     }
     if (itemId === "review-management") {
       navigate("/admin/review-management");
+      return;
+    }
+    if (itemId === "rubrics-management") {
+      navigate("/admin/rubrics");
     }
   };
 

@@ -202,6 +202,7 @@ export default function AdminReviewStages() {
     if (itemId === "guide-allocation") return navigate("/admin/guide-allocation");
     if (itemId === "mentor-management") return navigate("/admin/mentor-management");
     if (itemId === "review-management") return navigate("/admin/review-management");
+    if (itemId === "rubrics-management") return navigate("/admin/rubrics");
   };
 
   return (

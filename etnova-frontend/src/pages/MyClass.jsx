@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, Component } from "react";
 import { supabase } from "../config/supabaseClient";
+import { apiRequest } from "../config/apiClient";
+import CoordinatorResultsPanel from "../components/CoordinatorResultsPanel";
 
 // ─── Helpers (preserved from original) ───────────────────────────────────────
 function formatClassScore(value) {
@@ -27,6 +29,17 @@ function reviewStageOrderIndex(stageName) {
   const normalized = normalizeReviewStageName(stageName).toLowerCase();
   const idx = REVIEW_STAGE_ORDER.findIndex(n => n.toLowerCase() === normalized);
   return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
+}
+
+function stageNameToProgressKey(stageName) {
+  const normalized = normalizeReviewStageName(stageName).toLowerCase();
+  if (normalized === "idea") return "idea";
+  if (normalized === "abstract") return "abstract";
+  if (normalized === "zeroth review") return "zeroth_review";
+  if (normalized === "first review") return "first_review";
+  if (normalized === "second review") return "second_review";
+  if (normalized === "final review") return "final_review";
+  return normalized.replace(/\s+/g, "_");
 }
 
 function formatDeadlineDateTime(value) {
@@ -213,7 +226,7 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
     </Card>
   );
 
-  const { classTitle, totalProjects, evaluatedProjects, pendingEvaluations, classAverageScore, projects = [], reviewStages = [], deadlineLoadError = "" } = classData;
+  const { classTitle, totalProjects, evaluatedProjects, pendingEvaluations, classAverageScore, projects = [], reviewStages = [], deadlineLoadError = "", stageProgress = {} } = classData;
 
   const handleDraftChange = (id, key, val) => {
     setDeadlineDrafts(p => ({ ...p, [id]: { date: p[id]?.date || "", time: p[id]?.time || "", [key]: val } }));
@@ -513,10 +526,8 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
           {reviewStages.length === 0 ? (
             <p className="text-sm text-slate-400 text-center py-4">No stages configured.</p>
           ) : reviewStages.map(s => {
-            const done = projects.filter(p =>
-              (p.evaluationCount > 0 && normalizeReviewStageName(s.stage_name) !== "Idea") ||
-              normalizeReviewStageName(s.stage_name) === "Idea"
-            ).length;
+            const progressKey = stageNameToProgressKey(s.stage_name);
+            const done = Number(stageProgress?.[progressKey] || 0);
             const total = totalProjects || 1;
             const pct = Math.round((done / total) * 100);
             const barColor = pct === 100 ? "#14b8a6" : pct >= 40 ? "#f59e0b" : "#e2e8f0";
@@ -630,7 +641,7 @@ function TabSubmissions({ classId }) {
 
       const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString();
       const { data: vDocs } = await supabase.from("documents")
-        .select("id,project_id,document_type,file_name,coordinator_verified_at")
+        .select("id,project_id,document_type,file_name,file_url,coordinator_verified_at")
         .in("project_id", ids).eq("coordinator_verified", true).gte("coordinator_verified_at", weekAgo)
         .order("coordinator_verified_at", { ascending: false });
 
@@ -732,9 +743,15 @@ function TabSubmissions({ classId }) {
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   {doc.file_url && (
-                    <a href={doc.file_url} target="_blank" rel="noopener noreferrer"
+                    <a href={doc.file_url} target="_blank" rel="noopener noreferrer" title="View file"
                       className="w-9 h-9 rounded-xl border border-slate-200 flex items-center justify-center text-slate-400 hover:text-teal-600 hover:border-teal-200 transition-all">
-                      <span className="material-symbols-outlined text-base">open_in_new</span>
+                      <span className="material-symbols-outlined text-base">visibility</span>
+                    </a>
+                  )}
+                  {doc.file_url && (
+                    <a href={doc.file_url} download title="Download file"
+                      className="w-9 h-9 rounded-xl border border-slate-200 flex items-center justify-center text-slate-400 hover:text-teal-600 hover:border-teal-200 transition-all">
+                      <span className="material-symbols-outlined text-base">download</span>
                     </a>
                   )}
                   <TealButton small onClick={() => verify(doc.id)} disabled={acting === doc.id} icon="verified">
@@ -759,7 +776,7 @@ function TabSubmissions({ classId }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-100">
-                {["Team", "Document", "Verified On", "Status"].map(h => (
+                {["Team", "Document", "Verified On", "Status", "Actions"].map(h => (
                   <th key={h} className="text-left px-6 py-3 text-xs font-bold uppercase tracking-wider text-slate-400">{h}</th>
                 ))}
               </tr>
@@ -773,6 +790,24 @@ function TabSubmissions({ classId }) {
                     {doc.coordinator_verified_at ? new Date(doc.coordinator_verified_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—"}
                   </td>
                   <td className="px-6 py-3"><StatusPill label="Verified" type="green" /></td>
+                  <td className="px-6 py-3">
+                    <div className="flex items-center gap-2">
+                      {doc.file_url ? (
+                        <>
+                          <a href={doc.file_url} target="_blank" rel="noopener noreferrer" title="View file"
+                            className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 hover:text-teal-600 hover:border-teal-200 transition-all">
+                            <span className="material-symbols-outlined text-[18px] leading-none">visibility</span>
+                          </a>
+                          <a href={doc.file_url} download title="Download file"
+                            className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 hover:text-teal-600 hover:border-teal-200 transition-all">
+                            <span className="material-symbols-outlined text-[18px] leading-none">download</span>
+                          </a>
+                        </>
+                      ) : (
+                        <span className="text-xs text-slate-400">No file</span>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -956,6 +991,15 @@ function TeamDetail({ projectId, onBack }) {
               </table>
             )}
           </div>
+
+          <CoordinatorResultsPanel
+            projectId={projectId}
+            students={members.map((member) => ({
+              student_id: member.profiles?.id,
+              full_name: member.profiles?.full_name,
+              roll_number: member.profiles?.roll_number || member.profiles?.email,
+            })).filter((student) => student.student_id)}
+          />
         </div>
 
         <div className="space-y-5">
@@ -1023,6 +1067,8 @@ function TabTeams({ classId }) {
   const [teams, setTeams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingBatchId, setSavingBatchId] = useState("");
+  const [batchSaveError, setBatchSaveError] = useState("");
   const [locked, setLocked] = useState(false);
   const [filterBatch, setFilterBatch] = useState("all");
   const [filterGuide, setFilterGuide] = useState("all");
@@ -1039,6 +1085,31 @@ function TabTeams({ classId }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      try {
+        const apiTeams = await apiRequest("/coordinator/teams", { skipCache: true });
+        const normalized = (apiTeams || []).map((team) => ({
+          id: team.id,
+          title: team.title,
+          status: team.status,
+          batch: team.batch == null ? null : Number(team.batch),
+          guide_name: team.guide_name || "—",
+          members: [],
+          team_size: Number(team.team_size || 0),
+          current_stage: String(team.latest_stage || "—").replace(/_/g, " "),
+          sub_status: team.submission_status || "—",
+          coord_verified: Boolean(team.coordinator_verified),
+        }));
+        normalized.sort((a, b) => {
+          const ba = a.batch ?? 99, bb = b.batch ?? 99;
+          return ba - bb || a.title.localeCompare(b.title);
+        });
+        setTeams(normalized);
+        setLoading(false);
+        return;
+      } catch (apiError) {
+        console.warn("Falling back to direct teams query:", apiError?.message || apiError);
+      }
+
       const { data: projects, error: projErr } = await supabase
         .from("projects")
         .select("id,title,status,guide_id,batch,created_at,team_members(id)")
@@ -1118,9 +1189,14 @@ function TabTeams({ classId }) {
     try {
       const sorted = [...teams].sort((a, b) => a.title.localeCompare(b.title));
       const half = Math.ceil(sorted.length / 2);
-      for (let i = 0; i < sorted.length; i++) {
-        await supabase.from("projects").update({ batch: i < half ? 1 : 2 }).eq("id", sorted[i].id);
-      }
+      const assignments = sorted.map((team, index) => ({
+        project_id: team.id,
+        batch: index < half ? 1 : 2,
+      }));
+      await apiRequest("/coordinator/teams/batches", {
+        method: "PUT",
+        body: { assignments },
+      });
       await load();
       showNotice(`${sorted.length} teams divided — Batch 1: ${half}, Batch 2: ${sorted.length - half}`);
     } catch (e) { showNotice("Failed: " + e.message, "err"); }
@@ -1129,6 +1205,8 @@ function TabTeams({ classId }) {
 
   const handleBatchChange = async (teamId, newBatch) => {
     if (locked) return showNotice("Unlock team formation to make changes.", "err");
+    setBatchSaveError("");
+    const previousTeams = teams;
     // newBatch is a string from select ("", "1", "2") — convert correctly
     const val = newBatch === "" || newBatch === null ? null : Number(newBatch);
     // Update UI immediately
@@ -1137,14 +1215,23 @@ function TabTeams({ classId }) {
       updated.sort((a, b) => { const ba = a.batch ?? 99, bb = b.batch ?? 99; return ba - bb || a.title.localeCompare(b.title); });
       return updated;
     });
-    // Save to Supabase — use updateBatch helper to handle null correctly
-    const { error } = await supabase.from("projects")
-      .update({ batch: val })
-      .eq("id", teamId);
-    if (error) {
-      showNotice("Failed to save batch: " + error.message, "err");
-      // Revert on failure
+    setSavingBatchId(teamId);
+    try {
+      await apiRequest("/coordinator/teams/batches", {
+        method: "PUT",
+        body: {
+          assignments: [{ project_id: teamId, batch: val }],
+        },
+      });
+
       await load();
+      showNotice(`Batch saved as ${val ? `Batch ${val}` : "Unassigned"}.`);
+    } catch (error) {
+      setTeams(previousTeams);
+      setBatchSaveError(error.message || "Batch save failed.");
+      showNotice("Failed to save batch: " + error.message, "err");
+    } finally {
+      setSavingBatchId("");
     }
   };
 
@@ -1296,6 +1383,11 @@ function TabTeams({ classId }) {
           <span className="material-symbols-outlined text-base">{noticeType === "ok" ? "check_circle" : "error"}</span>{notice}
         </div>
       )}
+      {batchSaveError && (
+        <div className="rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 border bg-red-50 border-red-200 text-red-700">
+          <span className="material-symbols-outlined text-base">error</span>Batch save failed: {batchSaveError}
+        </div>
+      )}
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
@@ -1341,7 +1433,7 @@ function TabTeams({ classId }) {
                   <td className="px-4 py-3.5 text-sm font-semibold text-slate-700">{t.team_size}</td>
                   <td className="px-4 py-3.5 text-xs text-slate-600">{t.guide_name}</td>
                   <td className="px-4 py-3.5">
-                    <select value={t.batch || ""} disabled={locked}
+                    <select value={t.batch || ""} disabled={locked || savingBatchId === t.id}
                       onChange={e => handleBatchChange(t.id, e.target.value)}
                       className={`text-xs font-bold px-2.5 py-1 rounded-lg border focus:outline-none transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 ${t.batch === 1 ? "bg-teal-50 border-teal-200 text-teal-700" : t.batch === 2 ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-slate-50 border-slate-200 text-slate-400"}`}>
                       <option value="">Unassigned</option>
@@ -1373,52 +1465,182 @@ function TabReviews({ classId }) {
   const [toggles, setToggles] = useState({ zeroth_review: false, first_review: false, second_review: false, final_review: false });
   const [mentors, setMentors] = useState([]);
   const [selected, setSelected] = useState([]);
+  const [mentorBatches, setMentorBatches] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        const { data: coord } = await supabase.from("profiles").select("department").eq("id", user.id).single();
-        const { data: rows } = await supabase.from("reviewer_access").select("mentor_id,stage,is_open").eq("class_id", classId);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      let rows = [];
+      let hasBatchScope = true;
 
-        const t = { zeroth_review: false, first_review: false, second_review: false, final_review: false };
-        const assigned = new Set();
-        (rows || []).forEach(r => { if (r.is_open) t[r.stage] = true; assigned.add(r.mentor_id); });
-        setToggles(t); setSelected([...assigned]);
+      const { data: accessRows, error: accessError } = await supabase
+        .from("reviewer_access")
+        .select("mentor_id,stage,is_open,batch")
+        .eq("class_id", classId);
 
-        if (coord?.department) {
-          const { data: dm } = await supabase.from("profiles")
-            .select("id,full_name,email,department,designation").eq("role", "mentor")
-            .ilike("department", `%${coord.department}%`).order("full_name");
-          setMentors(dm || []);
+      if (accessError) {
+        const missingBatchColumn =
+          accessError.code === "PGRST204" ||
+          /batch/i.test(accessError.message || "") ||
+          /batch/i.test(accessError.details || "");
+
+        if (missingBatchColumn) {
+          hasBatchScope = false;
+          const { data: legacyRows, error: legacyError } = await supabase
+            .from("reviewer_access")
+            .select("mentor_id,stage,is_open")
+            .eq("class_id", classId);
+
+          if (legacyError) throw legacyError;
+          rows = legacyRows || [];
+        } else {
+          throw accessError;
         }
-      } catch (e) { console.error(e); }
-      setLoading(false);
-    };
-    load();
+      } else {
+        rows = accessRows || [];
+      }
+      const t = { zeroth_review: false, first_review: false, second_review: false, final_review: false };
+      const assigned = new Set();
+      const batchMap = {};
+      (rows || []).forEach((row) => {
+        if (row?.mentor_id) assigned.add(row.mentor_id);
+        if (row?.is_open) t[row.stage] = true;
+        if (hasBatchScope && row?.mentor_id) {
+          const nextBatch = row.batch ?? "all";
+          const currentBatch = batchMap[row.mentor_id];
+          if (currentBatch == null || (currentBatch === "all" && nextBatch !== "all")) {
+            batchMap[row.mentor_id] = nextBatch;
+          }
+        }
+      });
+      setToggles(t);
+      setSelected([...assigned]);
+      setMentorBatches(batchMap);
+
+      const { data: mentorRows, error: mentorError } = await supabase
+        .from("profiles")
+        .select("id,full_name,email,department,designation")
+        .eq("role", "mentor")
+        .order("full_name");
+
+      if (mentorError) throw mentorError;
+      setMentors(mentorRows || []);
+    } catch (e) {
+      console.error(e);
+    }
+    setLoading(false);
   }, [classId]);
 
-  const saveAccess = async () => {
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const persistAccess = useCallback(async (
+    nextSelected = selected,
+    nextToggles = toggles,
+    nextMentorBatches = mentorBatches
+  ) => {
     setSaving(true);
+    setSaveError("");
     try {
       const { data: { user } } = await supabase.auth.getUser();
       const allStages = ["zeroth_review", "first_review", "second_review", "final_review"];
       const rows = [];
-      for (const mentorId of selected) {
+      for (const mentorId of nextSelected) {
         for (const stage of allStages) {
-          rows.push({ class_id: classId, mentor_id: mentorId, stage, is_open: toggles[stage] || false, granted_by: user.id, updated_at: new Date().toISOString() });
+          rows.push({
+            class_id: classId,
+            mentor_id: mentorId,
+            stage,
+            batch: nextMentorBatches[mentorId] === "all" || nextMentorBatches[mentorId] == null ? null : Number(nextMentorBatches[mentorId]),
+            is_open: nextToggles[stage] || false,
+            granted_by: user.id,
+            updated_at: new Date().toISOString(),
+          });
         }
       }
-      if (rows.length > 0) await supabase.from("reviewer_access").upsert(rows, { onConflict: "class_id,mentor_id,stage" });
-      const deselected = mentors.filter(m => !selected.includes(m.id)).map(m => m.id);
-      if (deselected.length > 0) await supabase.from("reviewer_access").update({ is_open: false }).eq("class_id", classId).in("mentor_id", deselected);
+
+      if (rows.length > 0) {
+        let writeError = null;
+        const upsertResult = await supabase
+          .from("reviewer_access")
+          .upsert(rows, { onConflict: "class_id,mentor_id,stage" });
+
+        writeError = upsertResult.error;
+
+        const missingBatchColumn =
+          writeError &&
+          (writeError.code === "PGRST204" ||
+            /batch/i.test(writeError.message || "") ||
+            /batch/i.test(writeError.details || ""));
+
+        if (missingBatchColumn) {
+          throw new Error('Batch scope cannot be saved because the "reviewer_access.batch" column is missing in Supabase.');
+        }
+
+        if (writeError) throw writeError;
+      }
+
+      const deselected = mentors.filter(m => !nextSelected.includes(m.id)).map(m => m.id);
+      if (deselected.length > 0) {
+        const { error: deleteError } = await supabase
+          .from("reviewer_access")
+          .delete()
+          .eq("class_id", classId)
+          .in("mentor_id", deselected);
+        if (deleteError) throw deleteError;
+      }
+
+      if (nextSelected.length === 0) {
+        const { error: clearError } = await supabase
+          .from("reviewer_access")
+          .delete()
+          .eq("class_id", classId);
+        if (clearError) throw clearError;
+      }
+
+      await load();
       setSaved(true); setTimeout(() => setSaved(false), 3000);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      setSaveError(e.message || "Failed to save reviewer access.");
+    }
     setSaving(false);
+  }, [classId, load, mentorBatches, mentors, selected, toggles]);
+
+  const saveAccess = async () => {
+    await persistAccess();
+  };
+
+  const handleToggleChange = async (stageKey) => {
+    const nextToggles = { ...toggles, [stageKey]: !toggles[stageKey] };
+    setToggles(nextToggles);
+    await persistAccess(selected, nextToggles, mentorBatches);
+  };
+
+  const handleReviewerSelectionChange = async (mentorId) => {
+    const nextSelected = selected.includes(mentorId)
+      ? selected.filter((id) => id !== mentorId)
+      : [...selected, mentorId];
+    setSelected(nextSelected);
+    await persistAccess(nextSelected, toggles, mentorBatches);
+  };
+
+  const handleSelectAllReviewers = async (checked) => {
+    const nextSelected = checked ? mentors.map((mentor) => mentor.id) : [];
+    setSelected(nextSelected);
+    await persistAccess(nextSelected, toggles, mentorBatches);
+  };
+
+  const handleReviewerBatchChange = async (mentorId, batchValue) => {
+    const nextMentorBatches = { ...mentorBatches, [mentorId]: batchValue };
+    setMentorBatches(nextMentorBatches);
+    if (!selected.includes(mentorId)) return;
+    await persistAccess(selected, toggles, nextMentorBatches);
   };
 
   if (loading) return <Spinner />;
@@ -1453,7 +1675,8 @@ function TabReviews({ classId }) {
                   </div>
                   <div className="flex items-center gap-2">
                     <StatusPill label={isOn ? "Open" : "Closed"} type={isOn ? "teal" : "gray"} />
-                    <button onClick={() => setToggles(p => ({ ...p, [key]: !p[key] }))}
+                    <button onClick={() => handleToggleChange(key)}
+                      disabled={saving}
                       className="w-11 h-6 rounded-full relative transition-all duration-200 focus:outline-none"
                       style={{ backgroundColor: isOn ? "#00D2C4" : "#e2e8f0" }}>
                       <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-all duration-200 ${isOn ? "left-5" : "left-0.5"}`} />
@@ -1473,7 +1696,7 @@ function TabReviews({ classId }) {
             <span className="material-symbols-outlined text-xl" style={{ color: "#00D2C4" }}>manage_accounts</span>
             <div>
               <h2 className="text-base font-bold text-slate-900">Assign Reviewers</h2>
-              <p className="text-xs text-slate-400 mt-0.5">Select mentors from your department</p>
+              <p className="text-xs text-slate-400 mt-0.5">Select mentors and choose which batch they can review</p>
             </div>
           </div>
           <TealButton onClick={saveAccess} disabled={saving} icon="save">
@@ -1483,33 +1706,44 @@ function TabReviews({ classId }) {
 
         {/* Select all */}
         <div className="flex items-center justify-between px-6 py-3 bg-slate-50 border-b border-slate-100">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Department Mentors</p>
+          <p className="text-xs font-bold uppercase tracking-wider text-slate-400">All Mentors With Batch Scope</p>
           <label className="flex items-center gap-2 cursor-pointer">
             <span className="text-xs text-slate-500 font-medium">Select all</span>
             <input type="checkbox" checked={mentors.length > 0 && selected.length === mentors.length}
-              onChange={e => setSelected(e.target.checked ? mentors.map(m => m.id) : [])}
+              onChange={e => handleSelectAllReviewers(e.target.checked)}
               className="w-4 h-4 cursor-pointer" style={{ accentColor: "#00D2C4" }} />
           </label>
         </div>
 
         <div className="divide-y divide-slate-50 max-h-72 overflow-y-auto">
           {mentors.length === 0 ? (
-            <div className="px-6 py-10 text-center text-slate-400 text-sm">No department mentors found.</div>
+            <div className="px-6 py-10 text-center text-slate-400 text-sm">No mentors found.</div>
           ) : mentors.map(m => {
             const checked = selected.includes(m.id);
             return (
               <label key={m.id} className={`flex items-center gap-4 px-6 py-4 cursor-pointer transition-colors ${checked ? "bg-[rgba(0,210,196,0.04)]" : "hover:bg-slate-50/50"}`}>
                 <input type="checkbox" checked={checked}
-                  onChange={() => setSelected(p => p.includes(m.id) ? p.filter(x => x !== m.id) : [...p, m.id])}
+                  onChange={() => handleReviewerSelectionChange(m.id)}
+                  disabled={saving}
                   className="w-4 h-4 cursor-pointer flex-shrink-0" style={{ accentColor: "#00D2C4" }} />
                 <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-black text-sm flex-shrink-0"
                   style={{ backgroundColor: "#00D2C4" }}>
-                  {m.full_name?.[0]?.toUpperCase() || "M"}
+                  {(m.full_name || m.email || "Mentor")?.[0]?.toUpperCase() || "M"}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-slate-900 text-sm">{m.full_name}</p>
+                  <p className="font-semibold text-slate-900 text-sm">{m.full_name || m.email || "Unnamed Mentor"}</p>
                   <p className="text-xs text-slate-400 mt-0.5">{m.department}{m.designation ? ` · ${m.designation}` : ""}</p>
                 </div>
+                <select
+                  value={mentorBatches[m.id] ?? "all"}
+                  onChange={(e) => handleReviewerBatchChange(m.id, e.target.value)}
+                  disabled={saving}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none"
+                >
+                  <option value="all">All Batches</option>
+                  <option value="1">Batch 1</option>
+                  <option value="2">Batch 2</option>
+                </select>
                 {checked && <StatusPill label="Assigned" type="teal" />}
               </label>
             );
@@ -1520,6 +1754,12 @@ function TabReviews({ classId }) {
           <div className="flex items-center gap-2 px-6 py-4 bg-emerald-50 border-t border-emerald-100 text-sm font-semibold text-emerald-700">
             <span className="material-symbols-outlined text-base">check_circle</span>
             Reviewer access saved successfully
+          </div>
+        )}
+        {saveError && (
+          <div className="flex items-center gap-2 px-6 py-4 bg-red-50 border-t border-red-100 text-sm font-semibold text-red-700">
+            <span className="material-symbols-outlined text-base">error</span>
+            {saveError}
           </div>
         )}
       </Card>

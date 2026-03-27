@@ -121,6 +121,62 @@ const isProjectInCoordinatorScope = async (projectId, req) => {
   return anchor.department === req.userDepartment;
 };
 
+const resolveProjectReviewerScope = async (project) => {
+  if (!project?.id) {
+    return { class_id: project?.class_id || null, batch: project?.batch ?? null };
+  }
+
+  if (project?.class_id && project?.batch != null) {
+    return { class_id: project.class_id, batch: project.batch };
+  }
+
+  const { data: members, error } = await supabaseAdmin
+    .from('team_members')
+    .select(`
+      role,
+      profiles!team_members_student_id_fkey(class_id, class_section, batch)
+    `)
+    .eq('project_id', project.id);
+
+  if (error || !members?.length) {
+    return { class_id: project?.class_id || null, batch: project?.batch ?? null };
+  }
+
+  const leader = members.find((member) => member.role === 'leader');
+  const anchor = leader?.profiles || members[0]?.profiles || null;
+
+  return {
+    class_id: project?.class_id || anchor?.class_id || null,
+    batch: project?.batch ?? anchor?.batch ?? null,
+  };
+};
+
+const hasReviewerAccessForProject = async ({ project, userId }) => {
+  if (!userId) return false;
+  const projectScope = await resolveProjectReviewerScope(project);
+  if (!projectScope?.class_id) return false;
+
+  const { data, error } = await supabaseAdmin
+    .from('reviewer_access')
+    .select('id, batch')
+    .eq('class_id', projectScope.class_id)
+    .eq('mentor_id', userId)
+    .limit(20);
+
+  if (error) throw error;
+  const accessRows = data || [];
+  if (!accessRows.length) return false;
+
+  const specificBatchRows = accessRows.filter((row) => row.batch != null);
+  const effectiveRows = specificBatchRows.length > 0 ? specificBatchRows : accessRows;
+
+  if (projectScope.batch == null) {
+    return effectiveRows.some((row) => row.batch == null);
+  }
+
+  return effectiveRows.some((row) => row.batch == null || Number(row.batch) === Number(projectScope.batch));
+};
+
 // Check if user can access specific project (student must be team member, mentor must be assigned)
 export const canAccessProject = (options = {}) => async (req, res, next) => {
   try {
@@ -164,6 +220,9 @@ export const canAccessProject = (options = {}) => async (req, res, next) => {
       // Mentors can access if they are assigned as mentor or coordinator
       const assignedGuideId = project.guide_id ?? project.mentor_id;
       hasAccess = assignedGuideId === userId || project.coordinator_id === userId;
+      if (!hasAccess) {
+        hasAccess = await hasReviewerAccessForProject({ project, userId });
+      }
       if (!hasAccess && allowCoordinatorBatchScope) {
         hasAccess = await isProjectInCoordinatorScope(projectId, req);
       }

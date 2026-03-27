@@ -46,47 +46,6 @@ function parseTechnologies(value) {
     .filter(Boolean);
 }
 
-function clampScore(value, min = 0, max = 100) {
-  return Math.max(min, Math.min(max, Math.round(Number(value) || 0)));
-}
-
-function scoreIdeaDraft({ title, description, technologies }) {
-  const cleanTitle = String(title || "").trim();
-  const cleanDescription = String(description || "").trim().toLowerCase();
-  const techList = Array.isArray(technologies) ? technologies.filter(Boolean) : [];
-
-  let effectiveness = 40;
-  if (cleanTitle.length >= 10) effectiveness += 8;
-  if (cleanDescription.length >= 80) effectiveness += 12;
-  if (/(problem|challenge|issue|inefficient|delay|manual|error)/i.test(cleanDescription)) effectiveness += 20;
-  if (/(improve|optimize|reduce|increase|efficiency|accuracy|speed)/i.test(cleanDescription)) effectiveness += 10;
-
-  let feasibility = 40;
-  if (techList.length >= 1) feasibility += 12;
-  if (techList.length >= 2) feasibility += 8;
-  if (/(api|database|module|implementation|deploy|prototype|integration)/i.test(cleanDescription)) feasibility += 20;
-  if (cleanDescription.length >= 40) feasibility += 8;
-
-  effectiveness = clampScore(effectiveness);
-  feasibility = clampScore(feasibility);
-  const score = clampScore((effectiveness + feasibility) / 2);
-  const status = score >= 70 ? "Good" : "Needs Improvement";
-
-  const feedback = [];
-  feedback.push(
-    effectiveness >= 70
-      ? "Effectiveness is strong. The problem statement and impact are clear."
-      : "Effectiveness needs work. Clarify the core problem and expected efficiency impact."
-  );
-  feedback.push(
-    feasibility >= 70
-      ? "Feasibility looks practical with a realistic scope."
-      : "Feasibility needs improvement. Add concrete implementation details and tools."
-  );
-
-  return { score, status, criteria: { effectiveness, feasibility }, feedback };
-}
-
 export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
   const [ideas, setIdeas] = useState([]);
   const [selectedIdeaId, setSelectedIdeaId] = useState("");
@@ -134,16 +93,6 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     [ideas, selectedIdeaId]
   );
   const selectedAutoEvaluation = selectedIdea ? (autoEvaluations[selectedIdea.id] || selectedIdea.auto_evaluation || null) : null;
-  const selectedDraftScore = useMemo(
-    () => selectedIdea
-      ? scoreIdeaDraft({
-        title: selectedIdea.title,
-        description: selectedIdea.description,
-        technologies: selectedIdea.technologies || [],
-      })
-      : null,
-    [selectedIdea]
-  );
 
   const teamLeader = useMemo(() => {
     const leader = (project?.team_members || []).find((member) => member.role === "leader");
@@ -425,29 +374,6 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                     )}
                   </div>
                 </div>
-
-                {EDITABLE_STATUSES.has(String(selectedIdea.status).toLowerCase()) && selectedDraftScore ? (
-                  <div className="rounded-2xl border border-teal-200 bg-teal-50 px-4 py-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-teal-300 bg-white px-2.5 py-1 text-xs font-bold text-teal-700">
-                        <span className="material-symbols-outlined text-sm">analytics</span>
-                        Draft Score
-                      </span>
-                      <span className="text-xs font-bold text-slate-700">Score: {selectedDraftScore.score}/100</span>
-                      <span className={`text-xs font-bold ${selectedDraftScore.status === "Good" ? "text-emerald-700" : "text-amber-700"}`}>
-                        {selectedDraftScore.status}
-                      </span>
-                    </div>
-                    <p className="mt-2 text-xs font-semibold text-slate-600">
-                      Effectiveness {selectedDraftScore.criteria.effectiveness}/100 · Feasibility {selectedDraftScore.criteria.feasibility}/100
-                    </p>
-                    <ul className="mt-2 space-y-1 text-sm text-slate-700">
-                      {selectedDraftScore.feedback.map((item) => (
-                        <li key={item}>- {item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
 
                 <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
                   <div className="flex items-center justify-between gap-3">

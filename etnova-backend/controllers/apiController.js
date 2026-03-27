@@ -88,7 +88,7 @@ const enrichProjectsWithCoordinatorFallback = async (projects) => {
   const missingCoordinatorProjects = projects.filter((project) => !project?.coordinator);
   if (!missingCoordinatorProjects.length) return projects;
 
-  const classNames = [...new Set(
+  const classSections = [...new Set(
     missingCoordinatorProjects
       .map((project) => {
         const anchor = getProjectAnchorProfile(project);
@@ -97,19 +97,19 @@ const enrichProjectsWithCoordinatorFallback = async (projects) => {
       .filter(Boolean)
   )];
 
-  if (!classNames.length) return projects;
+  if (!classSections.length) return projects;
 
   const { data: classes, error: classesError } = await supabase
     .from('classes')
-    .select('id, class_name')
-    .in('class_name', classNames);
+    .select('id, class_section')
+    .in('class_section', classSections);
 
   if (classesError) {
     throw classesError;
   }
 
-  const classIdByName = new Map(
-    (classes || []).map((row) => [String(row.class_name || '').trim(), row.id])
+  const classIdBySection = new Map(
+    (classes || []).map((row) => [String(row.class_section || '').trim(), row.id])
   );
   const classIds = [...new Set((classes || []).map((row) => row.id).filter(Boolean))];
   if (!classIds.length) return projects;
@@ -143,8 +143,8 @@ const enrichProjectsWithCoordinatorFallback = async (projects) => {
     if (project?.coordinator) return project;
 
     const anchor = getProjectAnchorProfile(project);
-    const className = String(anchor?.batch || anchor?.class_section || '').trim();
-    const classId = classIdByName.get(className);
+    const classSection = String(anchor?.batch || anchor?.class_section || '').trim();
+    const classId = classIdBySection.get(classSection);
     if (!classId) return project;
 
     const candidates = coordinatorsByClassId.get(classId) || [];
@@ -346,12 +346,33 @@ export const createProject = async (req, res) => {
     const initialIdeaTitle = title || null;
     const projectTitle = initialIdeaTitle || teamName;
     const defaultDomain = domain || 'General';
+    let resolvedClassId = null;
+
+    const { data: creatorProfile, error: profileError } = await supabase
+      .from('profiles')
+      .select('class_id, class_section, batch')
+      .eq('id', req.user.id)
+      .maybeSingle();
+    if (profileError) throw profileError;
+
+    resolvedClassId = creatorProfile?.class_id || null;
+    const profileSection = String(creatorProfile?.class_section || creatorProfile?.batch || '').trim();
+    if (!resolvedClassId && profileSection) {
+      const { data: classRow, error: classLookupError } = await supabase
+        .from('classes')
+        .select('id')
+        .ilike('class_section', profileSection)
+        .maybeSingle();
+      if (classLookupError) throw classLookupError;
+      resolvedClassId = classRow?.id || null;
+    }
 
     const { data: projectRow, error } = await supabase
       .from('projects')
       .insert({
         title: projectTitle,
         team_name: teamName,
+        class_id: resolvedClassId,
         domain: defaultDomain,
         description,
         abstract,
@@ -448,7 +469,7 @@ export const getProjects = async (req, res) => {
         guide:profiles!projects_guide_id_fkey(id, full_name, email, department),
         team_members(
           id, student_id, role,
-          profiles!team_members_student_id_fkey(full_name, email, roll_number)
+          profiles!team_members_student_id_fkey(full_name, email, roll_number, batch, class_section, class_id)
         ),
         documents(id, document_type, status, uploaded_at, file_name),
         evaluations(evaluation_type, obtained_marks, max_marks, feedback)
@@ -461,9 +482,108 @@ export const getProjects = async (req, res) => {
 
       if (assignedError) throw assignedError;
 
+      const { data: reviewerAccessRows, error: reviewerAccessError } = await supabase
+        .from('reviewer_access')
+        .select('class_id, batch')
+        .eq('mentor_id', req.user.id);
+
+      if (reviewerAccessError) throw reviewerAccessError;
+
+      const reviewerBatchMap = (reviewerAccessRows || []).reduce((acc, row) => {
+        if (!row?.class_id) return acc;
+        if (!acc[row.class_id]) {
+          acc[row.class_id] = { batches: new Set(), hasSpecificBatch: false };
+        }
+        if (row.batch == null) {
+          if (!acc[row.class_id].hasSpecificBatch) {
+            acc[row.class_id].batches.add('all');
+          }
+        } else {
+          if (!acc[row.class_id].hasSpecificBatch) {
+            acc[row.class_id].batches.clear();
+            acc[row.class_id].hasSpecificBatch = true;
+          }
+          acc[row.class_id].batches.add(String(row.batch));
+        }
+        return acc;
+      }, {});
+
+      const reviewerClassIds = Object.keys(reviewerBatchMap);
+      let reviewerProjects = [];
+
+      if (reviewerClassIds.length > 0) {
+        const normalizeSectionKey = (value) => String(value || '').trim().toLowerCase();
+        const { data: reviewerClasses, error: reviewerClassesError } = await supabase
+          .from('classes')
+          .select('id, class_section')
+          .in('id', reviewerClassIds);
+        if (reviewerClassesError) throw reviewerClassesError;
+
+        const classIdBySection = new Map(
+          (reviewerClasses || []).map((row) => [normalizeSectionKey(row.class_section), row.id])
+        );
+
+        const resolveAnchorProfile = (project) => {
+          const members = Array.isArray(project?.team_members) ? project.team_members : [];
+          const leader = members.find((member) => member?.role === 'leader');
+          return leader?.profiles || members[0]?.profiles || null;
+        };
+
+        const resolveProjectClassId = (project) => {
+          if (project?.class_id && reviewerBatchMap[project.class_id]) return project.class_id;
+          const anchor = resolveAnchorProfile(project);
+          if (!anchor) return null;
+          if (anchor.class_id && reviewerBatchMap[anchor.class_id]) return anchor.class_id;
+          const classSection = String(anchor.class_section || anchor.batch || '').trim();
+          if (!classSection) return null;
+          return classIdBySection.get(normalizeSectionKey(classSection)) || null;
+        };
+
+        const resolveProjectBatch = (project) => {
+          if (project?.batch != null) return String(project.batch);
+          const anchor = resolveAnchorProfile(project);
+          if (anchor?.batch != null && /^[0-9]+$/.test(String(anchor.batch).trim())) return String(anchor.batch);
+          return null;
+        };
+
+        const { data: reviewerClassProjects, error: reviewerProjectsError } = await supabase
+          .from('projects')
+          .select(mentorProjectsSelect)
+          .in('class_id', reviewerClassIds);
+
+        if (reviewerProjectsError) throw reviewerProjectsError;
+
+        const { data: reviewerLegacyProjects, error: reviewerLegacyProjectsError } = await supabase
+          .from('projects')
+          .select(mentorProjectsSelect)
+          .is('class_id', null);
+
+        if (reviewerLegacyProjectsError) throw reviewerLegacyProjectsError;
+
+        reviewerProjects = [...(reviewerClassProjects || []), ...(reviewerLegacyProjects || [])].filter((project) => {
+          const resolvedClassId = resolveProjectClassId(project);
+          const batchScope = resolvedClassId ? reviewerBatchMap[resolvedClassId] : null;
+          const allowedBatches = batchScope?.batches;
+          if (!allowedBatches || allowedBatches.size === 0) return false;
+          if (allowedBatches.has('all')) return true;
+          const effectiveBatch = resolveProjectBatch(project);
+          return effectiveBatch != null && allowedBatches.has(String(effectiveBatch));
+        });
+      }
+
+      const combinedAssignedProjects = [
+        ...(assignedProjects || []),
+        ...reviewerProjects,
+      ].reduce((acc, project) => {
+        if (!acc.some((item) => item.id === project.id)) {
+          acc.push(project);
+        }
+        return acc;
+      }, []);
+
       // Coordinators additionally get projects from their batch scope.
       if (!req.isCoordinator || !req.userBatch) {
-        return res.json(await enrichProjectsWithAllocations(assignedProjects || []));
+        return res.json(await enrichProjectsWithAllocations(combinedAssignedProjects));
       }
 
       const { data: teamRows, error: teamRowsError } = await supabase
@@ -493,10 +613,10 @@ export const getProjects = async (req, res) => {
         batchProjectIds.add(projectId);
       });
 
-      const assignedIds = new Set((assignedProjects || []).map((p) => p.id));
+      const assignedIds = new Set(combinedAssignedProjects.map((p) => p.id));
       const extraIds = [...batchProjectIds].filter((id) => !assignedIds.has(id));
       if (extraIds.length === 0) {
-        return res.json(assignedProjects || []);
+        return res.json(await enrichProjectsWithAllocations(combinedAssignedProjects));
       }
 
       const { data: extraProjects, error: extraError } = await supabase
@@ -506,7 +626,7 @@ export const getProjects = async (req, res) => {
 
       if (extraError) throw extraError;
 
-      const combined = [...(assignedProjects || []), ...(extraProjects || [])];
+      const combined = [...combinedAssignedProjects, ...(extraProjects || [])];
       return res.json(await enrichProjectsWithAllocations(combined));
     } else if (req.userRole === 'admin') {
       // Admins see all projects
@@ -526,6 +646,24 @@ export const getProjects = async (req, res) => {
     }
 
     return res.json([]);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const getMyReviewerAccess = async (req, res) => {
+  try {
+    if (req.userRole !== 'mentor') {
+      return res.json([]);
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('reviewer_access')
+      .select('class_id, stage, batch, is_open, updated_at')
+      .eq('mentor_id', req.user.id);
+
+    if (error) throw error;
+    res.json(data || []);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

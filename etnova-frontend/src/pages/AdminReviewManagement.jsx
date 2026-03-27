@@ -194,8 +194,8 @@ export default function AdminReviewManagement() {
   const fetchClasses = useCallback(async () => {
     const { data, error: fetchError } = await supabase
       .from("classes")
-      .select("id, class_name")
-      .order("class_name", { ascending: true });
+      .select("id, class_section")
+      .order("class_section", { ascending: true });
 
     if (fetchError) {
       throw new Error(fetchError.message || "Failed to load classes.");
@@ -203,7 +203,7 @@ export default function AdminReviewManagement() {
 
     const normalized = (data || []).map((row) => ({
       id: row.id,
-      name: row.class_name || String(row.id),
+      name: row.class_section || String(row.id),
     }));
     setClasses(normalized);
     return normalized;
@@ -969,6 +969,10 @@ export default function AdminReviewManagement() {
     }
     if (itemId === "review-management") {
       navigate("/admin/review-management");
+      return;
+    }
+    if (itemId === "rubrics-management") {
+      navigate("/admin/rubrics");
     }
   };
 

@@ -1,6 +1,9 @@
 import supabase from './supabaseClient'
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/$/, '')
+const API_FALLBACK_BASE_URL = API_BASE_URL.includes('localhost')
+  ? API_BASE_URL.replace('localhost', '127.0.0.1')
+  : null
 const GET_CACHE_TTL_MS = 20_000
 const responseCache = new Map()
 const inflightRequests = new Map()
@@ -48,6 +51,17 @@ function clearApiCache() {
   inflightRequests.clear()
 }
 
+async function fetchJson(url, fetchOptions, headers) {
+  return fetch(url, {
+    ...fetchOptions,
+    headers,
+    body:
+      fetchOptions.body === undefined || fetchOptions.body instanceof FormData
+        ? fetchOptions.body
+        : JSON.stringify(fetchOptions.body),
+  })
+}
+
 export async function apiRequest(path, options = {}) {
   const url = path.startsWith('http') ? path : `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
   const {
@@ -79,16 +93,18 @@ export async function apiRequest(path, options = {}) {
 
     let response
     try {
-      response = await fetch(url, {
-        ...fetchOptions,
-        headers,
-        body:
-          fetchOptions.body === undefined || fetchOptions.body instanceof FormData
-            ? fetchOptions.body
-            : JSON.stringify(fetchOptions.body),
-      })
-    } catch {
-      throw new Error(`API unreachable at ${API_BASE_URL}. Start backend and verify VITE_API_URL.`)
+      response = await fetchJson(url, fetchOptions, headers)
+    } catch (primaryError) {
+      if (API_FALLBACK_BASE_URL && !path.startsWith('http')) {
+        const fallbackUrl = `${API_FALLBACK_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
+        try {
+          response = await fetchJson(fallbackUrl, fetchOptions, headers)
+        } catch {
+          throw new Error(`API unreachable at ${API_BASE_URL} or ${API_FALLBACK_BASE_URL}. Start backend with "npm run dev" in etnova-backend and verify VITE_API_URL.`)
+        }
+      } else {
+        throw new Error(`API unreachable at ${API_BASE_URL}. Start backend with "npm run dev" in etnova-backend and verify VITE_API_URL.`)
+      }
     }
 
     if (response.status === 204) {
