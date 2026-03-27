@@ -604,63 +604,61 @@ function Sidebar({ active, setActive, onSignOut, showMyClass }) {
   }, [isMyClassActive]);
 
   const topItems = [
-    { key: "overview",   label: "Dashboard",  I: Icon.Dashboard  },
-    { key: "teams",      label: "My Teams",   I: Icon.Teams      },
+    { key: "overview", label: "Dashboard", I: Icon.Dashboard },
+    { key: "teams", label: "My Teams", I: Icon.Teams },
     { key: "evaluation", label: "Evaluation", I: Icon.Evaluation },
   ];
 
   const myClassSubItems = [
-    { key: "my-class-overview",     label: "Overview"     },
-    { key: "my-class-teams",        label: "Team"         },
-    { key: "my-class-submissions",  label: "Submissions"  },
-    { key: "my-class-reviews",      label: "Reviews"      },
+    { key: "my-class-overview", label: "Overview" },
+    { key: "my-class-teams", label: "Team" },
+    { key: "my-class-submissions", label: "Submissions" },
+    { key: "my-class-reviews", label: "Reviews" },
   ];
 
   return (
-	    <aside className="w-72 h-[100dvh] fixed inset-y-0 left-0 bg-white border-r border-slate-100 flex flex-col shadow-[0_8px_30px_rgba(15,23,42,0.06)] flex-shrink-0 overflow-hidden z-20">
-	      <div className="flex items-center gap-3 px-6 py-6 border-b border-slate-100">
-	        <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#00D2C4] to-[#00a89d] flex items-center justify-center shadow-sm">
-	          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-	            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-	          </svg>
-	        </div>
-	        <div>
-	          <p className="font-black text-slate-900 leading-tight tracking-wide">ETNOVA</p>
-	          <p className="text-xs text-slate-400 font-semibold">Mentor Portal</p>
-	        </div>
-	      </div>
-	      <nav className="flex-1 px-4 py-5 space-y-1.5">
+    <aside className="w-72 h-[100dvh] fixed inset-y-0 left-0 bg-white border-r border-slate-100 flex flex-col shadow-[0_8px_30px_rgba(15,23,42,0.06)] flex-shrink-0 overflow-hidden z-20">
+      <div className="flex items-center gap-3 px-6 py-6 border-b border-slate-100">
+        <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#00D2C4] to-[#00a89d] flex items-center justify-center shadow-sm">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+          </svg>
+        </div>
+        <div>
+          <p className="font-black text-slate-900 leading-tight tracking-wide">ETNOVA</p>
+          <p className="text-xs text-slate-400 font-semibold">Mentor Portal</p>
+        </div>
+      </div>
+      <nav className="flex-1 px-4 py-5 space-y-1.5">
         {/* Top-level items: Dashboard, My Teams, Evaluation */}
         {topItems.map(({ key, label, I }) => (
-	          <button key={key} onClick={() => setActive(key)}
-	            className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold transition-all border ${
-	              active === key
-	                ? "bg-[rgba(0,210,196,0.08)] text-teal-700 border-[rgba(0,210,196,0.35)]"
-	                : "bg-transparent text-slate-600 border-transparent hover:bg-slate-50 hover:text-slate-800"
-	            }`}>
-	            <span className={active === key ? "text-teal-600" : "text-slate-400"}><I /></span>
-	            {label}
-	          </button>
-	        ))}
+          <button key={key} onClick={() => setActive(key)}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold transition-all border ${active === key
+                ? "bg-[rgba(0,210,196,0.08)] text-teal-700 border-[rgba(0,210,196,0.35)]"
+                : "bg-transparent text-slate-600 border-transparent hover:bg-slate-50 hover:text-slate-800"
+              }`}>
+            <span className={active === key ? "text-teal-600" : "text-slate-400"}><I /></span>
+            {label}
+          </button>
+        ))}
 
         {/* My Class — expandable, only shown to coordinators */}
         {showMyClass && (
           <div>
             {/* Parent row — clicking toggles the sub-list open/closed */}
-	            <button
-	              onClick={() => {
-	                setMyClassOpen(o => !o);
-	                if (!isMyClassActive) setActive("my-class-overview");
-	              }}
-	              className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold transition-all border ${
-	                isMyClassActive
-	                  ? "bg-[rgba(0,210,196,0.08)] text-teal-700 border-[rgba(0,210,196,0.35)]"
-	                  : "bg-transparent text-slate-600 border-transparent hover:bg-slate-50 hover:text-slate-800"
-	              }`}>
-	              <span className={isMyClassActive ? "text-teal-600" : "text-slate-400"}>
-	                <Icon.Building />
-	              </span>
-	              <span className="flex-1 text-left">My Class</span>
+            <button
+              onClick={() => {
+                setMyClassOpen(o => !o);
+                if (!isMyClassActive) setActive("my-class-overview");
+              }}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold transition-all border ${isMyClassActive
+                  ? "bg-[rgba(0,210,196,0.08)] text-teal-700 border-[rgba(0,210,196,0.35)]"
+                  : "bg-transparent text-slate-600 border-transparent hover:bg-slate-50 hover:text-slate-800"
+                }`}>
+              <span className={isMyClassActive ? "text-teal-600" : "text-slate-400"}>
+                <Icon.Building />
+              </span>
+              <span className="flex-1 text-left">My Class</span>
               {/* Chevron rotates when open — same as LMS */}
               <svg
                 width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"
@@ -670,44 +668,43 @@ function Sidebar({ active, setActive, onSignOut, showMyClass }) {
             </button>
 
             {/* Sub-items — slide down when open */}
-	            {myClassOpen && (
-	              <div className="mt-1 space-y-1 pl-2">
-	                {myClassSubItems.map(({ key, label }) => (
-	                  <button key={key} onClick={() => setActive(key)}
-	                    className={`w-full flex items-center gap-2 pl-9 pr-3 py-2.5 rounded-2xl text-sm font-semibold transition-all border ${
-	                      active === key
-	                        ? "text-teal-700 bg-[rgba(0,210,196,0.08)] border-[rgba(0,210,196,0.35)]"
-	                        : "text-slate-600 bg-transparent border-transparent hover:bg-slate-50 hover:text-slate-800"
-	                    }`}>
-	                    {/* Tree connector dot */}
-	                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${active === key ? "bg-teal-500" : "bg-slate-300"}`} />
-	                    {label}
-	                  </button>
-	                ))}
-	              </div>
-	            )}
+            {myClassOpen && (
+              <div className="mt-1 space-y-1 pl-2">
+                {myClassSubItems.map(({ key, label }) => (
+                  <button key={key} onClick={() => setActive(key)}
+                    className={`w-full flex items-center gap-2 pl-9 pr-3 py-2.5 rounded-2xl text-sm font-semibold transition-all border ${active === key
+                        ? "text-teal-700 bg-[rgba(0,210,196,0.08)] border-[rgba(0,210,196,0.35)]"
+                        : "text-slate-600 bg-transparent border-transparent hover:bg-slate-50 hover:text-slate-800"
+                      }`}>
+                    {/* Tree connector dot */}
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${active === key ? "bg-teal-500" : "bg-slate-300"}`} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </nav>
-	      <div className="px-6 pb-6 pt-3 mt-auto">
-	        <button onClick={onSignOut}
-	          className="w-full flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#0a9688] via-[#13b5a4] to-[#2dcfc0] px-4 py-3.5 text-sm font-extrabold text-white shadow-[0_18px_28px_rgba(19,181,164,0.22)] transition-all hover:-translate-y-0.5 active:translate-y-0">
-	          <Icon.Logout />Sign Out
-	        </button>
-	      </div>
-	    </aside>
-	  );
-	}
+      <div className="px-6 pb-6 pt-3 mt-auto">
+        <button onClick={onSignOut}
+          className="w-full flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#0a9688] via-[#13b5a4] to-[#2dcfc0] px-4 py-3.5 text-sm font-extrabold text-white shadow-[0_18px_28px_rgba(19,181,164,0.22)] transition-all hover:-translate-y-0.5 active:translate-y-0">
+          <Icon.Logout />Sign Out
+        </button>
+      </div>
+    </aside>
+  );
+}
 
 function Topbar({ active, mentorName, onProfileClick, showMyClass }) {
   const labels = {
-    overview:                "Dashboard",
-    teams:                   "My Teams",
-    evaluation:              "Evaluation",
-    "my-class-overview":     "My Class — Overview",
-    "my-class-teams":        "My Class — Team",
-    "my-class-submissions":  "My Class — Submissions",
-    "my-class-reviews":      "My Class — Reviews",
+    overview: "Dashboard",
+    teams: "My Teams",
+    evaluation: "Evaluation",
+    "my-class-overview": "My Class — Overview",
+    "my-class-teams": "My Class — Team",
+    "my-class-submissions": "My Class — Submissions",
+    "my-class-reviews": "My Class — Reviews",
   };
   return (
     <header className="bg-white border-b border-gray-100 px-8 py-4 flex items-center justify-between">
@@ -809,8 +806,8 @@ function OverviewTab({ projects, evaluations, milestones, recentActivity, loadin
                 const tag = m.status === "completed" ? "Completed" : isToday ? "Today" : isPast ? "Overdue" : "Upcoming";
                 const tagStyle = tag === "Completed" ? "bg-blue-50 text-blue-600 border-blue-200"
                   : tag === "Overdue" ? "bg-red-50 text-red-600 border-red-200"
-                  : tag === "Today" ? "bg-amber-50 text-amber-600 border-amber-200"
-                  : "bg-teal-50 text-teal-600 border-teal-200";
+                    : tag === "Today" ? "bg-amber-50 text-amber-600 border-amber-200"
+                      : "bg-teal-50 text-teal-600 border-teal-200";
                 return (
                   <div key={i} className="flex items-center justify-between p-4 rounded-xl border border-gray-100 bg-gray-50 hover:bg-gray-100 transition-colors">
                     <div className="flex items-center gap-3">
@@ -897,13 +894,13 @@ function TeamsTab({ projects, evaluations, loading, onStartReview, mentorId, men
   if (loading) return <Spinner />;
 
   if (sel) {
-      const proj = projects.find(p => p.id === sel);
-      return (
-        <TeamWorkspace
-          key={proj?.id || sel}
-          proj={proj}
-          mentorId={mentorId}
-          mentorName={mentorName}
+    const proj = projects.find(p => p.id === sel);
+    return (
+      <TeamWorkspace
+        key={proj?.id || sel}
+        proj={proj}
+        mentorId={mentorId}
+        mentorName={mentorName}
         onBack={() => setSel(null)}
       />
     );
@@ -1224,7 +1221,7 @@ export default function MentorDashboard() {
   const isCoordinatorWithClass = Boolean(mentorProfile?.is_coordinator && coordinatorClassId);
 
   useEffect(() => {
-    if (!isCoordinatorWithClass && ["my-class-overview","my-class-teams","my-class-submissions","my-class-reviews"].includes(active)) {
+    if (!isCoordinatorWithClass && ["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews"].includes(active)) {
       setActive("overview");
     }
   }, [active, isCoordinatorWithClass]);
@@ -1324,27 +1321,27 @@ export default function MentorDashboard() {
           )}
         </div>
         <main className="flex-1 overflow-y-auto p-8">
-        {active === "overview" && (
-          <OverviewTab projects={projects} evaluations={evaluations} milestones={milestones}
-            recentActivity={recentActivity} loading={loading} onNavigate={setActive} onSubmitReview={handleSubmitReview} />
-        )}
-        {active === "teams" && (
-          <TeamsTab projects={projects} evaluations={evaluations} loading={loading}
-            onStartReview={handleSubmitReview} mentorId={mentorProfile?.id} mentorName={mentorProfile?.full_name} />
-        )}
-        {active === "evaluation" && (
-          <EvaluationTab projects={projects} evaluations={evaluations} setEvaluations={setEvaluations}
-            mentorId={mentorProfile?.id} loading={loading} />
-        )}
-        {["my-class-overview","my-class-teams","my-class-submissions","my-class-reviews"].includes(active) && isCoordinatorWithClass && (
-          <MyClass
-            classData={myClassData}
-            loading={myClassLoading}
-            onSaveStudentDeadline={handleSaveStudentDeadline}
-            activeSubPage={active.replace("my-class-", "")}
-            onNavigate={(sub) => setActive("my-class-" + sub)}
-          />
-        )}
+          {active === "overview" && (
+            <OverviewTab projects={projects} evaluations={evaluations} milestones={milestones}
+              recentActivity={recentActivity} loading={loading} onNavigate={setActive} onSubmitReview={handleSubmitReview} />
+          )}
+          {active === "teams" && (
+            <TeamsTab projects={projects} evaluations={evaluations} loading={loading}
+              onStartReview={handleSubmitReview} mentorId={mentorProfile?.id} mentorName={mentorProfile?.full_name} />
+          )}
+          {active === "evaluation" && (
+            <EvaluationTab projects={projects} evaluations={evaluations} setEvaluations={setEvaluations}
+              mentorId={mentorProfile?.id} loading={loading} />
+          )}
+          {["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews"].includes(active) && isCoordinatorWithClass && (
+            <MyClass
+              classData={myClassData}
+              loading={myClassLoading}
+              onSaveStudentDeadline={handleSaveStudentDeadline}
+              activeSubPage={active.replace("my-class-", "")}
+              onNavigate={(sub) => setActive("my-class-" + sub)}
+            />
+          )}
         </main>
       </div>
 
