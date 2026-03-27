@@ -15,8 +15,13 @@ function fmtDateTime(d) {
   return new Date(d).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-function isLocked(status) {
-  return ["approved", "completed"].includes((status || "").toLowerCase());
+function hasGuideApprovedIdea(project) {
+  return Boolean(project?.approved_idea_id);
+}
+
+function isLocked(project) {
+  const status = String(project?.status || "").toLowerCase();
+  return status === "completed" || hasGuideApprovedIdea(project);
 }
 
 // Sub-components
@@ -29,14 +34,14 @@ function Avatar({ name, size = 9, color }) {
   return <div className={cls} style={{ backgroundColor: bg }}>{initial}</div>;
 }
 
-function StatusBadge({ status }) {
-  const s = (status || "").toLowerCase();
+function StatusBadge({ project }) {
+  const s = String(project?.status || "").toLowerCase();
   if (s === "completed") return (
     <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-300">
       <span className="material-symbols-outlined text-sm">lock</span>Locked
     </span>
   );
-  if (s === "approved") return (
+  if (hasGuideApprovedIdea(project)) return (
     <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
       <span className="material-symbols-outlined text-sm">verified</span>Approved
     </span>
@@ -649,7 +654,7 @@ export default function MyTeam() {
   const leader = teamMembers.find((m) => m.role === "leader");
   const me = teamMembers.find((m) => m.student_id === profile?.id);
   const myRole = me?.role || "member";
-  const locked = isLocked(project?.status);
+  const locked = isLocked(project);
   const mentorContact = project?.guide || project?.mentor || null;
 
   // ── Use the freshly-fetched coordinator state instead of project?.coordinator
@@ -698,7 +703,7 @@ export default function MyTeam() {
       sub: "Administrative assignment",
       time: project.updated_at || project.created_at,
     });
-    if (["approved", "completed"].includes((project?.status || "").toLowerCase())) items.push({
+    if (hasGuideApprovedIdea(project) || String(project?.status || "").toLowerCase() === "completed") items.push({
       id: "approved",
       icon: "verified",
       text: "Team approved by administrator",
@@ -806,7 +811,7 @@ export default function MyTeam() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <StatusBadge status={project.status} />
+              <StatusBadge project={project} />
               <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full">
                 {teamMembers.length} / 4 Members
               </span>
@@ -840,7 +845,7 @@ export default function MyTeam() {
                 </button>
               )}
               {myRole === "member" && locked && (
-                <span className="text-xs text-slate-400 italic">Read-only - team is {project.status}</span>
+                <span className="text-xs text-slate-400 italic">Read-only - team is locked</span>
               )}
             </SectionHead>
           </div>
@@ -921,7 +926,7 @@ export default function MyTeam() {
           {locked && (
             <div className="px-4 sm:px-6 py-3 bg-slate-50 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-500">
               <span className="material-symbols-outlined text-sm">lock</span>
-              Member changes are disabled - team status is <strong className="ml-1">{project.status}</strong>.
+              Member changes are disabled until the idea is approved by your guide.
             </div>
           )}
         </div>

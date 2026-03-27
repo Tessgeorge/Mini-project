@@ -118,7 +118,7 @@ export function getWorkflowSnapshot({ project, documents = [], evaluations = [] 
   const documentTypes = extractDocumentTypes(documents);
   const evaluationStages = extractEvaluationStages(evaluations);
   const normalizedProjectStatus = String(project?.status || "").trim().toLowerCase();
-  const hasApprovedIdea = Boolean(project?.approved_idea_id) || normalizedProjectStatus === "approved" || normalizedProjectStatus === "completed";
+  const hasApprovedIdea = Boolean(project?.approved_idea_id) || normalizedProjectStatus === "completed";
 
   let stageKey = "idea";
   let isCompleted = false;

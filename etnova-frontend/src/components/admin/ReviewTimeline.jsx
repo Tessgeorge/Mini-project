@@ -8,6 +8,7 @@ function formatDeadline(deadline) {
 function statusTone(status) {
   if (status === "Active") return "bg-teal-100 text-teal-700 border-teal-200";
   if (status === "Completed") return "bg-emerald-100 text-emerald-700 border-emerald-200";
+  if (status === "Pending") return "bg-amber-100 text-amber-700 border-amber-200";
   if (status === "Locked") return "bg-rose-100 text-rose-700 border-rose-200";
   return "bg-gray-100 text-gray-700 border-gray-200";
 }

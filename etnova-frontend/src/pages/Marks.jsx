@@ -1,195 +1,107 @@
-import { useEffect, useMemo, useState } from "react";
-import { fetchStudentBootstrapData } from "../services/studentData";
-
-const RUBRIC_TEMPLATE = {
-  abstract: [
-    { name: "Clarity", weight: 30 },
-    { name: "Feasibility", weight: 35 },
-    { name: "Innovation", weight: 35 },
-  ],
-  mid_review: [
-    { name: "Technical Progress", weight: 40 },
-    { name: "Documentation", weight: 30 },
-    { name: "Communication", weight: 30 },
-  ],
-  final_presentation: [
-    { name: "Content", weight: 40 },
-    { name: "Delivery", weight: 30 },
-    { name: "Q&A", weight: 30 },
-  ],
-  documentation: [
-    { name: "Structure", weight: 35 },
-    { name: "Completeness", weight: 35 },
-    { name: "References", weight: 30 },
-  ],
-};
-
-function gradeFromPercent(percent) {
-  if (percent >= 90) return "A+";
-  if (percent >= 80) return "A";
-  if (percent >= 70) return "B";
-  if (percent >= 60) return "C";
-  return "D";
-}
+import { useEffect, useState } from "react";
+import { fetchPublishedStudentResult } from "../services/rubrics";
+import { apiRequest } from "../config/apiClient";
 
 export default function Marks() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [project, setProject] = useState(null);
+  const [result, setResult] = useState(null);
+  const [feedbackItems, setFeedbackItems] = useState([]);
 
   useEffect(() => {
+    let cancelled = false;
+
     const run = async () => {
       setLoading(true);
       setError("");
       try {
-        const { projects } = await fetchStudentBootstrapData();
-        const p = projects?.[0];
-        if (!p?.id) return;
-        // list embeds evaluations inline — no second fetch needed
-        setProject(p);
-      } catch (e) {
-        setError(e.message || "Failed to load marks.");
+        const [data, notifications] = await Promise.all([
+          fetchPublishedStudentResult(),
+          apiRequest("/notifications", { skipCache: true }),
+        ]);
+        if (!cancelled) {
+          setResult(data || null);
+          setFeedbackItems(
+            (notifications || []).filter((item) =>
+              item.type === "guide_individual_feedback" || item.type === "review_individual_feedback"
+            )
+          );
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setResult(null);
+          setFeedbackItems([]);
+          setError(err.message || "Final result is not available yet.");
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
+
     run();
+    return () => {
+      cancelled = true;
+    };
   }, []);
-
-  const evaluations = useMemo(() => project?.evaluations || [], [project?.evaluations]);
-  const totals = useMemo(() => {
-    const obtained = evaluations.reduce((sum, e) => sum + Number(e.obtained_marks || 0), 0);
-    const max = evaluations.reduce((sum, e) => sum + Number(e.max_marks || 0), 0);
-    const percent = max > 0 ? (obtained / max) * 100 : 0;
-    return { obtained, max, percent };
-  }, [evaluations]);
-
-  if (loading) return <div className="min-h-full md:min-h-screen etnova-bg flex items-center justify-center text-slate-600">Loading marks...</div>;
-  if (!project) return <div className="min-h-full md:min-h-screen etnova-bg flex items-center justify-center text-slate-600">No project found.</div>;
 
   return (
     <div className="min-h-full md:min-h-screen px-4 sm:px-6 py-5 sm:py-6">
-      <div className="max-w-6xl mx-auto space-y-6">
+      <div className="max-w-4xl mx-auto space-y-6">
         <div>
-          <h1 className="text-2xl font-black text-slate-900">Marks</h1>
-          <p className="text-sm text-slate-500 mt-1">Academic evaluation transparency.</p>
+          <h1 className="text-2xl font-black text-slate-900">Final Marks</h1>
+          <p className="text-sm text-slate-500 mt-1">Published results only. Detailed rubric breakdown is not shown to students.</p>
         </div>
 
-        {error && <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="glass-card p-4">
-            <p className="text-xs text-slate-500 font-bold uppercase">Total Marks</p>
-            <p className="mt-2 text-2xl font-black text-slate-900">{totals.obtained}/{totals.max || 0}</p>
-          </div>
-          <div className="glass-card p-4">
-            <p className="text-xs text-slate-500 font-bold uppercase">Percentage</p>
-            <p className="mt-2 text-2xl font-black text-slate-900">{totals.percent.toFixed(1)}%</p>
-          </div>
-          <div className="glass-card p-4">
-            <p className="text-xs text-slate-500 font-bold uppercase">Final Grade</p>
-            <p className="mt-2 text-2xl font-black text-slate-900">{gradeFromPercent(totals.percent)}</p>
-          </div>
-          <div className="glass-card p-4">
-            <p className="text-xs text-slate-500 font-bold uppercase">Evaluated Stages</p>
-            <p className="mt-2 text-2xl font-black text-slate-900">{evaluations.length}</p>
-          </div>
-        </div>
-
-        <div className="glass-card-strong p-5">
-          <h2 className="font-black text-slate-900 mb-4">Stage-wise Marks</h2>
-          {evaluations.length === 0 ? (
-            <p className="text-sm text-slate-500">No marks published yet.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100">
-                    <th className="text-left py-2 text-slate-500 text-xs uppercase">Stage</th>
-                    <th className="text-left py-2 text-slate-500 text-xs uppercase">Obtained</th>
-                    <th className="text-left py-2 text-slate-500 text-xs uppercase">Max</th>
-                    <th className="text-left py-2 text-slate-500 text-xs uppercase">Percent</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {evaluations.map((e) => {
-                    const percent = e.max_marks ? (Number(e.obtained_marks) / Number(e.max_marks)) * 100 : 0;
-                    return (
-                      <tr key={e.id} className="border-b border-slate-50">
-                        <td className="py-3 font-semibold capitalize">{e.evaluation_type?.replaceAll("_", " ")}</td>
-                        <td className="py-3">{e.obtained_marks}</td>
-                        <td className="py-3">{e.max_marks}</td>
-                        <td className="py-3">{percent.toFixed(1)}%</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+        {loading ? (
+          <div className="glass-card-strong p-8 text-center text-slate-500">Loading published result...</div>
+        ) : error ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{error}</div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="glass-card p-4">
+                <p className="text-xs text-slate-500 font-bold uppercase">Student ID</p>
+                <p className="mt-2 text-sm font-semibold text-slate-900 break-all">{result?.student_id}</p>
+              </div>
+              <div className="glass-card p-4">
+                <p className="text-xs text-slate-500 font-bold uppercase">Final Marks</p>
+                <p className="mt-2 text-3xl font-black text-slate-900">{result?.final_marks ?? "-"}</p>
+              </div>
+              <div className="glass-card p-4">
+                <p className="text-xs text-slate-500 font-bold uppercase">Status</p>
+                <p className="mt-2 text-2xl font-black text-emerald-700 capitalize">{result?.status || "-"}</p>
+              </div>
             </div>
-          )}
-        </div>
 
-        <div className="glass-card-strong p-5">
-          <h2 className="font-black text-slate-900 mb-4">Rubric Breakdown</h2>
-          {evaluations.length === 0 ? (
-            <p className="text-sm text-slate-500">Rubric breakdown appears after evaluation.</p>
-          ) : (
-            <div className="space-y-5">
-              {evaluations.map((e) => {
-                const rubrics = RUBRIC_TEMPLATE[e.evaluation_type] || [
-                  { name: "Criteria 1", weight: 34 },
-                  { name: "Criteria 2", weight: 33 },
-                  { name: "Criteria 3", weight: 33 },
-                ];
-                return (
-                  <div key={`rubric-${e.id}`} className="glass-card p-4">
-                    <p className="text-sm font-black capitalize text-slate-900 mb-3">{e.evaluation_type?.replaceAll("_", " ")}</p>
-                    <div className="space-y-2">
-                      {rubrics.map((r) => {
-                        const approx = ((Number(e.obtained_marks || 0) * r.weight) / 100).toFixed(2);
-                        return (
-                          <div key={`${e.id}-${r.name}`}>
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="font-semibold text-slate-700">{r.name}</span>
-                              <span className="text-slate-500">{approx} pts ({r.weight}%)</span>
-                            </div>
-                            <div className="mt-1 h-2 rounded-full bg-slate-100">
-                              <div className="h-2 rounded-full bg-teal-400" style={{ width: `${Math.max(8, r.weight)}%` }} />
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="glass-card-strong p-5">
+              <h2 className="font-black text-slate-900 mb-2">Published Result</h2>
+              <p className="text-sm text-slate-600">
+                Your final mark has been published. Internal calculation and rubric-wise evaluation remain controlled in the backend and are visible only to authorized staff.
+              </p>
+              <p className="text-xs text-slate-400 mt-3">
+                Published at: {result?.published_at ? new Date(result.published_at).toLocaleString("en-IN") : "-"}
+              </p>
             </div>
-          )}
-        </div>
 
-        <div className="glass-card-strong p-5">
-          <h2 className="font-black text-slate-900 mb-4">Performance Chart</h2>
-          {evaluations.length === 0 ? (
-            <p className="text-sm text-slate-500">No chart data yet.</p>
-          ) : (
-            <div className="space-y-3">
-              {evaluations.map((e) => {
-                const percent = e.max_marks ? (Number(e.obtained_marks) / Number(e.max_marks)) * 100 : 0;
-                return (
-                  <div key={`bar-${e.id}`}>
-                    <div className="flex items-center justify-between text-xs mb-1">
-                      <span className="font-semibold capitalize">{e.evaluation_type?.replaceAll("_", " ")}</span>
-                      <span>{percent.toFixed(1)}%</span>
+            <div className="glass-card-strong p-5">
+              <h2 className="font-black text-slate-900 mb-2">Individual Feedback</h2>
+              {feedbackItems.length === 0 ? (
+                <p className="text-sm text-slate-500">No individual mentor feedback has been shared yet.</p>
+              ) : (
+                <div className="space-y-3">
+                  {feedbackItems.map((item) => (
+                    <div key={item.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                      <p className="text-sm text-slate-700">{item.message}</p>
+                      <p className="mt-2 text-xs text-slate-400">
+                        {item.created_at ? new Date(item.created_at).toLocaleString("en-IN") : "-"}
+                      </p>
                     </div>
-                    <div className="h-2 rounded-full bg-slate-100">
-                      <div className="h-2 rounded-full bg-slate-900" style={{ width: `${Math.max(4, Math.min(100, percent))}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
     </div>
   );

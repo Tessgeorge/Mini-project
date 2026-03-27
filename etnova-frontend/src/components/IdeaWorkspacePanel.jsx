@@ -57,6 +57,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingIdeaId, setEditingIdeaId] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
+  const [autoEvaluations, setAutoEvaluations] = useState({});
 
   const loadIdeas = useCallback(async () => {
     if (!project?.id) {
@@ -91,6 +92,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     () => ideas.find((idea) => idea.id === selectedIdeaId) || ideas[0] || null,
     [ideas, selectedIdeaId]
   );
+  const selectedAutoEvaluation = selectedIdea ? (autoEvaluations[selectedIdea.id] || selectedIdea.auto_evaluation || null) : null;
 
   const teamLeader = useMemo(() => {
     const leader = (project?.team_members || []).find((member) => member.role === "leader");
@@ -168,9 +170,12 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     setError("");
     setNotice("");
     try {
-      await apiRequest(`/projects/${project.id}/ideas/${idea.id}/submit`, {
+      const submitResult = await apiRequest(`/projects/${project.id}/ideas/${idea.id}/submit`, {
         method: "POST",
       });
+      if (submitResult?.id && submitResult?.auto_evaluation) {
+        setAutoEvaluations((prev) => ({ ...prev, [submitResult.id]: submitResult.auto_evaluation }));
+      }
       setNotice(`Version ${idea.version_no} submitted for mentor review.`);
       await loadIdeas();
       await onRefresh?.();
@@ -377,6 +382,27 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                       <p className="text-xs text-slate-500 mt-0.5">Latest review and comments for this idea.</p>
                     </div>
                   </div>
+                  {selectedAutoEvaluation ? (
+                    <div className="mt-3 rounded-xl border border-teal-200 bg-teal-50 px-4 py-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-teal-300 bg-white px-2.5 py-1 text-xs font-bold text-teal-700">
+                          <span className="material-symbols-outlined text-sm">auto_awesome</span>
+                          Auto Review
+                        </span>
+                        <span className="text-xs font-bold text-slate-700">Score: {selectedAutoEvaluation.score}/100</span>
+                        <span className={`text-xs font-bold ${selectedAutoEvaluation.status === "Good" ? "text-emerald-700" : "text-amber-700"}`}>
+                          {selectedAutoEvaluation.status}
+                        </span>
+                      </div>
+                      {Array.isArray(selectedAutoEvaluation.feedback) && selectedAutoEvaluation.feedback.length > 0 ? (
+                        <ul className="mt-2 space-y-1 text-sm text-slate-700">
+                          {selectedAutoEvaluation.feedback.map((item) => (
+                            <li key={item}>- {item}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {selectedIdea.latest_review ? (
                     <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                       <div className="flex flex-wrap items-center gap-2">

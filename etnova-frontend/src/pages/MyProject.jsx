@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import EditProjectModal from "../components/EditProjectModal";
+import ProjectDiaryPanel from "../components/ProjectDiaryPanel";
 import {
   fetchStudentBootstrapData,
   invalidateStudentBootstrapCache,
@@ -47,8 +48,9 @@ function FieldBlock({ label, children }) {
   );
 }
 
-function StatusBadge({ status }) {
-  const normalized = (status || "pending").toLowerCase();
+function StatusBadge({ project }) {
+  const normalized = (project?.status || "pending").toLowerCase();
+  const hasApprovedIdea = Boolean(project?.approved_idea_id);
   const map = {
     pending: {
       cls: "bg-amber-50 text-amber-700 border-amber-200",
@@ -77,7 +79,9 @@ function StatusBadge({ status }) {
     },
   };
 
-  const { cls, icon, label } = map[normalized] || map.pending;
+  const shouldShowApproved = hasApprovedIdea && normalized !== "completed";
+  const view = shouldShowApproved ? map.approved : (map[normalized] || map.pending);
+  const { cls, icon, label } = view;
 
   return (
     <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border ${cls}`}>
@@ -143,31 +147,6 @@ export default function MyProject() {
     [project?.technology_stacks],
   );
 
-  const checklist = useMemo(() => {
-    const docs = project?.documents || [];
-    const evals = project?.evaluations || [];
-    return [
-      {
-        label: "Proposal Submitted",
-        sub: "Initial project brief submitted for review",
-        done: docs.some((d) => ["proposal", "abstract", "srs"].includes(d.document_type)),
-        icon: "description",
-      },
-      {
-        label: "Mid-Review Completed",
-        sub: "Progress evaluation conducted by mentor",
-        done: evals.some((e) => e.evaluation_type === "mid_review"),
-        icon: "rate_review",
-      },
-      {
-        label: "Final Submitted",
-        sub: "Final report and presentation uploaded",
-        done: docs.some((d) => ["final_report", "presentation"].includes(d.document_type)),
-        icon: "task_alt",
-      },
-    ];
-  }, [project]);
-
   const handleProjectSaved = (updatedProject) => {
     setProject((prev) => (prev ? { ...prev, ...updatedProject } : updatedProject));
     invalidateStudentBootstrapCache();
@@ -213,7 +192,7 @@ export default function MyProject() {
               <p className="text-xs text-slate-500 mt-0.5">Official academic identity record</p>
             </div>
           </div>
-          <StatusBadge status={project.status} />
+          <StatusBadge project={project} />
         </div>
       </div>
 
@@ -405,48 +384,13 @@ export default function MyProject() {
           </section>
         </div>
 
-        <section className="glass-card-strong p-4 sm:p-6">
-          <SectionHead icon="checklist" title="Project Timeline Checklist" />
-          <div className="relative">
-            <div className="absolute left-[17px] top-6 bottom-6 w-px bg-slate-100" />
-            <div className="space-y-5">
-              {checklist.map((item, index) => (
-                <div key={item.label} className="flex items-start gap-4">
-                  <div
-                    className={`size-9 rounded-full flex items-center justify-center flex-shrink-0 z-10 ${
-                      item.done
-                        ? "bg-emerald-400 text-white shadow-sm"
-                        : index === checklist.findIndex((c) => !c.done)
-                          ? "border-2 border-[#00D2C4] text-[#00D2C4] bg-white"
-                          : "border-2 border-slate-200 text-slate-300 bg-white"
-                    }`}
-                  >
-                    <span className="material-symbols-outlined text-base">
-                      {item.done ? "check" : item.icon}
-                    </span>
-                  </div>
-                  <div className="flex-1 pt-1">
-                    <div className="flex items-center justify-between">
-                      <p className={`text-sm font-black ${item.done ? "text-slate-900" : "text-slate-500"}`}>
-                        {item.label}
-                      </p>
-                      {item.done ? (
-                        <span className="text-xs font-bold text-emerald-600">Done</span>
-                      ) : index === checklist.findIndex((c) => !c.done) ? (
-                        <span className="text-xs font-bold" style={{ color: "#00D2C4" }}>
-                          Current
-                        </span>
-                      ) : (
-                        <span className="text-xs text-slate-400">Pending</span>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-400 mt-0.5">{item.sub}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
+        <ProjectDiaryPanel
+          project={project}
+          currentUserId={profile?.id}
+          currentUserName={profile?.full_name}
+          role="student"
+        />
+
       </main>
 
       <EditProjectModal

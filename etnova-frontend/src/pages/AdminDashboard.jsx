@@ -93,6 +93,10 @@ export default function AdminDashboard() {
     }
     if (itemId === "review-management") {
       navigate("/admin/review-management");
+      return;
+    }
+    if (itemId === "rubrics-management") {
+      navigate("/admin/rubrics");
     }
   };
 
