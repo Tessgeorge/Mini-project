@@ -56,6 +56,9 @@ import {
   createProjectIdea,
   updateProjectIdea,
   submitProjectIdea,
+  generateProjectIdeaDraft,
+  generateProjectIdeaChat,
+  getProjectIdeaChat,
   getMentorIdeas,
   reviewProjectIdea,
 } from '../controllers/ideaController.js';
@@ -93,6 +96,9 @@ router.get('/projects/:id/ideas', authenticateUser, canAccessProject(), getProje
 router.post('/projects/:id/ideas', authenticateUser, requireRole(['student']), canAccessProject(), createProjectIdea);
 router.put('/projects/:id/ideas/:ideaId', authenticateUser, requireRole(['student']), canAccessProject(), updateProjectIdea);
 router.post('/projects/:id/ideas/:ideaId/submit', authenticateUser, requireRole(['student']), canAccessProject(), submitProjectIdea);
+router.post('/projects/:id/ideas/assistant-draft', authenticateUser, requireRole(['student']), canAccessProject(), generateProjectIdeaDraft);
+router.get('/ideas/:ideaId/chat', authenticateUser, requireRole(['student']), getProjectIdeaChat);
+router.post('/ideas/:ideaId/chat', authenticateUser, requireRole(['student']), generateProjectIdeaChat);
 
 // Mentor routes
 router.put('/projects/:id/approve', authenticateUser, requireRole(['mentor', 'admin']), canAccessProject(), approveProject);

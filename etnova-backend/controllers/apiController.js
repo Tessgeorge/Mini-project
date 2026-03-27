@@ -403,6 +403,7 @@ export const createProject = async (req, res) => {
           project_id: projectRow.id,
           version_no: 1,
           title: initialIdeaTitle || teamName,
+          domain: defaultDomain,
           description,
           technologies: technologyStacks ?? [],
           status: 'draft',
