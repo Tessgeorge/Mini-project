@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '../config/supabase.js';
+import { PDFParse } from 'pdf-parse';
 
 const supabase = supabaseAdmin;
 
@@ -34,6 +35,12 @@ const IDEA_ASSISTANT_SCHEMA = {
       items: { type: 'string' },
     },
     domain: { type: 'string' },
+    subdomain: { type: 'string' },
+    confidence_score: { type: 'number' },
+    keywords: {
+      type: 'array',
+      items: { type: 'string' },
+    },
     summary: { type: 'string' },
     readiness: { type: 'string', enum: ['ready', 'needs_more_detail'] },
     missing_details: {
@@ -51,6 +58,9 @@ const IDEA_ASSISTANT_SCHEMA = {
     'description',
     'technologies',
     'domain',
+    'subdomain',
+    'confidence_score',
+    'keywords',
     'summary',
     'readiness',
     'missing_details',
@@ -69,6 +79,12 @@ const GEMINI_IDEA_ASSISTANT_SCHEMA = {
       items: { type: 'STRING' },
     },
     domain: { type: 'STRING' },
+    subdomain: { type: 'STRING' },
+    confidence_score: { type: 'NUMBER' },
+    keywords: {
+      type: 'ARRAY',
+      items: { type: 'STRING' },
+    },
     summary: { type: 'STRING' },
     readiness: {
       type: 'STRING',
@@ -89,6 +105,9 @@ const GEMINI_IDEA_ASSISTANT_SCHEMA = {
     'description',
     'technologies',
     'domain',
+    'subdomain',
+    'confidence_score',
+    'keywords',
     'summary',
     'readiness',
     'missing_details',
@@ -100,6 +119,9 @@ const GEMINI_IDEA_ASSISTANT_SCHEMA = {
     'description',
     'technologies',
     'domain',
+    'subdomain',
+    'confidence_score',
+    'keywords',
     'summary',
     'readiness',
     'missing_details',
@@ -124,8 +146,14 @@ const IDEA_ASSISTANT_CHAT_SCHEMA = {
           items: { type: 'string' },
         },
         domain: { type: 'string' },
+        subdomain: { type: 'string' },
+        confidence_score: { type: 'number' },
+        keywords: {
+          type: 'array',
+          items: { type: 'string' },
+        },
       },
-      required: ['title', 'description', 'technologies', 'domain'],
+      required: ['title', 'description', 'technologies', 'domain', 'subdomain', 'confidence_score', 'keywords'],
     },
     readiness: { type: 'string', enum: ['exploring', 'ready_to_apply'] },
     follow_up_questions: {
@@ -150,9 +178,15 @@ const GEMINI_IDEA_ASSISTANT_CHAT_SCHEMA = {
           items: { type: 'STRING' },
         },
         domain: { type: 'STRING' },
+        subdomain: { type: 'STRING' },
+        confidence_score: { type: 'NUMBER' },
+        keywords: {
+          type: 'ARRAY',
+          items: { type: 'STRING' },
+        },
       },
-      required: ['title', 'description', 'technologies', 'domain'],
-      propertyOrdering: ['title', 'description', 'technologies', 'domain'],
+      required: ['title', 'description', 'technologies', 'domain', 'subdomain', 'confidence_score', 'keywords'],
+      propertyOrdering: ['title', 'description', 'technologies', 'domain', 'subdomain', 'confidence_score', 'keywords'],
     },
     readiness: {
       type: 'STRING',
@@ -175,6 +209,13 @@ function keepTitleWithinWordLimit(value, maxWords = 6) {
     .filter(Boolean)
     .slice(0, maxWords)
     .join(' ');
+}
+
+function keepChatTitleWithinLimit(value, maxChars = 40) {
+  const normalized = normalizeTextField(value, { maxLength: 160 }) || '';
+  if (!normalized) return '';
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
 }
 
 const safeProfileName = (profile, fallback = 'User') => {
@@ -211,11 +252,73 @@ const normalizeIdeaDomain = (value, { fallback = null } = {}) => {
   return normalized.slice(0, 120);
 };
 
+const normalizeIdeaSubdomain = (value, { fallback = null } = {}) => {
+  if (value === undefined) return undefined;
+  if (value === null) return fallback;
+  const normalized = String(value).trim();
+  if (!normalized) return fallback;
+  return normalized.slice(0, 120);
+};
+
+const normalizeIdeaKeywords = (value) => {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(
+    value
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+      .map((item) => item.slice(0, 40))
+  )].slice(0, 10);
+};
+
+const normalizeConfidenceScore = (value, fallback = 0) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  if (numeric > 1) return Math.max(0, Math.min(1, Number((numeric / 100).toFixed(2))));
+  return Math.max(0, Math.min(1, Number(numeric.toFixed(2))));
+};
+
 const normalizeIdeaStatus = (value, allowed = IDEA_STATUSES) => {
   const normalized = String(value || '').trim().toLowerCase();
   if (!allowed.has(normalized)) return null;
   return normalized;
 };
+
+function normalizeAssistantDraftPatch(value, project = null) {
+  return {
+    title:
+      keepTitleWithinWordLimit(value?.title)
+      || keepTitleWithinWordLimit(project?.title || project?.team_name)
+      || 'Untitled Idea',
+    description: normalizeTextField(value?.description, { maxLength: 3000 }) || '',
+    technologies: normalizeTechnologyStacks(value?.technologies),
+    domain:
+      normalizeIdeaDomain(value?.domain, { fallback: project?.domain || 'General' })
+      || project?.domain
+      || 'General',
+    subdomain: normalizeIdeaSubdomain(value?.subdomain, { fallback: '' }) || '',
+    confidence_score: normalizeConfidenceScore(value?.confidence_score, 0),
+    keywords: normalizeIdeaKeywords(value?.keywords),
+  };
+}
+
+function buildAssistantCurrentDraft(source = {}, project = null) {
+  const normalized = normalizeAssistantDraftPatch(source, project);
+  return {
+    ...normalized,
+    title: normalized.title || '',
+    description: normalized.description || '',
+    domain: normalized.domain || '',
+  };
+}
+
+function deriveChatTitleFromMessages(messages = [], assistantDraft = null, fallback = '') {
+  const firstUserMessage = sanitizeAssistantMessages(messages).find((message) => message.role === 'user')?.content || '';
+  return (
+    keepChatTitleWithinLimit(firstUserMessage)
+    || keepChatTitleWithinLimit(assistantDraft?.title)
+    || keepChatTitleWithinLimit(fallback)
+  );
+}
 
 const clampScore = (value, min = 0, max = 100) => Math.max(min, Math.min(max, Math.round(Number(value) || 0)));
 
@@ -436,8 +539,11 @@ async function listIdeasForProject(projectId) {
       version_no,
       title,
       domain,
+      subdomain,
       description,
       technologies,
+      confidence_score,
+      keywords,
       status,
       submitted_at,
       created_by,
@@ -467,7 +573,7 @@ async function getProjectRow(projectId) {
 async function getIdeaRow(ideaId) {
   const { data, error } = await supabase
     .from('project_ideas')
-    .select('id, project_id, version_no, title, domain, description, technologies, status, submitted_at, created_by, created_at, updated_at')
+    .select('id, project_id, version_no, title, domain, subdomain, description, technologies, confidence_score, keywords, status, submitted_at, created_by, created_at, updated_at')
     .eq('id', ideaId)
     .single();
 
@@ -512,6 +618,114 @@ async function assertStudentCanAccessIdea(ideaId, userId) {
   }
 
   return { idea, project };
+}
+
+async function getProjectIdeaChatSession(chatId) {
+  const { data, error } = await supabase
+    .from('idea_chats')
+    .select('id, project_id, title, latest_draft, created_at, updated_at')
+    .eq('id', chatId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data || null;
+}
+
+async function listProjectIdeaChats(projectId) {
+  const { data, error } = await supabase
+    .from('idea_chats')
+    .select('id, project_id, title, latest_draft, created_at, updated_at')
+    .eq('project_id', projectId)
+    .order('updated_at', { ascending: false });
+
+  if (error) throw error;
+  return data || [];
+}
+
+async function createProjectIdeaChatRecord(projectId) {
+  const { data, error } = await supabase
+    .from('idea_chats')
+    .insert({
+      project_id: projectId,
+      title: null,
+      latest_draft: null,
+    })
+    .select('id, project_id, title, latest_draft, created_at, updated_at')
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+async function listProjectIdeaChatMessages(chatId) {
+  const { data, error } = await supabase
+    .from('idea_chat_messages')
+    .select('id, chat_id, role, content, attachments, created_at')
+    .eq('chat_id', chatId)
+    .order('created_at', { ascending: true });
+
+  if (error) throw error;
+  return data || [];
+}
+
+async function createProjectIdeaChatMessage(chatId, role, content, attachments = []) {
+  const { data, error } = await supabase
+    .from('idea_chat_messages')
+    .insert({
+      chat_id: chatId,
+      role,
+      content,
+      attachments,
+    })
+    .select('id, chat_id, role, content, attachments, created_at')
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+async function updateProjectIdeaChatSession(chatId, updates) {
+  const { data, error } = await supabase
+    .from('idea_chats')
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', chatId)
+    .select('id, project_id, title, latest_draft, created_at, updated_at')
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+async function deleteProjectIdeaChatSessionRecord(chatId) {
+  const { error } = await supabase
+    .from('idea_chats')
+    .delete()
+    .eq('id', chatId);
+
+  if (error) throw error;
+}
+
+async function assertStudentCanAccessProjectChat(chatId, userId) {
+  const chat = await getProjectIdeaChatSession(chatId);
+  if (!chat) {
+    const error = new Error('Chat not found.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const project = await getProjectAccessRow(chat.project_id);
+  const isMember = (project.team_members || []).some((member) => member.student_id === userId);
+
+  if (!isMember) {
+    const error = new Error('You do not have access to this chat.');
+    error.statusCode = 403;
+    throw error;
+  }
+
+  return { chat, project };
 }
 
 async function getIdeaAssistantChat(ideaId) {
@@ -669,6 +883,7 @@ function buildIdeaAssistantSystemPrompt() {
     'Keep the idea realistic for an academic project team.',
     'Write concise but complete content suitable for a mentor review workflow.',
     'Infer a single best-fit project domain.',
+    'Also infer a useful subdomain, a confidence_score between 0 and 1, and short keywords that describe the idea.',
     'Generate a short, professional title with a maximum of 6 words.',
     'Technologies should be specific and relevant, without overloading the stack.',
     'If important information is missing, still produce the best possible draft and list the missing details separately.',
@@ -685,9 +900,9 @@ function buildIdeaAssistantChatSystemPrompt() {
     'Guide the idea step by step instead of dumping everything at once.',
     'If the idea is vague, ask thoughtful follow-up questions. If it is clear, improve it with better naming, scope, feasibility, innovation, and technology choices.',
     'Use previous messages to maintain continuity and build on what the student already said.',
-    'Internally maintain and improve a structured draft with title, domain, description, and technologies, but do not expose that structure in the conversational message.',
+    'Internally maintain and improve a structured draft with title, domain, subdomain, description, technologies, confidence_score, and keywords, but do not expose that structure in the conversational message.',
     'The title in draft_patch must be short, clear, professional, and no more than 6 words.',
-    'Infer a strong best-fit domain and choose practical technologies without overloading the stack.',
+    'Infer a strong best-fit domain, a specific subdomain, a confidence_score between 0 and 1, and concise keywords. Choose practical technologies without overloading the stack.',
     'When helpful, naturally suggest improvements or ask whether the student wants to apply the refined idea to the workspace.',
     'Always return valid JSON with message, draft_patch, readiness, and follow_up_questions.',
     'The message must sound like a natural mentor reply, not like JSON or form labels.',
@@ -722,11 +937,9 @@ function parseJsonDraft(parsedText) {
     throw new Error('AI assistant response could not be parsed.');
   }
 
+  const normalizedDraft = normalizeAssistantDraftPatch(parsedDraft);
   return {
-    title: keepTitleWithinWordLimit(parsedDraft.title) || 'Untitled Idea',
-    description: normalizeTextField(parsedDraft.description, { maxLength: 3000 }) || '',
-    technologies: normalizeTechnologyStacks(parsedDraft.technologies),
-    domain: normalizeIdeaDomain(parsedDraft.domain, { fallback: 'General' }) || 'General',
+    ...normalizedDraft,
     summary: normalizeTextField(parsedDraft.summary, { maxLength: 1500 }) || '',
     readiness: String(parsedDraft.readiness || '').toLowerCase() === 'ready' ? 'ready' : 'needs_more_detail',
     missing_details: Array.isArray(parsedDraft.missing_details)
@@ -747,23 +960,11 @@ function parseJsonChatResponse(parsedText, project) {
     throw new Error('AI assistant chat response could not be parsed.');
   }
 
+  const normalizedDraft = normalizeAssistantDraftPatch(parsedResponse?.draft_patch, project);
   return {
     message: normalizeTextField(parsedResponse.message, { required: true, maxLength: 3000 })
       || 'I refined the idea based on your latest message.',
-    draft_patch: {
-      title:
-        keepTitleWithinWordLimit(parsedResponse?.draft_patch?.title)
-        || keepTitleWithinWordLimit(project?.title || project?.team_name)
-        || 'Untitled Idea',
-      description:
-        normalizeTextField(parsedResponse?.draft_patch?.description, { maxLength: 3000 })
-        || '',
-      technologies: normalizeTechnologyStacks(parsedResponse?.draft_patch?.technologies),
-      domain:
-        normalizeIdeaDomain(parsedResponse?.draft_patch?.domain, { fallback: project?.domain || 'General' })
-        || project?.domain
-        || 'General',
-    },
+    draft_patch: normalizedDraft,
     readiness:
       String(parsedResponse.readiness || '').toLowerCase() === 'ready_to_apply'
         ? 'ready_to_apply'
@@ -783,6 +984,55 @@ function extractBase64Image(imageDataUrl) {
 function extractImageMimeType(imageDataUrl) {
   const match = String(imageDataUrl || '').match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/);
   return match?.[1] || 'image/png';
+}
+
+function decodeDataUrlToBuffer(dataUrl) {
+  const source = String(dataUrl || '');
+  const base64 = source.includes(',') ? source.split(',')[1] : '';
+  if (!base64) return Buffer.alloc(0);
+  return Buffer.from(base64, 'base64');
+}
+
+async function extractAttachmentText(attachment) {
+  if (!attachment?.dataUrl) return '';
+  const mimeType = String(attachment.mimeType || '').toLowerCase();
+
+  try {
+    if (mimeType === 'application/pdf') {
+      const buffer = decodeDataUrlToBuffer(attachment.dataUrl);
+      if (!buffer.length) return '';
+      const parser = new PDFParse({ data: buffer });
+      try {
+        const parsed = await parser.getText();
+        return normalizeTextField(parsed?.text, { maxLength: 8000 }) || '';
+      } finally {
+        await parser.destroy();
+      }
+    }
+
+    if (
+      mimeType.startsWith('text/')
+      || ['application/json', 'application/csv', 'text/csv'].includes(mimeType)
+    ) {
+      const buffer = decodeDataUrlToBuffer(attachment.dataUrl);
+      return normalizeTextField(buffer.toString('utf8'), { maxLength: 8000 }) || '';
+    }
+  } catch (error) {
+    console.error('Attachment text extraction skipped:', error.message);
+  }
+
+  return '';
+}
+
+async function enrichAttachmentForChat(attachment) {
+  if (!attachment?.dataUrl) return null;
+  const textExcerpt = await extractAttachmentText(attachment);
+  return {
+    name: attachment.name || 'Attachment',
+    mimeType: attachment.mimeType || 'application/octet-stream',
+    dataUrl: attachment.dataUrl,
+    textExcerpt,
+  };
 }
 
 function buildIdeaAssistantUserPrompt({ project, prompt, currentDraft }) {
@@ -805,19 +1055,54 @@ function sanitizeAssistantMessages(messages) {
     .map((message) => ({
       role: String(message?.role || '').trim().toLowerCase(),
       content: normalizeTextField(message?.content, { maxLength: 2500 }) || '',
+      attachments: Array.isArray(message?.attachments)
+        ? message.attachments
+          .map((attachment) => ({
+            name: normalizeTextField(attachment?.name, { maxLength: 120 }) || 'Attachment',
+            mimeType: normalizeTextField(attachment?.mimeType, { maxLength: 120 }) || 'application/octet-stream',
+            dataUrl: normalizeTextField(attachment?.dataUrl, { maxLength: 10_000_000 }) || '',
+            textExcerpt: normalizeTextField(attachment?.textExcerpt, { maxLength: 4000 }) || '',
+          }))
+          .filter((attachment) => attachment.dataUrl)
+          .slice(0, 3)
+        : [],
     }))
-    .filter((message) => ['user', 'assistant'].includes(message.role) && message.content);
+    .filter((message) => ['user', 'assistant'].includes(message.role) && (message.content || message.attachments.length));
+}
+
+function buildAttachmentNarration(attachments = []) {
+  return (Array.isArray(attachments) ? attachments : [])
+    .map((attachment) => {
+      const label = attachment?.mimeType?.startsWith('image/') ? 'Attached image' : 'Attached file';
+      const excerpt = attachment?.textExcerpt ? ` Excerpt: ${attachment.textExcerpt.slice(0, 1200)}` : '';
+      return `${label}: ${attachment?.name || 'Attachment'}${excerpt}`;
+    })
+    .join(' | ');
+}
+
+function collectRecentImageAttachments(messages = [], limit = 3) {
+  return sanitizeAssistantMessages(messages)
+    .flatMap((message) => message.attachments || [])
+    .filter((attachment) => attachment?.mimeType?.startsWith('image/') && attachment?.dataUrl)
+    .slice(-limit);
 }
 
 function buildIdeaAssistantConversationText({ project, currentDraft, messages }) {
   const currentDraftJson = JSON.stringify({
     title: currentDraft?.title || '',
     domain: currentDraft?.domain || '',
+    subdomain: currentDraft?.subdomain || '',
     description: currentDraft?.description || '',
     technologies: Array.isArray(currentDraft?.technologies) ? currentDraft.technologies : [],
+    confidence_score: currentDraft?.confidence_score ?? 0,
+    keywords: Array.isArray(currentDraft?.keywords) ? currentDraft.keywords : [],
   });
   const transcript = sanitizeAssistantMessages(messages)
-    .map((message) => `${message.role === 'assistant' ? 'Assistant' : 'Student'}: ${message.content}`)
+    .map((message) => {
+      const attachmentNarration = buildAttachmentNarration(message.attachments);
+      const content = message.content || 'Shared an attachment for context.';
+      return `${message.role === 'assistant' ? 'Assistant' : 'Student'}: ${content}${attachmentNarration ? ` [${attachmentNarration}]` : ''}`;
+    })
     .join('\n');
 
   return [
@@ -830,6 +1115,7 @@ function buildIdeaAssistantConversationText({ project, currentDraft, messages })
     `Current draft description: ${currentDraft?.description || 'Not set'}`,
     `Current draft technologies: ${Array.isArray(currentDraft?.technologies) && currentDraft.technologies.length ? currentDraft.technologies.join(', ') : 'Not set'}`,
     `Current draft domain: ${currentDraft?.domain || 'Not set'}`,
+    `Current draft subdomain: ${currentDraft?.subdomain || 'Not set'}`,
     `Current extracted idea JSON: ${currentDraftJson}`,
     'Conversation so far:',
     transcript || 'No conversation yet.',
@@ -1057,7 +1343,7 @@ async function generateIdeaAssistantDraftWithGemini({ project, prompt, imageData
   };
 }
 
-async function generateIdeaAssistantChatWithOpenAI({ project, messages, imageDataUrl, currentDraft }) {
+async function generateIdeaAssistantChatWithOpenAI({ project, messages, currentDraft }) {
   if (!process.env.OPENAI_API_KEY) {
     const error = new Error('OPENAI_API_KEY is not configured on the backend.');
     error.statusCode = 503;
@@ -1071,10 +1357,11 @@ async function generateIdeaAssistantChatWithOpenAI({ project, messages, imageDat
     },
   ];
 
-  if (imageDataUrl) {
+  const recentImages = collectRecentImageAttachments(messages);
+  for (const attachment of recentImages) {
     content.push({
       type: 'input_image',
-      image_url: imageDataUrl,
+      image_url: attachment.dataUrl,
     });
   }
 
@@ -1127,15 +1414,17 @@ async function generateIdeaAssistantChatWithOpenAI({ project, messages, imageDat
   };
 }
 
-async function generateIdeaAssistantChatWithOllama({ project, messages, imageDataUrl, currentDraft }) {
+async function generateIdeaAssistantChatWithOllama({ project, messages, currentDraft }) {
   const message = {
     role: 'user',
     content: buildIdeaAssistantConversationText({ project, currentDraft, messages }),
   };
 
-  const base64Image = extractBase64Image(imageDataUrl);
-  if (base64Image) {
-    message.images = [base64Image];
+  const recentImages = collectRecentImageAttachments(messages)
+    .map((attachment) => extractBase64Image(attachment.dataUrl))
+    .filter(Boolean);
+  if (recentImages.length) {
+    message.images = recentImages;
   }
 
   let response;
@@ -1188,7 +1477,7 @@ async function generateIdeaAssistantChatWithOllama({ project, messages, imageDat
   };
 }
 
-async function generateIdeaAssistantChatWithGemini({ project, messages, imageDataUrl, currentDraft }) {
+async function generateIdeaAssistantChatWithGemini({ project, messages, currentDraft }) {
   if (!GOOGLE_API_KEY) {
     const error = new Error('GOOGLE_API_KEY is not configured on the backend.');
     error.statusCode = 503;
@@ -1201,11 +1490,13 @@ async function generateIdeaAssistantChatWithGemini({ project, messages, imageDat
     },
   ];
 
-  const base64Image = extractBase64Image(imageDataUrl);
-  if (base64Image) {
+  const recentImages = collectRecentImageAttachments(messages);
+  for (const attachment of recentImages) {
+    const base64Image = extractBase64Image(attachment.dataUrl);
+    if (!base64Image) continue;
     parts.push({
       inlineData: {
-        mimeType: extractImageMimeType(imageDataUrl),
+        mimeType: attachment.mimeType || extractImageMimeType(attachment.dataUrl),
         data: base64Image,
       },
     });
@@ -1275,17 +1566,165 @@ async function generateIdeaAssistantDraft({ project, prompt, imageDataUrl, curre
   return generateIdeaAssistantDraftWithOpenAI({ project, prompt, imageDataUrl, currentDraft });
 }
 
-async function generateIdeaAssistantChat({ project, messages, imageDataUrl, currentDraft }) {
+async function generateIdeaAssistantChat({ project, messages, currentDraft }) {
   if (IDEA_ASSISTANT_PROVIDER === 'gemini') {
-    return generateIdeaAssistantChatWithGemini({ project, messages, imageDataUrl, currentDraft });
+    return generateIdeaAssistantChatWithGemini({ project, messages, currentDraft });
   }
 
   if (IDEA_ASSISTANT_PROVIDER === 'ollama') {
-    return generateIdeaAssistantChatWithOllama({ project, messages, imageDataUrl, currentDraft });
+    return generateIdeaAssistantChatWithOllama({ project, messages, currentDraft });
   }
 
-  return generateIdeaAssistantChatWithOpenAI({ project, messages, imageDataUrl, currentDraft });
+  return generateIdeaAssistantChatWithOpenAI({ project, messages, currentDraft });
 }
+
+export const getProjectIdeaChats = async (req, res) => {
+  try {
+    const chats = await listProjectIdeaChats(req.params.id);
+    res.json(chats);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ message: error.message });
+  }
+};
+
+export const createProjectIdeaChatSession = async (req, res) => {
+  try {
+    const chat = await createProjectIdeaChatRecord(req.params.id);
+    res.status(201).json(chat);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ message: error.message });
+  }
+};
+
+export const getProjectIdeaChatMessages = async (req, res) => {
+  try {
+    const { chat } = await assertStudentCanAccessProjectChat(req.params.chatId, req.user.id);
+    const messages = await listProjectIdeaChatMessages(chat.id);
+
+    res.json({
+      chat,
+      messages,
+      latest_draft: chat.latest_draft || null,
+      readiness: 'exploring',
+      follow_up_questions: [],
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ message: error.message });
+  }
+};
+
+export const renameProjectIdeaChatSession = async (req, res) => {
+  try {
+    const title = normalizeTextField(req.body?.title, { required: true, maxLength: 120 });
+    if (!title) {
+      return res.status(400).json({ message: 'Chat title is required.' });
+    }
+
+    const { chat } = await assertStudentCanAccessProjectChat(req.params.chatId, req.user.id);
+    const updatedChat = await updateProjectIdeaChatSession(chat.id, { title });
+    res.json(updatedChat);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ message: error.message });
+  }
+};
+
+export const deleteProjectIdeaChatSession = async (req, res) => {
+  try {
+    const { chat } = await assertStudentCanAccessProjectChat(req.params.chatId, req.user.id);
+    await deleteProjectIdeaChatSessionRecord(chat.id);
+    res.status(204).send();
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ message: error.message });
+  }
+};
+
+export const sendProjectIdeaChatMessage = async (req, res) => {
+  try {
+    const message = normalizeTextField(req.body?.message, { maxLength: 2500 });
+    const attachment = req.body?.attachment && typeof req.body.attachment === 'object'
+      ? {
+          name: normalizeTextField(req.body.attachment?.name, { maxLength: 120 }) || 'Attachment',
+          mimeType: normalizeTextField(req.body.attachment?.mimeType, { maxLength: 120 }) || 'application/octet-stream',
+          dataUrl: normalizeTextField(req.body.attachment?.dataUrl, { maxLength: 10_000_000 }) || '',
+        }
+      : null;
+    const requestCurrentDraft = req.body?.currentDraft || {};
+
+    if (!message && !attachment?.dataUrl) {
+      return res.status(400).json({ message: 'Send a message or upload an attachment before asking the assistant.' });
+    }
+
+    if (attachment?.dataUrl && !/^data:[a-zA-Z0-9.+/-]+\/[a-zA-Z0-9.+-]+;base64,/.test(attachment.dataUrl)) {
+      return res.status(400).json({ message: 'Unsupported attachment format.' });
+    }
+
+    const { chat, project } = await assertStudentCanAccessProjectChat(req.params.chatId, req.user.id);
+    const persistedMessages = await listProjectIdeaChatMessages(chat.id);
+    const normalizedPersistedMessages = sanitizeAssistantMessages(persistedMessages);
+    const attachments = attachment?.dataUrl ? [await enrichAttachmentForChat(attachment)].filter(Boolean) : [];
+    const nextMessages = [
+      ...normalizedPersistedMessages,
+      {
+        role: 'user',
+        content: message || `Please analyze the attached ${attachment?.mimeType?.startsWith('image/') ? 'image' : 'file'} and help refine the idea.`,
+        attachments,
+      },
+    ];
+
+    const currentDraft = buildAssistantCurrentDraft({
+      title: requestCurrentDraft?.title || chat?.latest_draft?.title || project.title || '',
+      description: requestCurrentDraft?.description || chat?.latest_draft?.description || project.description || '',
+      technologies: requestCurrentDraft?.technologies || chat?.latest_draft?.technologies || project.technology_stacks,
+      domain: requestCurrentDraft?.domain || chat?.latest_draft?.domain || project.domain || '',
+      subdomain: requestCurrentDraft?.subdomain || chat?.latest_draft?.subdomain || '',
+      confidence_score: requestCurrentDraft?.confidence_score ?? chat?.latest_draft?.confidence_score ?? 0,
+      keywords: requestCurrentDraft?.keywords || chat?.latest_draft?.keywords || [],
+    }, project);
+
+    const assistantReply = await generateIdeaAssistantChat({
+      project,
+      messages: nextMessages,
+      currentDraft,
+    });
+
+    const savedUserMessage = await createProjectIdeaChatMessage(
+      chat.id,
+      'user',
+      message || `Please analyze the attached ${attachment?.mimeType?.startsWith('image/') ? 'image' : 'file'} and help refine the idea.`,
+      attachments
+    );
+    const savedAssistantMessage = await createProjectIdeaChatMessage(
+      chat.id,
+      'assistant',
+      assistantReply.message
+    );
+
+    const nextTitle =
+      chat.title
+      || deriveChatTitleFromMessages(nextMessages, assistantReply?.draft_patch, 'New Idea Chat')
+      || 'New Idea Chat';
+    const updatedChat = await updateProjectIdeaChatSession(chat.id, {
+      title: nextTitle,
+      latest_draft: assistantReply.draft_patch,
+    });
+
+    res.json({
+      chat: updatedChat,
+      user_message: savedUserMessage,
+      assistant_message: savedAssistantMessage,
+      reply: assistantReply.message,
+      draft_patch: assistantReply.draft_patch,
+      title: updatedChat.title || null,
+      readiness: assistantReply.readiness,
+      follow_up_questions: assistantReply.follow_up_questions,
+      provider: assistantReply.provider,
+      model: assistantReply.model,
+      generated_at: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ message: error.message });
+  }
+};
 
 export const getProjectIdeas = async (req, res) => {
   try {
@@ -1300,8 +1739,11 @@ export const createProjectIdea = async (req, res) => {
   try {
     const title = normalizeTextField(req.body?.title, { required: true, maxLength: 200 });
     const domain = normalizeIdeaDomain(req.body?.domain, { fallback: 'General' });
+    const subdomain = normalizeIdeaSubdomain(req.body?.subdomain, { fallback: '' }) || null;
     const description = normalizeTextField(req.body?.description, { maxLength: 3000 });
     const technologies = normalizeTechnologyStacks(req.body?.technologies);
+    const confidence_score = normalizeConfidenceScore(req.body?.confidence_score, 0);
+    const keywords = normalizeIdeaKeywords(req.body?.keywords);
 
     if (!title) {
       return res.status(400).json({ message: 'Idea title is required.' });
@@ -1326,8 +1768,11 @@ export const createProjectIdea = async (req, res) => {
         version_no: versionNo,
         title,
         domain,
+        subdomain,
         description,
         technologies,
+        confidence_score,
+        keywords,
         status: 'draft',
         created_by: req.user.id,
       })
@@ -1337,8 +1782,11 @@ export const createProjectIdea = async (req, res) => {
         version_no,
         title,
         domain,
+        subdomain,
         description,
         technologies,
+        confidence_score,
+        keywords,
         status,
         submitted_at,
         created_by,
@@ -1369,8 +1817,11 @@ export const updateProjectIdea = async (req, res) => {
   try {
     const title = normalizeTextField(req.body?.title, { required: true, maxLength: 200 });
     const domain = normalizeIdeaDomain(req.body?.domain, { fallback: 'General' });
+    const subdomain = normalizeIdeaSubdomain(req.body?.subdomain, { fallback: '' }) || null;
     const description = normalizeTextField(req.body?.description, { maxLength: 3000 });
     const technologies = normalizeTechnologyStacks(req.body?.technologies);
+    const confidence_score = normalizeConfidenceScore(req.body?.confidence_score, 0);
+    const keywords = normalizeIdeaKeywords(req.body?.keywords);
 
     const { data: existing, error: ideaError } = await supabase
       .from('project_ideas')
@@ -1396,8 +1847,11 @@ export const updateProjectIdea = async (req, res) => {
       .update({
         title,
         domain,
+        subdomain,
         description,
         technologies,
+        confidence_score,
+        keywords,
         updated_at: new Date().toISOString(),
       })
       .eq('id', existing.id)
@@ -1407,8 +1861,11 @@ export const updateProjectIdea = async (req, res) => {
         version_no,
         title,
         domain,
+        subdomain,
         description,
         technologies,
+        confidence_score,
+        keywords,
         status,
         submitted_at,
         created_by,
@@ -1466,8 +1923,11 @@ export const submitProjectIdea = async (req, res) => {
         version_no,
         title,
         domain,
+        subdomain,
         description,
         technologies,
+        confidence_score,
+        keywords,
         status,
         submitted_at,
         created_by,
@@ -1546,6 +2006,7 @@ export const generateProjectIdeaChat = async (req, res) => {
   try {
     const message = normalizeTextField(req.body?.message, { maxLength: 2500 });
     const imageDataUrl = normalizeTextField(req.body?.imageDataUrl, { maxLength: 10_000_000 });
+    const requestCurrentDraft = req.body?.currentDraft || {};
     if (!message && !imageDataUrl) {
       return res.status(400).json({ message: 'Send a message or upload an image before asking the assistant.' });
     }
@@ -1565,12 +2026,15 @@ export const generateProjectIdeaChat = async (req, res) => {
         content: message || `Please analyze the attached image for idea version ${idea.version_no}.`,
       },
     ];
-    const currentDraft = {
-      title: normalizeTextField(chat?.latest_draft?.title, { maxLength: 200 }) || idea.title || '',
-      description: normalizeTextField(chat?.latest_draft?.description, { maxLength: 3000 }) || idea.description || '',
-      technologies: normalizeTechnologyStacks(chat?.latest_draft?.technologies || idea.technologies),
-      domain: normalizeIdeaDomain(chat?.latest_draft?.domain, { fallback: idea.domain || '' }) || idea.domain || '',
-    };
+    const currentDraft = buildAssistantCurrentDraft({
+      title: requestCurrentDraft?.title || chat?.latest_draft?.title || idea.title || '',
+      description: requestCurrentDraft?.description || chat?.latest_draft?.description || idea.description || '',
+      technologies: requestCurrentDraft?.technologies || chat?.latest_draft?.technologies || idea.technologies,
+      domain: requestCurrentDraft?.domain || chat?.latest_draft?.domain || idea.domain || '',
+      subdomain: requestCurrentDraft?.subdomain || chat?.latest_draft?.subdomain || '',
+      confidence_score: requestCurrentDraft?.confidence_score ?? chat?.latest_draft?.confidence_score ?? 0,
+      keywords: requestCurrentDraft?.keywords || chat?.latest_draft?.keywords || [],
+    }, project);
 
     const assistantReply = await generateIdeaAssistantChat({
       project,
@@ -1592,8 +2056,7 @@ export const generateProjectIdeaChat = async (req, res) => {
 
     const nextTitle =
       chat.title
-      || keepTitleWithinWordLimit(assistantReply?.draft_patch?.title)
-      || keepTitleWithinWordLimit(message)
+      || deriveChatTitleFromMessages(nextMessages, assistantReply?.draft_patch, `Idea Chat V${idea.version_no}`)
       || `Idea Chat V${idea.version_no}`;
     const updatedChat = await updateIdeaAssistantChat(chat.id, {
       title: nextTitle,
@@ -1626,6 +2089,8 @@ export const getProjectIdeaChat = async (req, res) => {
         chat: null,
         messages: [],
         latest_draft: null,
+        readiness: 'exploring',
+        follow_up_questions: [],
       });
     }
 
@@ -1634,6 +2099,8 @@ export const getProjectIdeaChat = async (req, res) => {
       chat,
       messages,
       latest_draft: chat.latest_draft || null,
+      readiness: 'exploring',
+      follow_up_questions: [],
     });
   } catch (error) {
     res.status(error.statusCode || 500).json({ message: error.message });
@@ -1661,8 +2128,11 @@ export const getMentorIdeas = async (req, res) => {
         version_no,
         title,
         domain,
+        subdomain,
         description,
         technologies,
+        confidence_score,
+        keywords,
         status,
         submitted_at,
         created_by,
@@ -1772,8 +2242,11 @@ export const reviewProjectIdea = async (req, res) => {
         version_no,
         title,
         domain,
+        subdomain,
         description,
         technologies,
+        confidence_score,
+        keywords,
         status,
         submitted_at,
         created_by,

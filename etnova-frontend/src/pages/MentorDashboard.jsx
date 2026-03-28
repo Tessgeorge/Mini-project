@@ -460,6 +460,8 @@ function MentorProfileModal({ profile, onClose, onSave, onSignOut, startEditing 
     bio: profile?.bio || "",
     specialization: profile?.specialization || "",
     employee_id: profile?.employee_id || "",
+    domains_of_interest: Array.isArray(profile?.domains_of_interest) ? profile.domains_of_interest.join(", ") : "",
+    max_team_capacity: profile?.max_team_capacity || 2,
   });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -474,7 +476,13 @@ function MentorProfileModal({ profile, onClose, onSave, onSignOut, startEditing 
       const { error } = await supabase.from("profiles").update({
         full_name: form.full_name.trim(), department: form.department.trim(),
         phone: form.phone.trim(), bio: form.bio.trim(),
-        specialization: form.specialization.trim(), employee_id: form.employee_id.trim(),
+        specialization: form.specialization.trim(),
+        employee_id: form.employee_id.trim(),
+        domains_of_interest: String(form.domains_of_interest || "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+        max_team_capacity: Math.max(1, Number(form.max_team_capacity || 2)),
       }).eq("id", profile.id);
       if (error) throw error;
       onSave({ ...profile, ...form });
@@ -512,6 +520,20 @@ function MentorProfileModal({ profile, onClose, onSave, onSignOut, startEditing 
               <label className="block text-sm font-bold text-slate-900 mb-2">Specialization</label>
               <input className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900"
                 value={form.specialization} onChange={(e) => setForm((prev) => ({ ...prev, specialization: e.target.value }))} placeholder="e.g., Machine Learning" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
+              <label className="block text-sm font-bold text-slate-900 mb-2">Domains of Interest</label>
+              <input className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900"
+                value={form.domains_of_interest} onChange={(e) => setForm((prev) => ({ ...prev, domains_of_interest: e.target.value }))} placeholder="e.g., Healthcare AI, EdTech, Computer Vision" />
+              <p className="mt-1 text-xs text-slate-500">Separate multiple interests with commas.</p>
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-900 mb-2">Team Capacity</label>
+              <input type="number" min="1" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all text-slate-900"
+                value={form.max_team_capacity} onChange={(e) => setForm((prev) => ({ ...prev, max_team_capacity: e.target.value }))} placeholder="2" />
+              <p className="mt-1 text-xs text-slate-500">Used by admin suggestions to avoid overloading mentors.</p>
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

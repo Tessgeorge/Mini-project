@@ -56,6 +56,12 @@ import {
   createProjectIdea,
   updateProjectIdea,
   submitProjectIdea,
+  getProjectIdeaChats,
+  createProjectIdeaChatSession,
+  getProjectIdeaChatMessages,
+  renameProjectIdeaChatSession,
+  deleteProjectIdeaChatSession,
+  sendProjectIdeaChatMessage,
   generateProjectIdeaDraft,
   generateProjectIdeaChat,
   getProjectIdeaChat,
@@ -96,7 +102,13 @@ router.get('/projects/:id/ideas', authenticateUser, canAccessProject(), getProje
 router.post('/projects/:id/ideas', authenticateUser, requireRole(['student']), canAccessProject(), createProjectIdea);
 router.put('/projects/:id/ideas/:ideaId', authenticateUser, requireRole(['student']), canAccessProject(), updateProjectIdea);
 router.post('/projects/:id/ideas/:ideaId/submit', authenticateUser, requireRole(['student']), canAccessProject(), submitProjectIdea);
+router.get('/projects/:id/idea-chats', authenticateUser, requireRole(['student']), canAccessProject(), getProjectIdeaChats);
+router.post('/projects/:id/idea-chats', authenticateUser, requireRole(['student']), canAccessProject(), createProjectIdeaChatSession);
 router.post('/projects/:id/ideas/assistant-draft', authenticateUser, requireRole(['student']), canAccessProject(), generateProjectIdeaDraft);
+router.get('/idea-chats/:chatId/messages', authenticateUser, requireRole(['student']), getProjectIdeaChatMessages);
+router.put('/idea-chats/:chatId', authenticateUser, requireRole(['student']), renameProjectIdeaChatSession);
+router.delete('/idea-chats/:chatId', authenticateUser, requireRole(['student']), deleteProjectIdeaChatSession);
+router.post('/idea-chats/:chatId/messages', authenticateUser, requireRole(['student']), sendProjectIdeaChatMessage);
 router.get('/ideas/:ideaId/chat', authenticateUser, requireRole(['student']), getProjectIdeaChat);
 router.post('/ideas/:ideaId/chat', authenticateUser, requireRole(['student']), generateProjectIdeaChat);
 

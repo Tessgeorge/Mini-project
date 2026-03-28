@@ -234,6 +234,118 @@ const normalizeTechnologyStacks = (value) => {
   return unique.slice(0, 20);
 };
 
+const normalizeRecommendationTagList = (value) => {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map((item) => String(item || '').trim()).filter(Boolean))];
+  }
+
+  return [...new Set(
+    String(value || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+  )];
+};
+
+const getRecommendationMentorCapacity = (mentor) => {
+  const value = Number(mentor?.max_team_capacity);
+  return Number.isFinite(value) && value > 0 ? value : 2;
+};
+
+const tokenizeRecommendationTerms = (values) => {
+  return [...new Set(
+    values
+      .flatMap((value) => String(value || '').toLowerCase().split(/[^a-z0-9]+/))
+      .map((item) => item.trim())
+      .filter((item) => item.length >= 3)
+  )];
+};
+
+const buildRecommendationProjectSignals = (project) => {
+  const domain = String(project?.detected_domain || project?.domain || '').trim();
+  const subdomain = String(project?.detected_subdomain || '').trim();
+  const keywords = normalizeRecommendationTagList(project?.detected_keywords || []);
+  const technologies = normalizeRecommendationTagList(project?.technologies || []);
+  const department = String(project?.team_department || '').trim();
+
+  return {
+    domain,
+    subdomain,
+    keywords,
+    technologies,
+    department,
+    terms: tokenizeRecommendationTerms([domain, subdomain, ...keywords, ...technologies]),
+  };
+};
+
+const scoreGuideRecommendation = (project, mentor, workload) => {
+  const signals = buildRecommendationProjectSignals(project);
+  const interests = normalizeRecommendationTagList(mentor?.domains_of_interest);
+  const mentorTerms = tokenizeRecommendationTerms([mentor?.specialization || '', ...interests]);
+  const mentorDepartment = String(mentor?.department || '').trim().toLowerCase();
+  const projectDepartment = String(signals.department || '').trim().toLowerCase();
+  const capacity = getRecommendationMentorCapacity(mentor);
+  const remainingCapacity = capacity - workload;
+
+  let score = 20;
+  const reasons = [];
+
+  const hasDomainMatch = signals.domain && interests.some(
+    (item) => item.toLowerCase().includes(signals.domain.toLowerCase())
+      || signals.domain.toLowerCase().includes(item.toLowerCase())
+  );
+  if (hasDomainMatch) {
+    score += 32;
+    reasons.push('domain interest aligned');
+  }
+
+  const hasSubdomainMatch = signals.subdomain && mentorTerms.some(
+    (term) => signals.subdomain.toLowerCase().includes(term) || term.includes(signals.subdomain.toLowerCase())
+  );
+  if (hasSubdomainMatch) {
+    score += 18;
+    reasons.push('subdomain aligned');
+  }
+
+  const keywordMatches = signals.terms.filter((term) => mentorTerms.includes(term));
+  if (keywordMatches.length > 0) {
+    score += Math.min(18, keywordMatches.length * 6);
+    reasons.push(`matched ${keywordMatches.slice(0, 3).join(', ')}`);
+  }
+
+  if (
+    mentor?.specialization
+    && signals.terms.some((term) => String(mentor.specialization).toLowerCase().includes(term))
+  ) {
+    score += 12;
+    reasons.push('specialization matched');
+  }
+
+  if (mentorDepartment && projectDepartment && mentorDepartment === projectDepartment) {
+    score += 8;
+    reasons.push('department aligned');
+  }
+
+  if (remainingCapacity > 0) {
+    score += Math.min(10, remainingCapacity * 4);
+    reasons.push(`${remainingCapacity}/${capacity} slots free`);
+  } else {
+    score -= 18;
+    reasons.push('at capacity');
+  }
+
+  return {
+    mentor_id: mentor.id,
+    mentor_name: mentor.full_name,
+    score: Math.max(0, Math.min(99, Math.round(score))),
+    reasons: reasons.slice(0, 3),
+    workload,
+    capacity,
+    remainingCapacity,
+    eligible: remainingCapacity > 0,
+  };
+};
+
 // ====== USER PROFILE FUNCTIONS ======
 
 export const getUserProfile = async (req, res) => {

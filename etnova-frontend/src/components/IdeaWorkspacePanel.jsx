@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiRequest } from "../config/apiClient";
 import { getStatusMeta } from "../constants/statusConfig";
+import Modal from "./Modal";
 
 const EDITABLE_STATUSES = new Set(["draft", "revision_required", "rejected"]);
 
@@ -32,8 +33,17 @@ function IdeaStatusBadge({ status }) {
 const EMPTY_FORM = {
   title: "",
   domain: "",
+  subdomain: "",
   description: "",
   technologies: "",
+  confidence_score: 0,
+  keywords: "",
+};
+
+const COPILOT_STATES = {
+  CLOSED: "closed",
+  OPEN: "open",
+  MINIMIZED: "minimized",
 };
 
 const STARTER_ASSISTANT_MESSAGE = {
@@ -41,6 +51,11 @@ const STARTER_ASSISTANT_MESSAGE = {
   role: "assistant",
   content:
     "Tell me what you have in mind, even if it is rough. I will help you turn it into a strong, mentor-ready idea step by step.",
+};
+
+const EMPTY_ASSISTANT_META = {
+  readiness: "exploring",
+  follow_up_questions: [],
 };
 
 function toTechString(value) {
@@ -64,6 +79,301 @@ function readFileAsDataUrl(file) {
   });
 }
 
+function formatMessageTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString("en-IN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatMessageDateLabel(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const today = new Date();
+  const isSameDay =
+    date.getDate() === today.getDate()
+    && date.getMonth() === today.getMonth()
+    && date.getFullYear() === today.getFullYear();
+
+  if (isSameDay) return "Today";
+
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  const isYesterday =
+    date.getDate() === yesterday.getDate()
+    && date.getMonth() === yesterday.getMonth()
+    && date.getFullYear() === yesterday.getFullYear();
+
+  if (isYesterday) return "Yesterday";
+
+  return date.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function buildChatTimeline(messages) {
+  const timeline = [];
+  let lastDateLabel = "";
+
+  for (const message of messages) {
+    const nextDateLabel = formatMessageDateLabel(message?.created_at);
+    if (nextDateLabel && nextDateLabel !== lastDateLabel) {
+      timeline.push({
+        id: `divider-${message.id || nextDateLabel}`,
+        type: "divider",
+        label: nextDateLabel,
+      });
+      lastDateLabel = nextDateLabel;
+    }
+
+    timeline.push({
+      ...message,
+      type: "message",
+    });
+  }
+
+  return timeline;
+}
+
+function formatChatListTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const today = new Date();
+  const sameDay =
+    date.getDate() === today.getDate()
+    && date.getMonth() === today.getMonth()
+    && date.getFullYear() === today.getFullYear();
+
+  if (sameDay) {
+    return date.toLocaleTimeString("en-IN", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  return date.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+  });
+}
+
+function isDraftConfirmationMessage(value) {
+  const normalized = String(value || "")
+    .toLowerCase()
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) return false;
+
+  const directMatches = new Set([
+    "yes",
+    "yes please",
+    "yeah",
+    "yep",
+    "sure",
+    "ok",
+    "okay",
+    "go ahead",
+    "continue",
+    "proceed",
+    "draft it",
+    "show draft",
+    "show the draft",
+    "finalize it",
+    "finalise it",
+    "prepare draft",
+    "make the draft",
+    "create the draft",
+    "generate the draft",
+    "apply it",
+  ]);
+
+  if (directMatches.has(normalized)) return true;
+
+  const phraseMatches = [
+    "can you draft",
+    "please draft",
+    "show me the draft",
+    "let s draft",
+    "lets draft",
+    "go with this",
+    "this looks good",
+    "this is fine",
+    "draft this idea",
+    "prepare the idea",
+    "turn this into a draft",
+    "finalize the idea",
+    "finalise the idea",
+  ];
+
+  return phraseMatches.some((phrase) => normalized.includes(phrase));
+}
+
+function CopilotAvatar({ role }) {
+  const isAssistant = role === "assistant";
+
+  return (
+    <div
+      className={`flex size-8 shrink-0 items-center justify-center rounded-full border text-xs font-black ${
+        isAssistant
+          ? "border-white/80 bg-white text-slate-700 shadow-sm"
+          : "border-transparent text-slate-950 shadow-sm"
+      }`}
+      style={isAssistant ? undefined : { backgroundColor: "rgba(0,210,196,0.18)" }}
+    >
+      <span className="material-symbols-outlined text-[16px]">
+        {isAssistant ? "auto_awesome" : "person"}
+      </span>
+    </div>
+  );
+}
+
+function TypingIndicator() {
+  return (
+    <div className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 shadow-sm">
+      <div className="flex items-center gap-1.5">
+        {[0, 1, 2].map((item) => (
+          <span
+            key={item}
+            className="size-2 rounded-full bg-teal-300 animate-pulse"
+            style={{ animationDelay: `${item * 0.15}s` }}
+          />
+        ))}
+      </div>
+      <span></span>
+    </div>
+  );
+}
+
+function MessageAttachmentPreview({ attachment }) {
+  const isImage = attachment?.mimeType?.startsWith("image/");
+
+  if (isImage && attachment?.dataUrl) {
+    return (
+      <a
+        href={attachment.dataUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-3 block overflow-hidden rounded-2xl border border-slate-200 bg-white/80"
+      >
+        <img
+          src={attachment.dataUrl}
+          alt={attachment?.name || "Attached image"}
+          className="max-h-48 w-full object-cover"
+        />
+      </a>
+    );
+  }
+
+  return (
+    <a
+      href={attachment?.dataUrl || "#"}
+      target="_blank"
+      rel="noreferrer"
+      className="mt-3 inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700"
+    >
+      <span className="material-symbols-outlined text-[16px]">attach_file</span>
+      <span className="max-w-[180px] truncate">{attachment?.name || "Attachment"}</span>
+    </a>
+  );
+}
+
+function AssistantDraftPreview({ draft, readiness }) {
+  if (!draft) return null;
+
+  const confidencePercent = typeof draft.confidence_score === "number"
+    ? `${Math.round(Math.max(0, Math.min(1, draft.confidence_score)) * 100)}%`
+    : "Not available";
+  const technologies = Array.isArray(draft.technologies) ? draft.technologies.filter(Boolean) : [];
+  const keywords = Array.isArray(draft.keywords) ? draft.keywords.filter(Boolean) : [];
+
+  return (
+    <div className="rounded-3xl border border-teal-100 bg-white/80 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.06)] backdrop-blur-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Current Draft Preview</p>
+          <h3 className="mt-1 text-base font-black text-slate-900">{draft.title || "Untitled idea draft"}</h3>
+          <p className="mt-1 text-xs leading-relaxed text-slate-500">
+            Ask for any change here first, then use <span className="font-semibold text-slate-700">Apply</span> when the draft feels right.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {readiness === "ready_to_apply" ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
+              <span className="material-symbols-outlined text-[14px]">task_alt</span>
+              Ready to apply
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-700">
+              <span className="material-symbols-outlined text-[14px]">sync</span>
+              Still refining
+            </span>
+          )}
+          <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-600">
+            Confidence {confidencePercent}
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-3.5 py-3">
+          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">Domain</p>
+          <p className="mt-1 text-sm font-semibold text-slate-800">{draft.domain || "Not set yet"}</p>
+          {draft.subdomain ? (
+            <p className="mt-1 text-xs text-slate-500">{draft.subdomain}</p>
+          ) : null}
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-3.5 py-3">
+          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">Keywords</p>
+          {keywords.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {keywords.map((keyword) => (
+                <span key={keyword} className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                  {keyword}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-1 text-sm text-slate-500">No keywords yet</p>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-3.5 py-3">
+        <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">Description</p>
+        <p className="mt-1 text-sm leading-relaxed text-slate-700 whitespace-pre-wrap">
+          {draft.description || "The assistant is still shaping the description."}
+        </p>
+      </div>
+
+      <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-3.5 py-3">
+        <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">Suggested Technologies</p>
+        {technologies.length > 0 ? (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {technologies.map((item) => (
+              <span key={item} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+                {item}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-1 text-sm text-slate-500">No technologies suggested yet.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
   const [ideas, setIdeas] = useState([]);
   const [selectedIdeaId, setSelectedIdeaId] = useState("");
@@ -76,17 +386,24 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
   const [editingIdeaId, setEditingIdeaId] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
   const [autoEvaluations, setAutoEvaluations] = useState({});
-  const [assistantChat, setAssistantChat] = useState(null);
-  const [assistantMessages, setAssistantMessages] = useState([]);
+  const [chats, setChats] = useState([]);
+  const [activeChatId, setActiveChatId] = useState("");
+  const [messages, setMessages] = useState([]);
   const [assistantInput, setAssistantInput] = useState("");
-  const [assistantImageName, setAssistantImageName] = useState("");
-  const [assistantImageDataUrl, setAssistantImageDataUrl] = useState("");
+  const [assistantAttachment, setAssistantAttachment] = useState(null);
   const [assistantLoading, setAssistantLoading] = useState(false);
-  const [assistantHistoryLoading, setAssistantHistoryLoading] = useState(false);
+  const [assistantChatsLoading, setAssistantChatsLoading] = useState(false);
+  const [assistantMessagesLoading, setAssistantMessagesLoading] = useState(false);
   const [assistantError, setAssistantError] = useState("");
   const [assistantDraft, setAssistantDraft] = useState(null);
-  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantMeta, setAssistantMeta] = useState(EMPTY_ASSISTANT_META);
+  const [assistantWidgetState, setAssistantWidgetState] = useState(COPILOT_STATES.CLOSED);
+  const [assistantExpanded, setAssistantExpanded] = useState(false);
+  const [assistantSidebarHidden, setAssistantSidebarHidden] = useState(false);
+  const [chatMenuOpenId, setChatMenuOpenId] = useState("");
+  const [chatDialog, setChatDialog] = useState({ type: "", chat: null, value: "" });
   const assistantEndRef = useRef(null);
+  const assistantInputRef = useRef(null);
 
   const loadIdeas = useCallback(async () => {
     if (!project?.id) {
@@ -117,6 +434,12 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     loadIdeas();
   }, [loadIdeas]);
 
+  useEffect(() => {
+    if (selectedIdeaId) return;
+    setAssistantDraft(null);
+    setAssistantMeta(EMPTY_ASSISTANT_META);
+  }, [selectedIdeaId]);
+
   const selectedIdea = useMemo(
     () => ideas.find((idea) => idea.id === selectedIdeaId) || ideas[0] || null,
     [ideas, selectedIdeaId]
@@ -130,6 +453,18 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
 
   const mentorName = project?.guide?.full_name || project?.mentor?.full_name || "Mentor not assigned";
   const approvedIdea = ideas.find((idea) => String(idea.status).toLowerCase() === "approved") || null;
+  const activeChat = useMemo(
+    () => chats.find((chat) => chat.id === activeChatId) || null,
+    [activeChatId, chats]
+  );
+  const assistantIsOpen = assistantWidgetState === COPILOT_STATES.OPEN;
+  const assistantIsMinimized = assistantWidgetState === COPILOT_STATES.MINIMIZED;
+  const assistantCanApply = Boolean(
+    assistantDraft?.title
+      || assistantDraft?.description
+      || assistantDraft?.domain
+      || (assistantDraft?.technologies || []).length
+  );
 
   const openCreate = () => {
     setEditingIdeaId("");
@@ -145,8 +480,11 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     setForm({
       title: idea.title || "",
       domain: idea.domain || project?.domain || "",
+      subdomain: idea.subdomain || "",
       description: idea.description || "",
       technologies: toTechString(idea.technologies),
+      confidence_score: Number(idea.confidence_score || 0),
+      keywords: Array.isArray(idea.keywords) ? idea.keywords.join(", ") : "",
     });
     setIsFormOpen(true);
     setError("");
@@ -160,10 +498,35 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
   };
 
   const ensureFormOpen = () => {
-    if (!isFormOpen) {
-      setEditingIdeaId("");
-      setIsFormOpen(true);
+    if (isFormOpen) return;
+    if (selectedIdea && EDITABLE_STATUSES.has(String(selectedIdea.status || "").toLowerCase())) {
+      openEdit(selectedIdea);
+      return;
     }
+    openCreate();
+  };
+
+  const openAssistant = () => {
+    setAssistantWidgetState(COPILOT_STATES.OPEN);
+    setAssistantError("");
+  };
+
+  const minimizeAssistant = () => {
+    setAssistantWidgetState(COPILOT_STATES.MINIMIZED);
+  };
+
+  const closeAssistant = () => {
+    setAssistantWidgetState(COPILOT_STATES.CLOSED);
+    setAssistantError("");
+  };
+
+  const toggleAssistantExpanded = () => {
+    setAssistantExpanded((current) => !current);
+  };
+
+  const toggleAssistantSidebar = () => {
+    setAssistantSidebarHidden((current) => !current);
+    setChatMenuOpenId("");
   };
 
   const applyAssistantSuggestion = (mode = "all") => {
@@ -172,81 +535,245 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     setForm((prev) => ({
       title: mode === "all" || mode === "title" ? assistantDraft.title || prev.title : prev.title,
       domain: mode === "all" || mode === "domain" ? assistantDraft.domain || prev.domain : prev.domain,
+      subdomain: assistantDraft.subdomain || prev.subdomain,
       description: mode === "all" || mode === "description" ? assistantDraft.description || prev.description : prev.description,
       technologies:
         mode === "all" || mode === "technologies"
           ? toTechString(assistantDraft.technologies)
           : prev.technologies,
+      confidence_score: assistantDraft.confidence_score ?? prev.confidence_score,
+      keywords:
+        Array.isArray(assistantDraft.keywords) && assistantDraft.keywords.length > 0
+          ? assistantDraft.keywords.join(", ")
+          : prev.keywords,
     }));
     setNotice("AI draft applied to the idea form. Review it, adjust anything you want, and save when ready.");
     setError("");
+    setAssistantWidgetState(COPILOT_STATES.CLOSED);
   };
 
-  const handleAssistantImageChange = async (event) => {
+  const handleAssistantAttachmentChange = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setAssistantError("Please upload an image file.");
+    const isImage = file.type.startsWith("image/");
+    const allowedMime = isImage || ["application/pdf", "text/plain", "text/markdown", "text/csv", "application/json"].includes(file.type);
+    if (!allowedMime) {
+      setAssistantError("Please upload an image, PDF, or text-based file.");
       return;
     }
     if (file.size > 4 * 1024 * 1024) {
-      setAssistantError("Please upload an image smaller than 4 MB.");
+      setAssistantError("Please upload a file smaller than 4 MB.");
       return;
     }
 
     setAssistantError("");
     try {
       const dataUrl = await readFileAsDataUrl(file);
-      setAssistantImageDataUrl(dataUrl);
-      setAssistantImageName(file.name);
+      setAssistantAttachment({
+        name: file.name,
+        mimeType: file.type || "application/octet-stream",
+        dataUrl,
+      });
     } catch (fileError) {
-      setAssistantError(fileError.message || "Failed to read the selected image.");
+      setAssistantError(fileError.message || "Failed to read the selected file.");
     } finally {
       event.target.value = "";
     }
   };
 
-  const clearAssistantImage = () => {
-    setAssistantImageDataUrl("");
-    setAssistantImageName("");
+  const clearAssistantAttachment = () => {
+    setAssistantAttachment(null);
   };
 
-  const loadAssistantChat = useCallback(async () => {
-    if (!selectedIdea?.id || !assistantOpen) return;
-    setAssistantHistoryLoading(true);
+  const handleCreateChat = async () => {
+    if (!project?.id) return;
     setAssistantError("");
     try {
-      const response = await apiRequest(`/ideas/${selectedIdea.id}/chat`, { skipCache: true });
-      setAssistantChat(response?.chat || null);
-      setAssistantMessages(Array.isArray(response?.messages) ? response.messages : []);
-      setAssistantDraft(response?.latest_draft || null);
-    } catch (chatError) {
-      setAssistantError(chatError.message || "Failed to load assistant chat.");
-      setAssistantMessages([]);
+      const createdChat = await apiRequest(`/projects/${project.id}/idea-chats`, {
+        method: "POST",
+      });
+      setChats((current) => [createdChat, ...current]);
+      setActiveChatId(createdChat?.id || "");
+      setMessages([]);
       setAssistantDraft(null);
-      setAssistantChat(null);
-    } finally {
-      setAssistantHistoryLoading(false);
+      setAssistantMeta(EMPTY_ASSISTANT_META);
+      setAssistantInput("");
+      clearAssistantAttachment();
+    } catch (chatError) {
+      setAssistantError(chatError.message || "Failed to create a new chat.");
     }
-  }, [assistantOpen, selectedIdea?.id]);
+  };
+
+  const handleRenameChat = async (chat) => {
+    if (!chat?.id) return;
+    setChatMenuOpenId("");
+    setChatDialog({
+      type: "rename",
+      chat,
+      value: chat.title || "New chat",
+    });
+  };
+
+  const confirmRenameChat = async () => {
+    const chat = chatDialog.chat;
+    if (!chat?.id) return;
+    const trimmedTitle = String(chatDialog.value || "").trim();
+    if (!trimmedTitle) {
+      setAssistantError("Chat title cannot be empty.");
+      return;
+    }
+
+    setAssistantError("");
+    try {
+      const updatedChat = await apiRequest(`/idea-chats/${chat.id}`, {
+        method: "PUT",
+        body: { title: trimmedTitle },
+      });
+      setChats((current) =>
+        current.map((item) => (item.id === updatedChat.id ? { ...item, ...updatedChat } : item))
+      );
+      setChatDialog({ type: "", chat: null, value: "" });
+    } catch (chatError) {
+      setAssistantError(chatError.message || "Failed to rename the chat.");
+    }
+  };
+
+  const handleDeleteChat = async (chat) => {
+    if (!chat?.id) return;
+    setChatMenuOpenId("");
+    setChatDialog({ type: "delete", chat, value: "" });
+  };
+
+  const confirmDeleteChat = async () => {
+    const chat = chatDialog.chat;
+    if (!chat?.id) return;
+    setAssistantError("");
+    try {
+      await apiRequest(`/idea-chats/${chat.id}`, { method: "DELETE" });
+      const isDeletingActiveChat = activeChatId === chat.id;
+      const nextChatId = chats.find((item) => item.id !== chat.id)?.id || "";
+      setChats((current) => current.filter((item) => item.id !== chat.id));
+      if (isDeletingActiveChat) {
+        setActiveChatId(nextChatId);
+        setMessages([]);
+        setAssistantDraft(null);
+        setAssistantMeta(EMPTY_ASSISTANT_META);
+      }
+      setChatDialog({ type: "", chat: null, value: "" });
+    } catch (chatError) {
+      setAssistantError(chatError.message || "Failed to delete the chat.");
+    }
+  };
+
+  const loadChats = useCallback(async () => {
+    if (!project?.id || !assistantIsOpen) return;
+    setAssistantChatsLoading(true);
+    setAssistantError("");
+    try {
+      const response = await apiRequest(`/projects/${project.id}/idea-chats`, { skipCache: true });
+      const nextChats = Array.isArray(response) ? response : [];
+      setChats(nextChats);
+      setActiveChatId((current) => {
+        if (current && nextChats.some((chat) => chat.id === current)) return current;
+        return nextChats[0]?.id || "";
+      });
+    } catch (chatError) {
+      setAssistantError(chatError.message || "Failed to load copilot chats.");
+      setChats([]);
+      setActiveChatId("");
+      setMessages([]);
+      setAssistantDraft(null);
+      setAssistantMeta(EMPTY_ASSISTANT_META);
+    } finally {
+      setAssistantChatsLoading(false);
+    }
+  }, [assistantIsOpen, project?.id]);
+
+  const loadActiveChatMessages = useCallback(async () => {
+    if (!activeChatId || !assistantIsOpen) return;
+    setAssistantMessagesLoading(true);
+    setAssistantError("");
+    try {
+      const response = await apiRequest(`/idea-chats/${activeChatId}/messages`, { skipCache: true });
+      setMessages(Array.isArray(response?.messages) ? response.messages : []);
+      setAssistantDraft(response?.latest_draft || null);
+      setAssistantMeta({
+        readiness: response?.readiness || EMPTY_ASSISTANT_META.readiness,
+        follow_up_questions: Array.isArray(response?.follow_up_questions)
+          ? response.follow_up_questions
+          : EMPTY_ASSISTANT_META.follow_up_questions,
+      });
+      if (response?.chat) {
+        setChats((current) => {
+          const exists = current.some((chat) => chat.id === response.chat.id);
+          if (!exists) return [response.chat, ...current];
+          return current.map((chat) => (chat.id === response.chat.id ? { ...chat, ...response.chat } : chat));
+        });
+      }
+    } catch (chatError) {
+      setAssistantError(chatError.message || "Failed to load chat messages.");
+      setMessages([]);
+      setAssistantDraft(null);
+      setAssistantMeta(EMPTY_ASSISTANT_META);
+    } finally {
+      setAssistantMessagesLoading(false);
+    }
+  }, [activeChatId, assistantIsOpen]);
 
   useEffect(() => {
-    loadAssistantChat();
-  }, [loadAssistantChat]);
+    loadChats();
+  }, [loadChats]);
 
   useEffect(() => {
-    if (!assistantOpen) return;
+    loadActiveChatMessages();
+  }, [loadActiveChatMessages]);
+
+  useEffect(() => {
+    if (!assistantIsOpen) return;
     assistantEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [assistantMessages, assistantLoading, assistantOpen]);
+  }, [messages, assistantLoading, assistantIsOpen]);
+
+  useEffect(() => {
+    if (!assistantIsOpen) return;
+    assistantInputRef.current?.focus();
+  }, [assistantIsOpen, messages.length, activeChatId]);
+
+  useEffect(() => {
+    if (!assistantIsOpen || typeof document === "undefined") return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [assistantIsOpen]);
+
+  useEffect(() => {
+    setAssistantInput("");
+    clearAssistantAttachment();
+  }, [activeChatId]);
+
+  useEffect(() => {
+    if (!chatMenuOpenId || typeof document === "undefined") return undefined;
+
+    const handleDocumentClick = () => {
+      setChatMenuOpenId("");
+    };
+
+    document.addEventListener("click", handleDocumentClick);
+    return () => {
+      document.removeEventListener("click", handleDocumentClick);
+    };
+  }, [chatMenuOpenId]);
 
   const handleSendAssistantMessage = async () => {
-    if (!selectedIdea?.id) {
-      setAssistantError("Create or select an idea version before starting the assistant chat.");
+    if (!activeChatId) {
+      setAssistantError("Create a new chat before starting a conversation.");
       return;
     }
     const trimmedInput = assistantInput.trim();
-    if (!trimmedInput && !assistantImageDataUrl) {
-      setAssistantError("Add a message or an image before asking the assistant.");
+    if (!trimmedInput && !assistantAttachment?.dataUrl) {
+      setAssistantError("Add a message or an attachment before asking the assistant.");
       return;
     }
 
@@ -255,9 +782,10 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
       role: "user",
       content:
         trimmedInput ||
-        (assistantImageName
-          ? `Please analyze the attached image (${assistantImageName}) and help refine the idea.`
+        (assistantAttachment?.name
+          ? `Please analyze the attached ${assistantAttachment.mimeType?.startsWith("image/") ? "image" : "file"} (${assistantAttachment.name}) and help refine the idea.`
           : "Please help me refine this idea."),
+      attachments: assistantAttachment ? [assistantAttachment] : [],
     };
     const tempUserMessage = {
       ...userMessage,
@@ -265,45 +793,81 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     };
     const tempUserId = tempUserMessage.id;
 
-    setAssistantMessages((current) => [...current, tempUserMessage]);
+    setMessages((current) => [...current, tempUserMessage]);
     setAssistantLoading(true);
     setAssistantError("");
     setNotice("");
     setAssistantInput("");
     try {
-      const response = await apiRequest(`/ideas/${selectedIdea.id}/chat`, {
+      const response = await apiRequest(`/idea-chats/${activeChatId}/messages`, {
         method: "POST",
         body: {
           message: trimmedInput,
-          imageDataUrl: assistantImageDataUrl || undefined,
+          attachment: assistantAttachment || undefined,
           currentDraft: {
             title: form.title,
             domain: form.domain,
+            subdomain: form.subdomain,
             description: form.description,
             technologies: parseTechnologies(form.technologies),
+            confidence_score: Number(form.confidence_score || 0),
+            keywords: parseTechnologies(form.keywords),
           },
         },
       });
-      if (!response?.assistant_message?.content) {
+      if (!response?.assistant_message?.content && !response?.reply) {
         throw new Error("The assistant did not return a response.");
       }
-      setAssistantMessages((current) => {
+      setMessages((current) => {
         const withoutTemp = current.filter((message) => message.id !== tempUserId);
         return [
           ...withoutTemp,
           response.user_message || tempUserMessage,
-          response.assistant_message,
+          response.assistant_message || {
+            id: `assistant-${Date.now()}`,
+            role: "assistant",
+            content: response.reply,
+            created_at: new Date().toISOString(),
+          },
         ];
       });
-      setAssistantChat(response.chat || null);
+      setChats((current) => {
+        const nextChat = response.chat || current.find((chat) => chat.id === activeChatId) || null;
+        if (!nextChat) return current;
+        const withoutActive = current.filter((chat) => chat.id !== nextChat.id);
+        return [{ ...nextChat, title: response.title || nextChat.title || null }, ...withoutActive];
+      });
       setAssistantDraft(response.draft_patch || null);
-      clearAssistantImage();
+      setAssistantMeta({
+        readiness: response?.readiness || EMPTY_ASSISTANT_META.readiness,
+        follow_up_questions: Array.isArray(response?.follow_up_questions)
+          ? response.follow_up_questions
+          : EMPTY_ASSISTANT_META.follow_up_questions,
+      });
+      clearAssistantAttachment();
     } catch (generationError) {
-      setAssistantMessages((current) => current.filter((message) => message.id !== tempUserId));
+      setMessages((current) => current.filter((message) => message.id !== tempUserId));
       setAssistantError(generationError.message || "Failed to get a response from the assistant.");
     } finally {
       setAssistantLoading(false);
     }
+  };
+
+  const handleAssistantInputKeyDown = (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      if (!assistantLoading) {
+        handleSendAssistantMessage();
+      }
+    }
+  };
+
+  const handleFollowUpClick = (question) => {
+    setAssistantInput(question);
+    setAssistantError("");
+    requestAnimationFrame(() => {
+      assistantInputRef.current?.focus();
+    });
   };
 
   const handleSave = async () => {
@@ -325,8 +889,11 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
       const payload = {
         title: form.title.trim(),
         domain: form.domain.trim(),
+        subdomain: form.subdomain.trim(),
         description: form.description.trim(),
         technologies: parseTechnologies(form.technologies),
+        confidence_score: Number(form.confidence_score || 0),
+        keywords: parseTechnologies(form.keywords),
       };
 
       const savedIdea = await apiRequest(path, { method, body: payload });
@@ -364,160 +931,435 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     }
   };
 
-  const visibleAssistantMessages = assistantMessages.length ? assistantMessages : [STARTER_ASSISTANT_MESSAGE];
+  const visibleAssistantMessages = messages.length ? messages : [STARTER_ASSISTANT_MESSAGE];
+  const assistantTimeline = useMemo(
+    () => buildChatTimeline(visibleAssistantMessages),
+    [visibleAssistantMessages]
+  );
+  const latestAssistantMessageId = useMemo(
+    () => [...visibleAssistantMessages].reverse().find((message) => message.role === "assistant")?.id || null,
+    [visibleAssistantMessages]
+  );
+  const draftPreviewAnchorMessageId = useMemo(() => {
+    if (!assistantDraft || !messages.length) return "";
+
+    const hasEnteredDraftMode = messages.some(
+      (entry) => entry?.role === "user" && isDraftConfirmationMessage(entry?.content)
+    );
+
+    if (!hasEnteredDraftMode) return "";
+
+    return [...messages].reverse().find((entry) => entry?.role === "assistant")?.id || "";
+  }, [assistantDraft, messages]);
 
   const assistantPortal = typeof document !== "undefined"
     ? createPortal(
       <>
         <button
           type="button"
-          onClick={() => setAssistantOpen(true)}
-          className="fixed bottom-6 right-6 z-[70] flex size-14 items-center justify-center rounded-full text-black shadow-[0_18px_40px_rgba(0,210,196,0.24)] transition-all hover:-translate-y-0.5 hover:scale-[1.02] hover:opacity-95"
+          onClick={openAssistant}
+          className={`fixed bottom-6 right-6 z-[70] flex size-14 items-center justify-center rounded-full text-black shadow-[0_18px_40px_rgba(0,210,196,0.24)] transition-all duration-300 ease-out hover:-translate-y-0.5 hover:scale-[1.02] hover:opacity-95 ${
+            assistantWidgetState === COPILOT_STATES.CLOSED
+              ? "pointer-events-auto translate-y-0 opacity-100 scale-100"
+              : "pointer-events-none translate-y-3 opacity-0 scale-95"
+          }`}
           style={{ backgroundColor: "#00D2C4" }}
-          aria-label="Open AI idea assistant"
+          aria-label="Open Idea Copilot"
         >
           <span className="material-symbols-outlined text-[24px]">psychology</span>
         </button>
 
-        {assistantOpen ? (
-          <div className="fixed bottom-24 right-4 z-[80] w-[calc(100vw-2rem)] max-w-[460px] overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.28)] sm:right-6">
-              <div className="flex h-[min(720px,calc(100dvh-8rem))] flex-col">
-                <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
-                  <div className="min-w-0">
-                    <p className="text-base font-black text-slate-900">AI Idea Assistant</p>
-                    <p className="mt-1 truncate text-sm text-slate-500">
-                      {assistantChat?.title || selectedIdea?.title || "Start shaping your project idea"}
+        <button
+          type="button"
+          onClick={openAssistant}
+          className={`fixed bottom-6 right-6 z-[80] inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/95 px-4 py-3 text-sm font-black text-slate-800 shadow-[0_18px_40px_rgba(15,23,42,0.18)] backdrop-blur transition-all duration-300 ease-out hover:-translate-y-0.5 ${
+            assistantIsMinimized
+              ? "pointer-events-auto translate-y-0 opacity-100 scale-100"
+              : "pointer-events-none translate-y-3 opacity-0 scale-95"
+          }`}
+        >
+          <span className="relative inline-flex">
+            <span className="inline-flex size-2 rounded-full bg-teal-400" aria-hidden="true" />
+            <span className="absolute inset-0 animate-ping rounded-full bg-teal-300/70" aria-hidden="true" />
+          </span>
+          Idea Copilot
+          <span className="material-symbols-outlined text-[18px] text-slate-500">expand_less</span>
+        </button>
+
+        <div
+          className={`fixed inset-0 z-[75] bg-black/30 backdrop-blur-sm transition-opacity duration-300 ease-out ${
+            assistantIsOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+          }`}
+          onClick={closeAssistant}
+          aria-hidden="true"
+        />
+
+        <div
+          className={`fixed bottom-6 right-4 z-[80] flex ${assistantExpanded ? "h-[84vh] max-h-[860px] max-w-[920px]" : "h-[76vh] max-h-[760px] max-w-[520px]"} w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-[32px] border border-white/30 bg-gradient-to-b from-white via-slate-50/95 to-slate-100/90 shadow-[0_25px_80px_rgba(15,23,42,0.18)] transition-all duration-300 ease-out sm:right-6 ${
+            assistantIsOpen
+              ? "pointer-events-auto translate-y-0 opacity-100"
+              : "pointer-events-none translate-y-6 opacity-0"
+          }`}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="border-b border-slate-200/70 bg-white/70 px-4 py-3 backdrop-blur-md">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={toggleAssistantSidebar}
+                    className="inline-flex size-9 items-center justify-center rounded-full border border-slate-200/80 bg-white/90 text-slate-500 transition duration-200 hover:scale-[1.03] hover:bg-white hover:text-slate-700"
+                    aria-label={assistantSidebarHidden ? "Show chat history" : "Hide chat history"}
+                  >
+                    <span className="material-symbols-outlined text-[18px]">
+                      {assistantSidebarHidden ? "left_panel_open" : "left_panel_close"}
+                    </span>
+                  </button>
+                  <span className="relative inline-flex">
+                    <span className="inline-flex size-2.5 rounded-full bg-teal-400" aria-hidden="true" />
+                    <span className="absolute inset-0 animate-ping rounded-full bg-teal-300/70" aria-hidden="true" />
+                  </span>
+                  <p className="text-base font-black tracking-tight text-slate-950">Idea Copilot</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {assistantCanApply ? (
+                  <button
+                    type="button"
+                    onClick={() => applyAssistantSuggestion("all")}
+                    className="inline-flex items-center gap-1 rounded-full bg-teal-500 px-3.5 py-2 text-xs font-black text-white shadow-[0_8px_20px_rgba(20,184,166,0.18)] transition duration-200 hover:scale-[1.02] hover:bg-teal-600"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">upload</span>
+                    Apply
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={toggleAssistantExpanded}
+                  className="rounded-full border border-slate-200/80 bg-white/90 p-2 text-slate-500 transition duration-200 hover:scale-[1.03] hover:bg-white hover:text-slate-700"
+                  aria-label={assistantExpanded ? "Collapse Idea Copilot" : "Expand Idea Copilot"}
+                >
+                  <span className="material-symbols-outlined text-[18px]">
+                    {assistantExpanded ? "close_fullscreen" : "open_in_full"}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={minimizeAssistant}
+                  className="rounded-full border border-slate-200/80 bg-white/90 p-2 text-slate-500 transition duration-200 hover:scale-[1.03] hover:bg-white hover:text-slate-700"
+                  aria-label="Minimize Idea Copilot"
+                >
+                  <span className="material-symbols-outlined text-[18px]">remove</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={closeAssistant}
+                  className="rounded-full border border-slate-200/80 bg-white/90 p-2 text-slate-500 transition duration-200 hover:scale-[1.03] hover:bg-white hover:text-slate-700"
+                  aria-label="Close Idea Copilot"
+                >
+                  <span className="material-symbols-outlined text-[18px]">close</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex min-h-0 flex-1 overflow-hidden">
+            <aside
+              className={`flex shrink-0 flex-col bg-slate-50/75 backdrop-blur-sm transition-all duration-300 ease-out ${
+                assistantSidebarHidden
+                  ? "w-0 overflow-hidden border-r-0 opacity-0"
+                  : "w-[180px] border-r border-slate-200/60 opacity-100"
+              }`}
+            >
+              <div className="p-3">
+                <button
+                  type="button"
+                  onClick={handleCreateChat}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-teal-500 px-3 py-2.5 text-sm font-black text-white shadow-[0_10px_24px_rgba(20,184,166,0.15)] transition duration-200 hover:scale-[1.01] hover:bg-teal-600"
+                >
+                  <span className="material-symbols-outlined text-[18px]">add</span>
+                  New Chat
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-2">
+                {assistantError && !activeChat ? (
+                  <div className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                    {assistantError}
+                  </div>
+                ) : null}
+
+                {assistantChatsLoading ? (
+                  <div className="px-2 py-4 text-xs text-slate-500">Loading chats...</div>
+                ) : chats.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-white/80 px-3 py-5 text-center">
+                    <p className="text-sm font-black text-slate-800">No chats yet</p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                      Start a new thread for each idea direction.
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {assistantDraft ? (
-                      <button
-                        type="button"
-                        onClick={() => applyAssistantSuggestion("all")}
-                        className="rounded-xl px-3.5 py-2 text-xs font-black text-black hover:opacity-90"
-                        style={{ backgroundColor: "#00D2C4" }}
-                      >
-                        Apply to Workspace
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={() => setAssistantOpen(false)}
-                      className="rounded-xl border border-slate-200 bg-white p-2 text-slate-500 hover:bg-slate-50 hover:text-slate-700"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">close</span>
-                    </button>
-                  </div>
-                </div>
+                ) : (
+                  <div className="space-y-2">
+                    {chats.map((chat) => {
+                      const isActive = chat.id === activeChatId;
+                      return (
+                        <div
+                          key={chat.id}
+                          className={`group rounded-xl border px-3 py-2.5 transition duration-200 ${
+                            isActive
+                              ? "border-teal-200/80 bg-teal-50/60 shadow-[0_8px_18px_rgba(20,184,166,0.08)]"
+                              : "border-transparent bg-white/60 hover:border-slate-200/80 hover:bg-white/90"
+                          }`}
+                        >
+                          <div className="flex items-start gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setActiveChatId(chat.id)}
+                              className="min-w-0 flex-1 text-left"
+                              title={chat.title || "New chat"}
+                            >
+                              <>
+                                <p className="truncate text-[13px] font-semibold text-slate-800">
+                                  {chat.title || "New chat"}
+                                </p>
+                                <p className="mt-1 text-[10px] font-medium text-slate-400">
+                                  {formatChatListTime(chat.updated_at || chat.created_at)}
+                                </p>
+                              </>
+                            </button>
+                            <div className="relative shrink-0">
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setChatMenuOpenId((current) => (current === chat.id ? "" : chat.id));
+                                }}
+                                className="rounded-lg p-1.5 text-slate-400 opacity-0 transition duration-200 hover:bg-slate-100 hover:text-slate-700 group-hover:opacity-100 group-focus-within:opacity-100"
+                                aria-label={`More options for ${chat.title || "chat"}`}
+                              >
+                                <span className="material-symbols-outlined text-[16px]">more_horiz</span>
+                              </button>
 
-                <div className="flex-1 overflow-y-auto bg-slate-50/70 px-4 py-4">
-                  {!selectedIdea ? (
-                    <div className="flex h-full items-center justify-center">
-                      <div className="max-w-md rounded-3xl border border-slate-200 bg-white px-6 py-8 text-center shadow-sm">
-                        <p className="text-base font-black text-slate-900">Create or select an idea first</p>
-                        <p className="mt-2 text-sm text-slate-500">
-                          Once you pick an idea version, the assistant will keep a separate conversation for it.
+                              {chatMenuOpenId === chat.id ? (
+                                <div
+                                  className="absolute right-0 top-9 z-10 w-32 rounded-xl border border-slate-200 bg-white p-1 shadow-[0_16px_40px_rgba(15,23,42,0.12)]"
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRenameChat(chat)}
+                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 transition duration-200 hover:bg-slate-50"
+                                  >
+                                    <span className="material-symbols-outlined text-[15px]">edit</span>
+                                    Rename
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteChat(chat)}
+                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold text-rose-600 transition duration-200 hover:bg-rose-50"
+                                  >
+                                    <span className="material-symbols-outlined text-[15px]">delete</span>
+                                    Delete
+                                  </button>
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </aside>
+
+            <div className="flex min-w-0 flex-1 flex-col">
+              <div className="flex-1 overflow-y-auto px-5 py-5">
+                {!activeChat ? (
+                  <div className="flex h-full items-center justify-center">
+                    <div className="max-w-[260px] rounded-3xl border border-white/70 bg-white/75 px-6 py-7 text-center shadow-[0_14px_32px_rgba(15,23,42,0.06)]">
+                      <p className="text-base font-black text-slate-900">Start a new chat</p>
+                      <p className="mt-2 text-sm leading-relaxed text-slate-500">
+                        Explore different angles, then apply the strongest draft to your workspace.
+                      </p>
+                    </div>
+                  </div>
+                ) : assistantMessagesLoading ? (
+                  <div className="flex h-full items-center justify-center">
+                    <div className="rounded-2xl border border-white/80 bg-white/90 px-5 py-4 text-sm text-slate-500 shadow-sm">
+                      Loading messages...
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {assistantError ? (
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                        {assistantError}
+                      </div>
+                    ) : null}
+
+                    {assistantTimeline.map((entry) => {
+                      if (entry.type === "divider") {
+                        return (
+                          <div key={entry.id} className="flex items-center gap-3 py-1">
+                            <div className="h-px flex-1 bg-slate-200/80" />
+                            <span className="rounded-full border border-white/70 bg-white/85 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400 shadow-sm">
+                              {entry.label}
+                            </span>
+                            <div className="h-px flex-1 bg-slate-200/80" />
+                          </div>
+                        );
+                      }
+
+                      const isAssistant = entry.role === "assistant";
+                      const showContextualApply = isAssistant && assistantCanApply && latestAssistantMessageId === entry.id;
+
+                      return (
+                        <div key={entry.id} className="space-y-3">
+                          <div
+                            className={`flex gap-3 transition-opacity duration-200 ${isAssistant ? "justify-start" : "justify-end"}`}
+                          >
+                            {isAssistant ? <CopilotAvatar role="assistant" /> : null}
+                            <div className={`max-w-[84%] ${isAssistant ? "" : "order-first"}`}>
+                              <div
+                                className={`rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
+                                  isAssistant
+                                    ? "border border-slate-200/80 bg-slate-50/90 text-slate-700 shadow-[0_8px_20px_rgba(15,23,42,0.04)]"
+                                    : "text-slate-950"
+                                }`}
+                                style={isAssistant ? undefined : { backgroundColor: "rgba(0,210,196,0.18)" }}
+                              >
+                                <p className="whitespace-pre-wrap">{entry.content}</p>
+                                {Array.isArray(entry.attachments) && entry.attachments.length > 0 ? (
+                                  <div className="space-y-2">
+                                    {entry.attachments.map((attachment, index) => (
+                                      <MessageAttachmentPreview
+                                        key={`${entry.id}-attachment-${index}`}
+                                        attachment={attachment}
+                                      />
+                                    ))}
+                                  </div>
+                                ) : null}
+
+                                {showContextualApply ? (
+                                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                                    {assistantMeta.readiness === "ready_to_apply" ? (
+                                      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
+                                        <span className="material-symbols-outlined text-[14px]">task_alt</span>
+                                        Ready to apply
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
+                              <p className={`mt-1 px-1 text-[11px] text-slate-400 ${isAssistant ? "text-left" : "text-right"}`}>
+                                {formatMessageTime(entry.created_at)}
+                              </p>
+                            </div>
+                            {!isAssistant ? <CopilotAvatar role="user" /> : null}
+                          </div>
+
+                          {isAssistant && entry.id === draftPreviewAnchorMessageId ? (
+                            <div className="flex gap-3 justify-start">
+                              <CopilotAvatar role="assistant" />
+                              <div className="max-w-[84%]">
+                                <AssistantDraftPreview
+                                  draft={assistantDraft}
+                                  readiness={assistantMeta.readiness}
+                                />
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+
+                    {assistantLoading ? (
+                      <div className="flex items-end gap-3">
+                        <CopilotAvatar role="assistant" />
+                        <TypingIndicator />
+                      </div>
+                    ) : null}
+
+                    {!assistantLoading && assistantMeta.follow_up_questions.length > 0 ? (
+                      <div className="flex flex-wrap gap-2 pl-11">
+                        {assistantMeta.follow_up_questions.map((question) => (
+                          <button
+                            key={question}
+                            type="button"
+                            onClick={() => handleFollowUpClick(question)}
+                            className="rounded-full border border-slate-200 bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-600 transition duration-200 hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
+                          >
+                            {question}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div ref={assistantEndRef} />
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-200/60 bg-transparent px-5 py-3">
+                <div className="flex flex-col gap-3">
+                  {assistantAttachment ? (
+                    <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200/70 bg-white/45 px-3.5 py-2.5 shadow-sm backdrop-blur-sm">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-800">{assistantAttachment.name}</p>
+                        <p className="text-xs text-slate-500">
+                          This {assistantAttachment.mimeType?.startsWith("image/") ? "image" : "file"} will be included with your next message.
                         </p>
                       </div>
+                      <button
+                        type="button"
+                        onClick={clearAssistantAttachment}
+                        className="rounded-lg px-2 py-1 text-xs font-bold text-rose-600 transition duration-200 hover:bg-rose-50 hover:text-rose-700"
+                      >
+                        Remove
+                      </button>
                     </div>
-                  ) : assistantHistoryLoading ? (
-                    <div className="flex h-full items-center justify-center">
-                      <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 text-sm text-slate-500 shadow-sm">
-                        Loading your conversation...
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mx-auto flex h-full w-full max-w-4xl flex-col gap-4">
-                      {assistantError ? (
-                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                          {assistantError}
-                        </div>
-                      ) : null}
+                  ) : null}
 
-                      <div className="flex-1 space-y-4">
-                        {visibleAssistantMessages.map((message) => (
-                          <div
-                            key={message.id}
-                            className={`flex ${message.role === "assistant" ? "justify-start" : "justify-end"}`}
-                          >
-                          <div
-                            className={`max-w-[85%] rounded-[24px] px-4 py-3 text-sm leading-relaxed shadow-sm sm:max-w-[70%] ${
-                                message.role === "assistant"
-                                  ? "border border-slate-200 bg-white text-slate-700"
-                                  : "text-slate-950"
-                              }`}
-                              style={
-                                message.role === "assistant"
-                                  ? undefined
-                                  : { backgroundColor: "rgba(0,210,196,0.18)" }
-                              }
-                            >
-                              {message.content}
-                            </div>
-                          </div>
-                        ))}
-
-                        {assistantLoading ? (
-                          <div className="flex justify-start">
-                            <div className="rounded-[24px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 shadow-sm">
-                              Thinking...
-                            </div>
-                          </div>
-                        ) : null}
-                        <div ref={assistantEndRef} />
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="border-t border-slate-200 bg-white px-4 py-4">
-                  <div className="flex w-full flex-col gap-3">
-                    {assistantImageName ? (
-                      <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-slate-800">{assistantImageName}</p>
-                          <p className="text-xs text-slate-500">This image will be included with your next message.</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={clearAssistantImage}
-                          className="text-xs font-bold text-rose-600 hover:text-rose-700"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ) : null}
-
-                    <div className="flex items-end gap-3">
-                      <label className="inline-flex shrink-0 cursor-pointer items-center justify-center rounded-xl border border-slate-200 bg-white p-3 text-slate-600 hover:bg-slate-50">
-                        <span className="material-symbols-outlined text-[20px]">add_photo_alternate</span>
-                        <input type="file" accept="image/*" className="hidden" onChange={handleAssistantImageChange} />
+                  <div className="rounded-full border border-white/70 bg-white/45 px-3 py-1.5 shadow-[0_10px_24px_rgba(15,23,42,0.06)] backdrop-blur-md transition duration-200 focus-within:border-teal-300 focus-within:ring-4 focus-within:ring-teal-500/10">
+                    <div className="flex items-end gap-2">
+                      <label className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-slate-500 transition duration-200 hover:bg-white hover:text-slate-700">
+                        <span className="material-symbols-outlined text-[18px]">attach_file</span>
+                        <input type="file" accept="image/*,.pdf,.txt,.md,.csv,.json" className="hidden" onChange={handleAssistantAttachmentChange} />
                       </label>
-                      <div className="flex-1 overflow-hidden rounded-[24px] border border-slate-200 bg-slate-50">
-                        <textarea
-                          rows={2}
-                          value={assistantInput}
-                          onChange={(event) => setAssistantInput(event.target.value)}
-                          className="min-h-[64px] w-full resize-none bg-transparent px-4 py-3 text-sm text-slate-900 outline-none"
-                          placeholder="Describe your idea, ask for refinement, or attach a sketch..."
-                          disabled={!selectedIdea || assistantLoading}
-                        />
-                      </div>
+
+                      <textarea
+                        ref={assistantInputRef}
+                        rows={1}
+                        value={assistantInput}
+                        onChange={(event) => setAssistantInput(event.target.value)}
+                        onKeyDown={handleAssistantInputKeyDown}
+                        className="max-h-24 min-h-[38px] flex-1 resize-none overflow-y-auto bg-transparent px-1 py-2 text-sm leading-relaxed text-slate-900 outline-none placeholder:text-slate-400"
+                        placeholder={activeChat ? "Describe your idea..." : "Create or select a chat first..."}
+                        disabled={!activeChat || assistantLoading}
+                      />
+
                       <button
                         type="button"
                         onClick={handleSendAssistantMessage}
-                        className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-black hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-                        style={{ backgroundColor: "#00D2C4" }}
-                        disabled={!selectedIdea || assistantLoading}
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-teal-500 text-white shadow-[0_10px_24px_rgba(20,184,166,0.18)] transition duration-200 hover:scale-[1.03] hover:bg-teal-600 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={!activeChat || assistantLoading}
                       >
-                        <span className="material-symbols-outlined text-[22px]">send</span>
+                        <span className="material-symbols-outlined text-[17px]">send</span>
                       </button>
                     </div>
                   </div>
+
+                  <p className="px-1 text-[11px] text-slate-400">
+                  
+                  </p>
                 </div>
               </div>
+            </div>
           </div>
-        ) : null}
+        </div>
       </>,
       document.body
     )
@@ -525,6 +1367,75 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
 
   return (
     <>
+      <Modal
+        isOpen={chatDialog.type === "rename"}
+        onClose={() => setChatDialog({ type: "", chat: null, value: "" })}
+        title="Rename chat"
+        maxWidth="max-w-md"
+        zIndexClass="z-[120]"
+      >
+        <div className="space-y-4 p-6">
+          <div>
+            <label className="mb-2 block text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+              Chat title
+            </label>
+            <input
+              value={chatDialog.value}
+              onChange={(event) => setChatDialog((current) => ({ ...current, value: event.target.value }))}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-500/15"
+              placeholder="Enter a chat title"
+            />
+          </div>
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setChatDialog({ type: "", chat: null, value: "" })}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmRenameChat}
+              className="rounded-xl bg-teal-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-600"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={chatDialog.type === "delete"}
+        onClose={() => setChatDialog({ type: "", chat: null, value: "" })}
+        title="Delete chat"
+        maxWidth="max-w-md"
+        zIndexClass="z-[120]"
+      >
+        <div className="space-y-4 p-6">
+          <p className="text-sm leading-relaxed text-slate-600">
+            Delete <span className="font-semibold text-slate-900">{chatDialog.chat?.title || "this chat"}</span>?
+            This will remove its messages from the copilot history.
+          </p>
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setChatDialog({ type: "", chat: null, value: "" })}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmDeleteChat}
+              className="rounded-xl bg-rose-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-600"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       <div className="glass-card-strong overflow-hidden">
       <div className="px-4 sm:px-6 py-4 border-b border-white/70 flex items-center gap-2.5">
         <div className="size-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: "rgba(0,210,196,0.12)" }}>
@@ -597,7 +1508,10 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-sm font-black text-slate-900 truncate">{idea.title}</p>
-                        <p className="text-xs text-slate-500 mt-1">Version {idea.version_no} - {idea.domain || "General"} - {formatDateTime(idea.created_at)}</p>
+                        <p className="text-xs text-slate-500 mt-1">
+                          Version {idea.version_no} - {idea.domain || "General"}
+                          {idea.subdomain ? ` / ${idea.subdomain}` : ""} - {formatDateTime(idea.created_at)}
+                        </p>
                       </div>
                       <IdeaStatusBadge status={idea.status} />
                     </div>
@@ -645,8 +1559,17 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                     placeholder="AI / Healthcare / FinTech / IoT"
                   />
                   <p className="mt-2 text-xs text-slate-500">
-                    Keep this editable. We will use it later for mentor recommendations, but students can still refine it.
+                  
                   </p>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Subdomain</label>
+                  <input
+                    value={form.subdomain}
+                    onChange={(event) => setForm((prev) => ({ ...prev, subdomain: event.target.value }))}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20"
+                    placeholder="Computer Vision / EdTech / Queue Analytics"
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Description</label>
@@ -666,6 +1589,18 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20"
                     placeholder="React, Node.js, Python"
                   />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Keywords</label>
+                  <input
+                    value={form.keywords}
+                    onChange={(event) => setForm((prev) => ({ ...prev, keywords: event.target.value }))}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20"
+                    placeholder="automation, student productivity, task prioritisation"
+                  />
+                  <p className="mt-2 text-xs text-slate-500">
+                    Use short tags separated by commas.
+                  </p>
                 </div>
                 <div className="flex gap-3">
                   <button
@@ -696,6 +1631,11 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                   <p className="mt-2 text-sm font-semibold text-slate-700">
                     {selectedIdea.domain || "General"}
                   </p>
+                  {selectedIdea.subdomain ? (
+                    <p className="mt-1 text-xs font-medium text-slate-500">
+                      {selectedIdea.subdomain}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                   <div>
@@ -713,6 +1653,38 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                   <p className="mt-2 text-sm leading-relaxed text-slate-700 whitespace-pre-wrap">
                     {selectedIdea.description || "No description added for this version."}
                   </p>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4">
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Subdomain</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-700">
+                      {selectedIdea.subdomain || "Not specified"}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4">
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">AI Confidence</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-700">
+                      {typeof selectedIdea.confidence_score === "number"
+                        ? `${Math.round(selectedIdea.confidence_score * 100)}%`
+                        : "Not available"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4">
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Keywords</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(selectedIdea.keywords || []).length > 0 ? (
+                      selectedIdea.keywords.map((item) => (
+                        <span key={item} className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 border border-slate-200">
+                          {item}
+                        </span>
+                      ))
+                    ) : (
+                      <p className="text-sm text-slate-500">No keywords added.</p>
+                    )}
+                  </div>
                 </div>
 
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4">
@@ -804,5 +1776,6 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     </>
   );
 }
+
 
 

@@ -1,6 +1,14 @@
 import { useEffect } from 'react';
 
-export default function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-2xl', disableClose = false }) {
+export default function Modal({
+    isOpen,
+    onClose,
+    title,
+    children,
+    maxWidth = 'max-w-2xl',
+    disableClose = false,
+    zIndexClass = 'z-50',
+}) {
     // Close on ESC key
     useEffect(() => {
         const handleEsc = (e) => {
@@ -20,7 +28,7 @@ export default function Modal({ isOpen, onClose, title, children, maxWidth = 'ma
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fadeIn">
+        <div className={`fixed inset-0 ${zIndexClass} flex items-center justify-center p-4 animate-fadeIn`}>
             {/* Backdrop */}
             <div
                 className="absolute inset-0 bg-black/50 backdrop-blur-sm"
