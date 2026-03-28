@@ -1,6 +1,7 @@
 create table if not exists public.rubrics (
   id uuid primary key default gen_random_uuid(),
   stage varchar(16) not null check (stage in ('review', 'guide', 'ese')),
+  review_round varchar(32) null check (review_round in ('zeroth_review') or review_round is null),
   title varchar(255) not null,
   max_marks integer not null check (max_marks > 0),
   order_no integer not null,
@@ -9,8 +10,14 @@ create table if not exists public.rubrics (
   created_at timestamptz not null default now()
 );
 
+alter table if exists public.rubrics
+  add column if not exists review_round varchar(32) null;
+
 create index if not exists idx_rubrics_stage_order
   on public.rubrics(stage, order_no);
+
+create index if not exists idx_rubrics_stage_review_round_order
+  on public.rubrics(stage, review_round, order_no);
 
 alter table if exists public.review_marks
   add column if not exists rubric_id uuid references public.rubrics(id),

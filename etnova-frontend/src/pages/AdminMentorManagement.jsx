@@ -17,8 +17,8 @@ let mentorEvalColumnStrategy = null;
 
 function projectClassName(project) {
   if (!project) return "Unknown Class";
-  if (Array.isArray(project.classes)) return project.classes[0]?.class_name || "Unknown Class";
-  return project.classes?.class_name || "Unknown Class";
+  if (Array.isArray(project.classes)) return project.classes[0]?.class_section || project.classes[0]?.class_name || "Unknown Class";
+  return project.classes?.class_section || project.classes?.class_name || "Unknown Class";
 }
 
 async function fetchMentorEvaluationsByMentorId(mentorId) {
@@ -102,8 +102,8 @@ export default function AdminMentorManagement() {
     try {
       const { data, error: classesError } = await supabase
         .from("classes")
-        .select("id, class_name")
-        .order("class_name", { ascending: true });
+        .select("id, class_section")
+        .order("class_section", { ascending: true });
       if (classesError) throw classesError;
       setClasses(data || []);
     } catch {
@@ -130,7 +130,7 @@ export default function AdminMentorManagement() {
       workload.set(row.guide_id, (workload.get(row.guide_id) || 0) + 1);
     });
 
-    const classNameById = new Map((classes || []).map((item) => [item.id, item.class_name]));
+    const classNameById = new Map((classes || []).map((item) => [item.id, item.class_section || item.class_name]));
     const normalized = (mentors || []).map((mentor) => ({
       id: mentor.id,
       name: mentor.full_name || "Unnamed Mentor",
@@ -523,16 +523,13 @@ export default function AdminMentorManagement() {
       (c) => c.id === selectedMentorProfile.class_id
     );
 
-    return cls ? cls.class_name : null;
+    return cls ? (cls.class_section || cls.class_name) : null;
   };
 
   const coordinatorClassName = getCoordinatorClassName();
   const coordinatorAssignments = getCoordinatorAssignments();
   const guidanceTeams = getGuidanceTeams();
   const guidancePercent = Math.min(100, Math.round((guidanceTeams / 2) * 100));
-  const evaluationPercent = workload.summary.totalEvaluations > 0
-    ? Math.round((workload.summary.completedEvaluations / workload.summary.totalEvaluations) * 100)
-    : 0;
 
   return (
     <AppFrame
@@ -625,11 +622,9 @@ export default function AdminMentorManagement() {
                   <MentorStatCard title="Total Guidance Teams" value={guidanceTeams} icon="guide" borderClass="border-t-teal-500" />
                   <div>
                     <MentorStatCard title="Coordination Assignments" value={coordinatorAssignments} icon="coordinator" borderClass="border-t-violet-500" />
-                    {coordinatorClassName && (
-                      <div className="text-sm text-slate-500 mt-2">
-                        Class: {coordinatorClassName}
-                      </div>
-                    )}
+                    <div className="text-sm text-slate-500 mt-2">
+                      Class: {coordinatorClassName || "No class allocated"}
+                    </div>
                   </div>
                   <MentorStatCard title="Total Evaluations" value={workload.summary.totalEvaluations} icon="evaluator" borderClass="border-t-cyan-500" />
                   <MentorStatCard title="Pending Evaluations" value={workload.summary.pendingEvaluations} icon="evaluator" borderClass="border-t-rose-500" />
@@ -646,11 +641,13 @@ export default function AdminMentorManagement() {
                   </section>
 
                   <section className="rounded-xl border border-slate-200/70 bg-slate-50/70 p-4">
-                    <h3 className="text-sm font-semibold text-slate-800">Evaluation Completion</h3>
-                    <div className="mt-3 h-2.5 rounded-full bg-slate-200 overflow-hidden">
-                      <div className="h-full rounded-full bg-teal-500" style={{ width: `${evaluationPercent}%` }} />
-                    </div>
-                    <p className="mt-2 text-xs text-slate-600">{evaluationPercent}% completed</p>
+                    <h3 className="text-sm font-semibold text-slate-800">Coordinator Class</h3>
+                    <p className="mt-3 text-base font-semibold text-slate-800">
+                      {coordinatorClassName || "No class allocated"}
+                    </p>
+                    <p className="mt-2 text-xs text-slate-600">
+                      {coordinatorClassName ? "Class allocated to the selected coordinator" : "No class allocated"}
+                    </p>
                   </section>
                 </div>
 

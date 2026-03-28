@@ -50,7 +50,7 @@ export default function EditRoleModal({
               <option value="">Select Class</option>
               {classes.map((cls) => (
                 <option key={cls.id} value={cls.id}>
-                  {cls.class_name}
+                  {cls.class_section || cls.class_name || cls.id}
                 </option>
               ))}
             </select>

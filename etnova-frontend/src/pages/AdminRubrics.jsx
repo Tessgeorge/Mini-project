@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AppFrame from "../components/AppFrame";
 import Sidebar from "../components/admin/Sidebar";
@@ -15,6 +15,10 @@ import {
 import supabase from "../config/supabaseClient";
 
 const ADMIN_RUBRIC_STAGE_OPTIONS = RUBRIC_STAGE_OPTIONS.filter((item) => item.value !== "guide");
+const ADMIN_REVIEW_RUBRIC_OPTIONS = [
+  { value: "zeroth_review", label: "Zeroth Review", total: 40, description: "Separate rubric set without Design and Module Description." },
+  { value: "shared_review", label: "Other Reviews", total: 40, description: "Shared rubric set used for first and second review." },
+];
 
 function makeDraftRow(stageMeta, index = 0) {
   return {
@@ -30,6 +34,7 @@ function makeDraftRow(stageMeta, index = 0) {
 export default function AdminRubrics() {
   const navigate = useNavigate();
   const [stage, setStage] = useState(ADMIN_RUBRIC_STAGE_OPTIONS[0].value);
+  const [reviewRubricMode, setReviewRubricMode] = useState(ADMIN_REVIEW_RUBRIC_OPTIONS[0].value);
   const [rubrics, setRubrics] = useState([]);
   const [finalResults, setFinalResults] = useState([]);
   const [availableClasses, setAvailableClasses] = useState([]);
@@ -45,14 +50,23 @@ export default function AdminRubrics() {
     () => ADMIN_RUBRIC_STAGE_OPTIONS.find((item) => item.value === stage) || ADMIN_RUBRIC_STAGE_OPTIONS[0],
     [stage]
   );
+  const selectedReviewRubricMeta = useMemo(
+    () => ADMIN_REVIEW_RUBRIC_OPTIONS.find((item) => item.value === reviewRubricMode) || ADMIN_REVIEW_RUBRIC_OPTIONS[0],
+    [reviewRubricMode]
+  );
+  const selectedReviewStage = reviewRubricMode === "zeroth_review" ? "zeroth_review" : null;
+  const rubricHeading = stage === "review"
+    ? `${selectedReviewRubricMeta.label} Rubrics`
+    : `${stageMeta.label} Rubrics`;
 
-  const loadData = async (selectedStage = stage) => {
+  const loadData = useCallback(async (selectedStage = stage, selectedReviewMode = reviewRubricMode) => {
     setLoading(true);
     setError("");
     setNotice("");
     try {
+      const reviewStage = selectedStage === "review" && selectedReviewMode === "zeroth_review" ? "zeroth_review" : null;
       const [rubricRows, finalRows, classRows] = await Promise.all([
-        fetchAdminRubrics(selectedStage),
+        fetchAdminRubrics(selectedStage, reviewStage),
         fetchAdminFinalResults(),
         fetchAdminClasses(),
       ]);
@@ -64,11 +78,11 @@ export default function AdminRubrics() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [reviewRubricMode, stage]);
 
   useEffect(() => {
-    loadData(stage);
-  }, [stage]);
+    loadData(stage, reviewRubricMode);
+  }, [loadData, reviewRubricMode, stage]);
 
   const activeTotal = useMemo(
     () => rubrics.filter((item) => item.is_active !== false).reduce((sum, item) => sum + Number(item.max_marks || 0), 0),
@@ -138,7 +152,7 @@ export default function AdminRubrics() {
         return;
       }
       await deleteAdminRubric(row.id);
-      await loadData(stage);
+      await loadData(stage, reviewRubricMode);
       setNotice("Rubric deleted.");
     } catch (err) {
       setError(err.message || "Failed to delete rubric.");
@@ -157,9 +171,9 @@ export default function AdminRubrics() {
         order_no: Number(row.order_no || index + 1),
         is_active: row.is_active !== false,
       }));
-      const result = await saveAdminRubrics(stage, payload);
+      const result = await saveAdminRubrics(stage, payload, selectedReviewStage);
       setRubrics((result || []).map((row, index) => ({ ...row, isNew: false, localKey: row.id || `row-${index}` })));
-      setNotice(`${stageMeta.label} rubrics saved.`);
+      setNotice(`${rubricHeading} saved.`);
     } catch (err) {
       setError(err.message || "Failed to save rubrics.");
     } finally {
@@ -230,6 +244,27 @@ export default function AdminRubrics() {
                 );
               })}
             </div>
+            {stage === "review" ? (
+              <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white p-1">
+                {ADMIN_REVIEW_RUBRIC_OPTIONS.map((option) => {
+                  const isActive = reviewRubricMode === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setReviewRubricMode(option.value)}
+                      className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
+                        isActive
+                          ? "bg-slate-900 text-white"
+                          : "text-slate-600 hover:bg-slate-100"
+                      }`}
+                    >
+                      {option.label} ({option.total})
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
             <button type="button" onClick={addRubric} className="rounded-xl border border-teal-200 bg-white px-4 py-2.5 text-sm font-semibold text-teal-700">
               Add Rubric
             </button>
@@ -244,7 +279,12 @@ export default function AdminRubrics() {
 
         <section className="bg-white/90 rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-200/70">
-            <h2 className="text-lg font-semibold text-slate-800">{stageMeta.label} Rubrics</h2>
+            <h2 className="text-lg font-semibold text-slate-800">{rubricHeading}</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {stage === "review"
+                ? `${selectedReviewRubricMeta.description} Active total: ${activeTotal}/${stageMeta.total}.`
+                : `Active total: ${activeTotal}/${stageMeta.total}.`}
+            </p>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

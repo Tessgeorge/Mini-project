@@ -27,6 +27,12 @@ const translateSchemaError = (error) => {
     return translated;
   }
 
+  if (rawMessage.includes("column rubrics.review_round does not exist") || rawMessage.includes("Could not find the 'review_round' column of 'rubrics'")) {
+    const translated = new Error('The "rubrics.review_round" column is missing in Supabase. Run the SQL in etnova-backend/sql/rubrics_evaluation_schema.sql and refresh the schema cache.');
+    translated.status = 500;
+    return translated;
+  }
+
   return error;
 };
 
@@ -38,14 +44,14 @@ const handleControllerError = (res, error) => {
 
 export const listRubrics = async (req, res) => {
   try {
-    const { stage } = req.query;
+    const { stage, review_stage: reviewStage } = req.query;
     if (!stage) {
       return res.status(400).json({ message: 'stage query parameter is required.' });
     }
 
     const result = req.userRole === 'admin'
-      ? await getRubricsForAdmin(stage)
-      : await getActiveRubricsByStage(stage);
+      ? await getRubricsForAdmin(stage, reviewStage || null)
+      : await getActiveRubricsByStage(stage, reviewStage || null);
 
     return res.json(result);
   } catch (error) {
@@ -56,11 +62,12 @@ export const listRubrics = async (req, res) => {
 export const saveStageRubrics = async (req, res) => {
   try {
     const { stage } = req.params;
-    const { rubrics } = req.body || {};
+    const { rubrics, review_stage: reviewStage } = req.body || {};
     const result = await saveRubricsForStage({
       stage,
       rubrics,
       adminId: req.user.id,
+      reviewStage: reviewStage || null,
     });
 
     return res.json(result);

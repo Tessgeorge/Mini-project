@@ -30,6 +30,12 @@ const DEFAULT_REVIEW_RUBRICS = [
   { title: 'Technology Stack', max_marks: 5, order_no: 5, is_active: true },
   { title: 'Presentation', max_marks: 5, order_no: 6, is_active: true },
 ];
+const DEFAULT_ZEROTH_REVIEW_RUBRICS = [
+  { title: 'Problem Statement', max_marks: 10, order_no: 1, is_active: true },
+  { title: 'Requirement Analysis', max_marks: 15, order_no: 2, is_active: true },
+  { title: 'Technology Stack', max_marks: 10, order_no: 3, is_active: true },
+  { title: 'Presentation', max_marks: 5, order_no: 4, is_active: true },
+];
 const DEFAULT_EXTERNAL_RUBRICS = [
   { title: 'Presentation', max_marks: 30, order_no: 1, is_active: true },
   { title: 'Demo', max_marks: 20, order_no: 2, is_active: true },
@@ -74,6 +80,13 @@ const formatReviewStageLabel = (value) => {
   if (value === 'second_review') return 'Second Review';
   if (value === 'final_review') return 'Final Review';
   return value;
+};
+
+const getRubricReviewRound = (stage, reviewStage = null) => {
+  if (stage !== 'review') return null;
+  if (!reviewStage) return null;
+  const normalizedReviewStage = normalizeReviewStage(reviewStage);
+  return normalizedReviewStage === 'zeroth_review' ? 'zeroth_review' : null;
 };
 
 const getProjectTeamMemberIds = async (projectId) => {
@@ -348,11 +361,18 @@ const calculateReviewTotal = async (studentId) => {
   };
 };
 
-const fetchRubricsByStage = async (normalizedStage, { activeOnly = false } = {}) => {
+const fetchRubricsByStage = async (normalizedStage, { activeOnly = false, reviewStage = null } = {}) => {
+  const rubricReviewRound = getRubricReviewRound(normalizedStage, reviewStage);
   let query = supabase
     .from('rubrics')
-    .select('id, stage, title, max_marks, order_no, is_active, created_by, created_at')
+    .select('id, stage, review_round, title, max_marks, order_no, is_active, created_by, created_at')
     .eq('stage', normalizedStage);
+
+  if (normalizedStage === 'review') {
+    query = rubricReviewRound
+      ? query.eq('review_round', rubricReviewRound)
+      : query.is('review_round', null);
+  }
 
   if (activeOnly) {
     query = query.eq('is_active', true);
@@ -366,22 +386,26 @@ const fetchRubricsByStage = async (normalizedStage, { activeOnly = false } = {})
   return data || [];
 };
 
-const ensureDefaultRubricsForStage = async (normalizedStage) => {
+const ensureDefaultRubricsForStage = async (normalizedStage, reviewStage = null) => {
   if (normalizedStage !== 'review' && normalizedStage !== 'ese') {
     return fetchRubricsByStage(normalizedStage);
   }
 
-  const existingRows = await fetchRubricsByStage(normalizedStage);
+  const rubricReviewRound = getRubricReviewRound(normalizedStage, reviewStage);
+  const existingRows = await fetchRubricsByStage(normalizedStage, { reviewStage });
   if (existingRows.length > 0) {
     return existingRows;
   }
 
-  const defaultRows = normalizedStage === 'review' ? DEFAULT_REVIEW_RUBRICS : DEFAULT_EXTERNAL_RUBRICS;
+  const defaultRows = normalizedStage === 'review'
+    ? (rubricReviewRound === 'zeroth_review' ? DEFAULT_ZEROTH_REVIEW_RUBRICS : DEFAULT_REVIEW_RUBRICS)
+    : DEFAULT_EXTERNAL_RUBRICS;
 
   const { error } = await supabase
     .from('rubrics')
     .insert(defaultRows.map((row) => ({
       stage: normalizedStage,
+      review_round: normalizedStage === 'review' ? rubricReviewRound : null,
       title: row.title,
       max_marks: row.max_marks,
       order_no: row.order_no,
@@ -389,18 +413,18 @@ const ensureDefaultRubricsForStage = async (normalizedStage) => {
     })));
 
   if (error) throw error;
-  return fetchRubricsByStage(normalizedStage);
+  return fetchRubricsByStage(normalizedStage, { reviewStage });
 };
 
-export const getActiveRubricsByStage = async (stage) => {
+export const getActiveRubricsByStage = async (stage, reviewStage = null) => {
   const { stage: normalizedStage } = getStageConfig(stage);
-  const rows = await ensureDefaultRubricsForStage(normalizedStage);
+  const rows = await ensureDefaultRubricsForStage(normalizedStage, reviewStage);
   return rows.filter((row) => row.is_active !== false);
 };
 
-export const getRubricsForAdmin = async (stage) => {
+export const getRubricsForAdmin = async (stage, reviewStage = null) => {
   const { stage: normalizedStage } = getStageConfig(stage);
-  return ensureDefaultRubricsForStage(normalizedStage);
+  return ensureDefaultRubricsForStage(normalizedStage, reviewStage);
 };
 
 const validateRubricDefinitions = (stage, rubrics) => {
@@ -429,11 +453,12 @@ const validateRubricDefinitions = (stage, rubrics) => {
   });
 };
 
-export const saveRubricsForStage = async ({ stage, rubrics, adminId }) => {
+export const saveRubricsForStage = async ({ stage, rubrics, adminId, reviewStage = null }) => {
   const { stage: normalizedStage } = getStageConfig(stage);
   validateRubricDefinitions(normalizedStage, rubrics);
+  const rubricReviewRound = getRubricReviewRound(normalizedStage, reviewStage);
 
-  const existingRubrics = await getRubricsForAdmin(normalizedStage);
+  const existingRubrics = await getRubricsForAdmin(normalizedStage, reviewStage);
   const existingIds = new Set(existingRubrics.map((rubric) => rubric.id));
   const payloadIds = new Set(rubrics.map((rubric) => rubric.id).filter(Boolean));
 
@@ -468,6 +493,7 @@ export const saveRubricsForStage = async ({ stage, rubrics, adminId }) => {
     return {
       id: rubric.id || undefined,
       stage: normalizedStage,
+      review_round: normalizedStage === 'review' ? rubricReviewRound : null,
       title: String(rubric.title).trim(),
       max_marks: Number(rubric.max_marks),
       order_no: Number(rubric.order_no),
@@ -482,13 +508,13 @@ export const saveRubricsForStage = async ({ stage, rubrics, adminId }) => {
 
   if (error) throw error;
 
-  return getRubricsForAdmin(normalizedStage);
+  return getRubricsForAdmin(normalizedStage, reviewStage);
 };
 
 export const deleteRubric = async (rubricId) => {
   const { data: rubric, error: rubricError } = await supabase
     .from('rubrics')
-    .select('id, stage')
+    .select('id, stage, review_round')
     .eq('id', rubricId)
     .single();
 
@@ -507,7 +533,7 @@ export const deleteRubric = async (rubricId) => {
     throw createHttpError('Rubrics with marks cannot be deleted.', 409);
   }
 
-  const remainingRubrics = (await getRubricsForAdmin(rubric.stage)).filter((row) => row.id !== rubricId);
+  const remainingRubrics = (await getRubricsForAdmin(rubric.stage, rubric.review_round)).filter((row) => row.id !== rubricId);
   validateRubricDefinitions(rubric.stage, remainingRubrics);
 
   const { error } = await supabase
@@ -550,7 +576,7 @@ const validateMarksPayload = async ({ stage, projectId, entries, reviewStage = n
     });
   }
 
-  const rubrics = await getActiveRubricsByStage(stage);
+  const rubrics = await getActiveRubricsByStage(stage, normalizedReviewStage);
   if (rubrics.length === 0) {
     throw createHttpError(`No active rubrics configured for ${stage}.`, 400);
   }
@@ -657,16 +683,23 @@ export const upsertStageMarks = async ({ stage, projectId, evaluatorId, entries,
   const project = await getProjectRow(projectId);
   await assertStageWritable({ stage: normalizedStage, projectId });
 
-  if (normalizedStage === 'review') {
-    const normalizedReviewStage = normalizeReviewStage(reviewStage);
+  if (normalizedStage === 'review' || normalizedStage === 'ese') {
+    const accessReviewStage = normalizedStage === 'ese'
+      ? 'final_review'
+      : normalizeReviewStage(reviewStage);
     const canWriteReview = await hasActiveReviewerStageAccess({
       project,
       evaluatorId,
-      reviewStage: normalizedReviewStage,
+      reviewStage: accessReviewStage,
     });
 
     if (!canWriteReview) {
-      throw createHttpError('Review mark entry is read-only because coordinator access for this review round is closed.', 423);
+      throw createHttpError(
+        normalizedStage === 'ese'
+          ? 'External mark entry is read-only because coordinator access for final review is closed.'
+          : 'Review mark entry is read-only because coordinator access for this review round is closed.',
+        423
+      );
     }
   }
 
@@ -749,7 +782,7 @@ export const getProjectStageBreakdown = async ({ projectId, stage, reviewStage =
   const { stage: normalizedStage, table } = getStageConfig(stage);
   const rubrics = normalizedStage === 'guide'
     ? [GUIDE_TOTAL_RUBRIC]
-    : await getActiveRubricsByStage(normalizedStage);
+    : await getActiveRubricsByStage(normalizedStage, reviewStage);
   const studentIds = await getProjectTeamMemberIds(projectId);
   const normalizedReviewStage = normalizedStage === 'review' ? normalizeReviewStage(reviewStage) : null;
 
@@ -760,11 +793,13 @@ export const getProjectStageBreakdown = async ({ projectId, stage, reviewStage =
 
   if (studentError) throw studentError;
 
+  const marksSelect = normalizedStage === 'review'
+    ? 'id, student_id, rubric_id, marks, evaluator_id, review_stage'
+    : 'id, student_id, rubric_id, marks, evaluator_id';
+
   let marksQuery = supabase
     .from(table)
-    .select(normalizedStage === 'guide'
-      ? 'id, student_id, rubric_id, marks, evaluator_id'
-      : 'id, student_id, rubric_id, marks, evaluator_id, review_stage')
+    .select(marksSelect)
     .in('student_id', studentIds);
 
   if (normalizedStage === 'review') {

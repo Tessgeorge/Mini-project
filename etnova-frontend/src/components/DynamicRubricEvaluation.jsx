@@ -19,41 +19,57 @@ function buildEmptyDraft(students, rubrics, existingRows = []) {
   return next;
 }
 
-function buildFeedbackDraft(students) {
+function buildFeedbackDraft(students, existingRows = []) {
   return (students || []).reduce((acc, student) => {
-    acc[student.student_id] = "";
+    const existing = existingRows.find((row) => row.student_id === student.student_id) || null;
+    acc[student.student_id] = existing?.feedback || "";
     return acc;
   }, {});
 }
 
-export default function DynamicRubricEvaluation({ projectId, members = [], mode = "guide", allowedReviewStages = [], writableReviewStages = [] }) {
-  const stage = mode === "review" ? "review" : "guide";
-  const initialReviewStage = allowedReviewStages[0] || REVIEW_ROUND_OPTIONS[0].value;
-  const [reviewStage, setReviewStage] = useState(initialReviewStage);
+export default function DynamicRubricEvaluation({
+  projectId,
+  members = [],
+  mode = "guide",
+  allowedReviewStages = [],
+  writableReviewStages = [],
+}) {
+  const baseStage = mode === "review" ? "review" : "guide";
+  const defaultReviewStage = allowedReviewStages[0] || REVIEW_ROUND_OPTIONS[0].value;
+  const [reviewStage, setReviewStage] = useState(defaultReviewStage);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [stageData, setStageData] = useState({ stage, rubrics: [], students: [] });
+  const [stageData, setStageData] = useState({ stage: baseStage, rubrics: [], students: [] });
   const [draft, setDraft] = useState({});
   const [feedbackDraft, setFeedbackDraft] = useState({});
 
   const students = useMemo(
-    () => (members || []).map((member) => ({
-      student_id: member.student_id,
-      full_name: member.profiles?.full_name || "Unnamed Student",
-      roll_number: member.profiles?.roll_number || "-",
-    })),
+    () =>
+      (members || []).map((member) => ({
+        student_id: member.student_id,
+        full_name: member.profiles?.full_name || "Unnamed Student",
+        roll_number: member.profiles?.roll_number || "-",
+      })),
     [members]
   );
 
   useEffect(() => {
-    if (stage !== "review") return;
+    if (baseStage !== "review") return;
     if (!allowedReviewStages.length) return;
     if (!allowedReviewStages.includes(reviewStage)) {
       setReviewStage(allowedReviewStages[0]);
     }
-  }, [allowedReviewStages, reviewStage, stage]);
+  }, [allowedReviewStages, baseStage, reviewStage]);
+
+  const reviewContextStage = baseStage === "review" ? reviewStage : null;
+  const activeStage = baseStage === "review" && reviewStage === "final_review" ? "ese" : baseStage;
+  const allowFeedback = activeStage === "review" || activeStage === "guide";
+  const meta = getRubricStageMeta(activeStage);
+  const activeReviewLabel =
+    REVIEW_ROUND_OPTIONS.find((item) => item.value === reviewStage)?.label || "Review";
+  const isReadOnly = baseStage === "review" && !writableReviewStages.includes(reviewStage);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,28 +79,36 @@ export default function DynamicRubricEvaluation({ projectId, members = [], mode 
       setError("");
       setNotice("");
       try {
-        const activeReviewStage = stage === "review" ? reviewStage : null;
-        const data = await fetchProjectRubricMarks(projectId, stage, activeReviewStage);
+        const data = await fetchProjectRubricMarks(projectId, activeStage, reviewContextStage);
         if (cancelled) return;
-        setStageData(data || { stage, rubrics: [], students: [] });
-        setDraft(buildEmptyDraft(data?.students || students, data?.rubrics || [], data?.students || []));
-        setFeedbackDraft(buildFeedbackDraft(data?.students || students));
+        const resolvedStudents = data?.students || students;
+        const resolvedRubrics = data?.rubrics || [];
+        setStageData({
+          stage: activeStage,
+          rubrics: resolvedRubrics,
+          students: resolvedStudents,
+        });
+        setDraft(buildEmptyDraft(resolvedStudents, resolvedRubrics, data?.students || []));
+        setFeedbackDraft(buildFeedbackDraft(resolvedStudents, data?.students || []));
       } catch (err) {
         if (cancelled) return;
         setError(err.message || "Failed to load rubric marks.");
-        setStageData({ stage, rubrics: [], students });
+        setStageData({ stage: activeStage, rubrics: [], students });
         setDraft(buildEmptyDraft(students, [], []));
-        setFeedbackDraft(buildFeedbackDraft(students));
+        setFeedbackDraft(buildFeedbackDraft(students, []));
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
 
-    if (projectId) run();
+    if (projectId) {
+      run();
+    }
+
     return () => {
       cancelled = true;
     };
-  }, [projectId, reviewStage, stage, students]);
+  }, [activeStage, projectId, reviewContextStage, students]);
 
   const handleCellChange = (studentId, rubricId, value) => {
     setDraft((prev) => ({
@@ -124,18 +148,26 @@ export default function DynamicRubricEvaluation({ projectId, members = [], mode 
         }
       }
 
-      const feedbackEntries = stage === "guide"
-        ? (stageData.students || []).map((student) => {
-          const feedback = String(feedbackDraft?.[student.student_id] || "").trim();
-          return feedback ? { student_id: student.student_id, feedback } : null;
-        }).filter(Boolean)
+      const feedbackEntries = allowFeedback
+        ? (stageData.students || [])
+            .map((student) => {
+              const feedback = String(feedbackDraft?.[student.student_id] || "").trim();
+              return feedback ? { student_id: student.student_id, feedback } : null;
+            })
+            .filter(Boolean)
         : [];
 
-      await saveProjectRubricMarks(projectId, stage, entries, stage === "review" ? reviewStage : null, feedbackEntries);
-      const refreshed = await fetchProjectRubricMarks(projectId, stage, stage === "review" ? reviewStage : null);
-      setStageData(refreshed || { stage, rubrics: [], students: [] });
-      setDraft(buildEmptyDraft(refreshed?.students || students, refreshed?.rubrics || [], refreshed?.students || []));
-      setFeedbackDraft(buildFeedbackDraft(refreshed?.students || students));
+      await saveProjectRubricMarks(projectId, activeStage, entries, reviewContextStage, feedbackEntries);
+      const refreshed = await fetchProjectRubricMarks(projectId, activeStage, reviewContextStage);
+      const resolvedStudents = refreshed?.students || students;
+      const resolvedRubrics = refreshed?.rubrics || [];
+      setStageData({
+        stage: activeStage,
+        rubrics: resolvedRubrics,
+        students: resolvedStudents,
+      });
+      setDraft(buildEmptyDraft(resolvedStudents, resolvedRubrics, refreshed?.students || []));
+      setFeedbackDraft(buildFeedbackDraft(resolvedStudents, refreshed?.students || []));
       setNotice(`${meta.label} marks saved successfully.`);
     } catch (err) {
       setError(err.message || "Failed to save rubric marks.");
@@ -144,30 +176,52 @@ export default function DynamicRubricEvaluation({ projectId, members = [], mode 
     }
   };
 
-  const meta = getRubricStageMeta(stage);
-  const isReadOnly = stage === "review" && !writableReviewStages.includes(reviewStage);
-  const activeReviewLabel =
-    REVIEW_ROUND_OPTIONS.find((item) => item.value === reviewStage)?.label || "Review";
+  const rubricTotal = useMemo(
+    () => (stageData.rubrics || []).reduce((sum, rubric) => sum + Number(rubric.max_marks || 0), 0),
+    [stageData.rubrics]
+  );
+
+  const headerEyebrow =
+    activeStage === "ese"
+      ? "External Evaluation"
+      : activeStage === "review"
+        ? "Review Evaluation"
+        : "Guide Evaluation";
+
+  const headerTitle =
+    activeStage === "ese"
+      ? "Final Review External Marks"
+      : baseStage === "review"
+        ? `${activeReviewLabel} Marks`
+        : `${meta.label} Marks`;
+
+  const helperText =
+    activeStage === "ese"
+      ? "Admin-set external evaluation rubrics out of 75 are loaded for final review. Saved marks flow into the coordinator external total."
+      : activeStage === "review"
+        ? isReadOnly
+          ? "This review round is visible in read-only mode because coordinator access is currently closed."
+          : "Existing review rubrics are loaded automatically for the selected review round."
+        : "Guide enters marks using the configured guide rubric. Totals are calculated automatically in the backend.";
+
+  const gridHelpText =
+    activeStage === "ese"
+      ? "Final review uses the external evaluation rubric configured by admin. Individual feedback is not collected here."
+      : activeStage === "review"
+        ? "All students in the selected project appear here with the active review rubrics. Individual feedback reaches only the corresponding student."
+        : "Add individual feedback here to send it directly to each student with your name.";
 
   return (
     <div className="space-y-5">
       <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
-            <p className="text-xs font-bold uppercase tracking-widest text-gray-400">{stage === "review" ? "Review Evaluation" : "Guide Evaluation"}</p>
-            <h3 className="text-xl font-extrabold text-gray-900 mt-1">
-              {stage === "review" ? `${activeReviewLabel} Marks` : `${meta.label} Marks`}
-            </h3>
-            <p className="text-sm text-gray-500 mt-1">
-              {stage === "review"
-                ? isReadOnly
-                  ? "This review round is visible in read-only mode because coordinator access is currently closed."
-                  : "Existing review rubrics are loaded automatically for the selected review round."
-                : "Guide enters a direct total mark out of 15 for each student. Totals are calculated automatically in the backend."}
-            </p>
+            <p className="text-xs font-bold uppercase tracking-widest text-gray-400">{headerEyebrow}</p>
+            <h3 className="text-xl font-extrabold text-gray-900 mt-1">{headerTitle}</h3>
+            <p className="text-sm text-gray-500 mt-1">{helperText}</p>
           </div>
           <div className="flex items-center gap-3">
-            {stage === "review" ? (
+            {baseStage === "review" ? (
               allowedReviewStages.length > 1 ? (
                 <select
                   value={reviewStage}
@@ -185,7 +239,7 @@ export default function DynamicRubricEvaluation({ projectId, members = [], mode 
                 </select>
               ) : (
                 <div className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-2.5 text-sm font-bold text-teal-700">
-                  {REVIEW_ROUND_OPTIONS.find((item) => item.value === reviewStage)?.label || "Review"}
+                  {activeReviewLabel}
                 </div>
               )
             ) : null}
@@ -215,21 +269,17 @@ export default function DynamicRubricEvaluation({ projectId, members = [], mode 
         </div>
         <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
           <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Stage Limit</p>
-          <p className="mt-2 text-2xl font-extrabold text-gray-900">{meta.total}</p>
+          <p className="mt-2 text-2xl font-extrabold text-gray-900">{rubricTotal || meta.total}</p>
         </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100">
           <p className="text-sm font-bold text-gray-800">Entry Grid</p>
-          <p className="text-xs text-gray-400 mt-1">
-            {stage === "review"
-              ? "All students in the selected project appear here with the active review rubrics. Individual feedback reaches only the corresponding student."
-              : "Add individual feedback here to send it directly to each student with your name."}
-          </p>
+          <p className="text-xs text-gray-400 mt-1">{gridHelpText}</p>
         </div>
         <div className="overflow-x-auto">
-          <table className={`w-full text-sm ${stage === "guide" ? "min-w-[1080px]" : "min-w-[1160px]"}`}>
+          <table className={`w-full text-sm ${allowFeedback ? "min-w-[1160px]" : "min-w-[920px]"}`}>
             <thead className="bg-gray-50 text-gray-500">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Student</th>
@@ -239,14 +289,22 @@ export default function DynamicRubricEvaluation({ projectId, members = [], mode 
                     <span className="ml-1 text-[11px] normal-case text-gray-400">/ {rubric.max_marks}</span>
                   </th>
                 ))}
-                <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Individual Feedback</th>
+                {allowFeedback ? <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Individual Feedback</th> : null}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={Math.max(3, stageData.rubrics.length + 2)} className="px-4 py-8 text-center text-gray-500">Loading rubric fields...</td></tr>
+                <tr>
+                  <td colSpan={Math.max(2, stageData.rubrics.length + (allowFeedback ? 2 : 1))} className="px-4 py-8 text-center text-gray-500">
+                    Loading rubric fields...
+                  </td>
+                </tr>
               ) : !stageData.rubrics.length ? (
-                <tr><td colSpan={3} className="px-4 py-8 text-center text-gray-500">No active rubrics configured for this stage.</td></tr>
+                <tr>
+                  <td colSpan={Math.max(2, (stageData.rubrics || []).length + (allowFeedback ? 2 : 1))} className="px-4 py-8 text-center text-gray-500">
+                    No active rubrics configured for this stage.
+                  </td>
+                </tr>
               ) : (
                 (stageData.students || []).map((student) => (
                   <tr key={student.student_id}>
@@ -257,26 +315,28 @@ export default function DynamicRubricEvaluation({ projectId, members = [], mode 
                     {stageData.rubrics.map((rubric) => (
                       <td key={`${student.student_id}-${rubric.id}`} className="px-4 py-3">
                         <input
-                        type="number"
-                        min="0"
-                        max={rubric.max_marks}
-                        value={draft?.[student.student_id]?.[rubric.id] ?? ""}
-                        onChange={(event) => handleCellChange(student.student_id, rubric.id, event.target.value)}
-                        readOnly={isReadOnly}
-                        className="w-24 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
-                      />
-                    </td>
-                  ))}
-                    <td className="px-4 py-3">
-                      <textarea
-                        rows={3}
-                        value={feedbackDraft?.[student.student_id] ?? ""}
-                        onChange={(event) => handleFeedbackChange(student.student_id, event.target.value)}
-                        placeholder="Write individual feedback for this student..."
-                        readOnly={isReadOnly}
-                        className="w-full min-w-[260px] rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-teal-400"
-                      />
-                    </td>
+                          type="number"
+                          min="0"
+                          max={rubric.max_marks}
+                          value={draft?.[student.student_id]?.[rubric.id] ?? ""}
+                          onChange={(event) => handleCellChange(student.student_id, rubric.id, event.target.value)}
+                          readOnly={isReadOnly}
+                          className="w-24 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                        />
+                      </td>
+                    ))}
+                    {allowFeedback ? (
+                      <td className="px-4 py-3">
+                        <textarea
+                          rows={3}
+                          value={feedbackDraft?.[student.student_id] ?? ""}
+                          onChange={(event) => handleFeedbackChange(student.student_id, event.target.value)}
+                          placeholder="Write individual feedback for this student..."
+                          readOnly={isReadOnly}
+                          className="w-full min-w-[260px] rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-teal-400"
+                        />
+                      </td>
+                    ) : null}
                   </tr>
                 ))
               )}
@@ -284,7 +344,6 @@ export default function DynamicRubricEvaluation({ projectId, members = [], mode 
           </table>
         </div>
       </div>
-
     </div>
   );
 }

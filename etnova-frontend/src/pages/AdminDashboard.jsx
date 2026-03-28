@@ -7,7 +7,6 @@ import TopNavbar from "../components/admin/TopNavbar";
 import StatCard from "../components/admin/StatCard";
 import SectionCard from "../components/admin/SectionCard";
 import PublishPanel from "../components/admin/PublishPanel";
-import AcademicActivityPanel from "../components/admin/AcademicActivityPanel";
 import AdminProfileSettingsModal from "../components/admin/AdminProfileSettingsModal";
 import ProfileMenu from "../components/ProfileMenu";
 
@@ -18,6 +17,17 @@ const KPI_DATA = [
   { title: "Results Published", value: "Not Yet", hint: "Awaiting final approval", borderClass: "border-t-rose-500", icon: "published" },
 ];
 const STAGE_ORDER = ["Idea", "Abstract", "Zeroth Review", "First Review", "Second Review", "Final Review"];
+
+function getClassLabel(classRow) {
+  return String(classRow?.class_section || classRow?.class_name || classRow?.id || "").trim();
+}
+
+function normalizeClassRows(rows = []) {
+  return rows.map((item) => ({
+    ...item,
+    label: getClassLabel(item),
+  }));
+}
 
 function normalizeStageName(stageName) {
   const value = String(stageName || "").trim().toLowerCase();
@@ -54,11 +64,32 @@ function formatStageLabel(stageName) {
   return stageName;
 }
 
+function formatTimelineStageLabel(stageName) {
+  if (stageName === "Idea") return "Idea Approval";
+  if (stageName === "Abstract") return "Abstract Submission";
+  if (stageName === "Zeroth Review") return "Zeroth Review";
+  if (stageName === "First Review") return "First Review";
+  if (stageName === "Second Review") return "Second Review";
+  if (stageName === "Final Review") return "Final Review";
+  return stageName;
+}
+
 function formatStageSubline(stage) {
   if (!stage?.deadline) return "Pending";
   const date = new Date(stage.deadline);
   if (Number.isNaN(date.getTime())) return "Pending";
   return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+}
+
+function normalizeClassRef(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function hasDeadlinePassed(deadline) {
+  if (!deadline) return false;
+  const date = new Date(deadline);
+  if (Number.isNaN(date.getTime())) return false;
+  return date.getTime() <= Date.now();
 }
 
 export default function AdminDashboard() {
@@ -154,7 +185,7 @@ export default function AdminDashboard() {
           .from("projects")
           .select("id, title, guide_id, status, class_id, team_members(id, student_id, profiles:student_id(class_section))"),
         supabase.from("profiles").select("id, full_name, role").eq("role", "mentor"),
-        supabase.from("classes").select("id, class_name"),
+        supabase.from("classes").select("id, class_section, department"),
       ]);
 
       if (projectsRes.error) throw projectsRes.error;
@@ -163,38 +194,48 @@ export default function AdminDashboard() {
 
       setProjects(projectsRes.data || []);
       setMentors(mentorsRes.data || []);
-      setDashboardClasses(classesRes.data || []);
+      setDashboardClasses((classesRes.data || []).map((item) => ({
+        ...item,
+        label: getClassLabel(item),
+      })));
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const fetchReviewStages = useCallback(async (classNameOverride = "") => {
+  const fetchReviewStages = useCallback(async (classNameOverride = "", classIdOverride = "") => {
     const { data: classRows, error: classError } = await supabase
       .from("classes")
-      .select("id, class_name")
-      .order("class_name", { ascending: true });
+      .select("id, class_section, department")
+      .order("class_section", { ascending: true, nullsFirst: false });
 
     if (classError) throw classError;
 
     const classes = classRows || [];
-    setReviewClasses(classes);
 
-    const targetClassName = classNameOverride || selectedClassName;
-    const currentClass = classes.find((item) => item.class_name === targetClassName) || classes[0] || null;
+    const normalizedClasses = normalizeClassRows(classes);
+
+    const normalizedTargetClass = normalizeClassRef(classNameOverride || selectedClassName);
+    const normalizedTargetId = normalizeClassRef(classIdOverride || selectedClassId);
+    const currentClass = normalizedClasses.find((item) => normalizeClassRef(item.id) === normalizedTargetId)
+      || normalizedClasses.find((item) => normalizeClassRef(item.label) === normalizedTargetClass)
+      || normalizedClasses[0]
+      || null;
     if (!currentClass?.id) {
       setSelectedClassId("");
       setSelectedClassName("");
       setReviewStages([]);
+      setClassActiveStageMap({});
       return;
     }
 
-    setSelectedClassName(currentClass.class_name || "S6 CSE A");
+    setReviewClasses(normalizedClasses);
+    setSelectedClassName(currentClass.label || "S6 CSE A");
     setSelectedClassId(currentClass.id);
 
     const { data: stageRows, error: stageError } = await supabase
       .from("review_stages")
-      .select("id, stage_name, deadline, is_active, is_completed, is_locked")
+      .select("id, stage_name, coordinator_deadline, is_active, is_completed, is_locked")
       .eq("class_id", currentClass.id);
 
     if (stageError) throw stageError;
@@ -208,8 +249,9 @@ export default function AdminDashboard() {
       .map((row) => ({
         id: row.id,
         name: normalizeStageName(row.stage_name),
-        deadline: row.deadline || null,
+        deadline: row.coordinator_deadline || null,
         status: normalizeStageStatus(row),
+        rawStatus: normalizeStageStatus(row),
       }));
 
     setReviewStages(mapped);
@@ -220,7 +262,7 @@ export default function AdminDashboard() {
 
     if (allStageError) throw allStageError;
 
-    const classNameById = new Map(classes.map((item) => [item.id, item.class_name]));
+    const classNameById = new Map(normalizedClasses.map((item) => [item.id, item.label]));
     const activeMap = {};
     (allStageRows || []).forEach((row) => {
       if (!row?.is_active) return;
@@ -229,7 +271,7 @@ export default function AdminDashboard() {
       activeMap[className] = normalizeStageName(row.stage_name);
     });
     setClassActiveStageMap(activeMap);
-  }, [selectedClassName]);
+  }, [selectedClassId, selectedClassName]);
 
   useEffect(() => {
     const run = async () => {
@@ -262,7 +304,7 @@ export default function AdminDashboard() {
   }, [fetchAdminProfile, fetchDashboardData, fetchReviewStages, selectedClassId]);
 
   const teams = useMemo(() => {
-    const classNameById = new Map(dashboardClasses.map((item) => [item.id, item.class_name]));
+    const classNameById = new Map(dashboardClasses.map((item) => [item.id, item.label || getClassLabel(item)]));
     return projects.map((project) => {
       const guide = mentors.find((mentor) => mentor.id === project.guide_id);
       const status = String(project.status || "").toLowerCase();
@@ -288,11 +330,6 @@ export default function AdminDashboard() {
     });
   }, [classActiveStageMap, dashboardClasses, mentors, projects]);
 
-  const activeReviewStage = useMemo(
-    () => reviewStages.find((stage) => stage.status === "Active")?.name || "-",
-    [reviewStages]
-  );
-
   const assignedProjects = useMemo(
     () => projects.filter((project) => Boolean(project.guide_id)).length,
     [projects]
@@ -316,6 +353,64 @@ export default function AdminDashboard() {
     [mentors, projects]
   );
 
+  const orderedReviewStages = useMemo(() => {
+    const byName = new Map(reviewStages.map((stage) => [normalizeStageName(stage.name), stage]));
+    let activeStageFound = false;
+    let fallbackActiveAssigned = false;
+
+    return STAGE_ORDER.map((name, index) => {
+      const liveStage = byName.get(name);
+      const baseStage = liveStage || {
+        id: `dashboard-stage-${index}`,
+        name,
+        deadline: null,
+        status: "Inactive",
+        rawStatus: "Inactive",
+      };
+
+      const rawStatus = baseStage.rawStatus || baseStage.status || "Inactive";
+      const deadlinePassed = hasDeadlinePassed(baseStage.deadline);
+      const isOpened = rawStatus !== "Locked";
+      let status = "Locked";
+
+      if (rawStatus === "Completed" || deadlinePassed) {
+        status = "Completed";
+      } else if (rawStatus === "Active") {
+        status = "Active";
+        activeStageFound = true;
+      } else if (isOpened && !activeStageFound && !fallbackActiveAssigned) {
+        status = "Active";
+        fallbackActiveAssigned = true;
+      } else if (isOpened) {
+        status = "Pending";
+      }
+
+      return {
+        ...baseStage,
+        status,
+        rawStatus,
+      };
+    });
+  }, [reviewStages]);
+
+  const activeReviewStage = useMemo(
+    () => orderedReviewStages.find((stage) => stage.status === "Active")?.name || "-",
+    [orderedReviewStages]
+  );
+
+  const completedCount = useMemo(
+    () => orderedReviewStages.filter((stage) => stage.status === "Completed").length,
+    [orderedReviewStages]
+  );
+
+  const currentTimelineIndex = useMemo(() => {
+    const activeIndex = orderedReviewStages.findIndex((stage) => stage.status === "Active");
+    if (activeIndex !== -1) return activeIndex;
+    const pendingIndex = orderedReviewStages.findIndex((stage) => stage.status === "Pending");
+    if (pendingIndex !== -1) return Math.max(pendingIndex - 1, 0);
+    return Math.max(completedCount - 1, 0);
+  }, [completedCount, orderedReviewStages]);
+
   const dashboardKpis = useMemo(
     () =>
       KPI_DATA.map((item) =>
@@ -333,29 +428,6 @@ export default function AdminDashboard() {
       ),
     [activeReviewStage, assignedProjects, fullyOccupiedMentors, mentors.length, projects.length, unassignedProjects]
   );
-
-  const orderedReviewStages = useMemo(() => {
-    const byName = new Map(reviewStages.map((stage) => [normalizeStageName(stage.name), stage]));
-    return STAGE_ORDER.map((name, index) => {
-      const liveStage = byName.get(name);
-      return liveStage || {
-        id: `dashboard-stage-${index}`,
-        name,
-        deadline: null,
-        status: "Inactive",
-      };
-    });
-  }, [reviewStages]);
-
-  const completedCount = useMemo(
-    () => orderedReviewStages.filter((stage) => stage.status === "Completed").length,
-    [orderedReviewStages]
-  );
-
-  const progressPercent = useMemo(() => {
-    if (!orderedReviewStages.length) return 0;
-    return Math.round((completedCount / orderedReviewStages.length) * 100);
-  }, [completedCount, orderedReviewStages.length]);
 
   const adminName = adminProfile.full_name || ADMIN_NAME;
   const adminDepartment = adminProfile.department || "CSE";
@@ -451,71 +523,107 @@ export default function AdminDashboard() {
             )}
           </SectionCard>
 
-          <SectionCard title="Review Stage Progress">
-            <div className="space-y-6">
-              <div className="flex items-center justify-end gap-3">
+          <SectionCard
+            title="Milestone Timeline"
+            action={(
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <select
-                  value={selectedClassName}
+                  value={selectedClassId || reviewClasses[0]?.id || ""}
                   onChange={async (event) => {
-                    const nextClass = event.target.value;
-                    setSelectedClassName(nextClass);
-                    await fetchReviewStages(nextClass);
+                    const nextClassId = event.target.value;
+                    const matchedClass = reviewClasses.find(
+                      (classItem) => normalizeClassRef(classItem.id) === normalizeClassRef(nextClassId)
+                    );
+                    setSelectedClassId(nextClassId);
+                    setSelectedClassName(matchedClass?.label || "");
+                    await fetchReviewStages(matchedClass?.label || "", nextClassId);
                   }}
-                  className="glass-input rounded-lg px-3 py-1.5 text-sm text-slate-700 min-w-[170px]"
+                  className="glass-input min-w-[220px] rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm"
+                  disabled={reviewClasses.length === 0}
                 >
-                  {reviewClasses.map((classItem) => (
-                    <option key={classItem.id} value={classItem.class_name}>
-                      {classItem.class_name}
+                  {reviewClasses.length === 0 ? (
+                    <option value="">No classes found</option>
+                  ) : reviewClasses.map((classItem) => (
+                    <option key={classItem.id} value={classItem.id}>
+                      {classItem.label || getClassLabel(classItem)}
                     </option>
                   ))}
                 </select>
                 <button
                   type="button"
                   onClick={() => navigate(`/admin/review-management?class=${encodeURIComponent(selectedClassName || "")}`)}
-                  className="px-4 py-1.5 rounded-lg bg-teal-500 text-white text-sm font-semibold hover:bg-teal-600 transition-colors"
+                  className="rounded-xl bg-teal-500 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-teal-600 hover:shadow-md"
                 >
-                  {activeReviewStage === "-" ? "Open Review" : formatStageLabel(activeReviewStage)}
+                  {activeReviewStage === "-" ? "Open Review" : `Manage ${formatStageLabel(activeReviewStage)}`}
                 </button>
               </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
-                {orderedReviewStages.map((stage, index) => {
-                  const isCompleted = stage.status === "Completed";
-                  const isActive = stage.status === "Active";
-                  const isLocked = stage.status === "Locked";
-                  const dotClass = isCompleted || isActive
-                    ? "bg-teal-500 border-teal-500 text-white"
-                    : isLocked
-                        ? "bg-rose-50 border-rose-200 text-rose-600"
-                        : "bg-slate-50 border-slate-200 text-slate-500";
-                  return (
-                    <button
-                      key={stage.id || `${stage.name}-${index}`}
-                      type="button"
-                      onClick={() => navigate(`/admin/review-management?class=${encodeURIComponent(selectedClassName || "")}`)}
-                      className="text-left rounded-xl border border-slate-200/80 bg-white/70 p-3 hover:border-teal-300 hover:bg-teal-50/30 transition-colors"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={`inline-flex w-8 h-8 items-center justify-center rounded-full border text-sm font-semibold ${dotClass}`}>
-                          {isCompleted ? "✓" : index + 1}
-                        </span>
-                        <span className="text-sm font-semibold text-slate-800">{formatStageLabel(stage.name)}</span>
-                      </div>
-                      <p className="mt-2 text-xs text-slate-500">{formatStageSubline(stage)}</p>
-                      <p className="text-xs mt-1 text-slate-600">{stage.status === "Inactive" ? "Pending" : stage.status}</p>
-                    </button>
-                  );
-                })}
+            )}
+          >
+            <div className="space-y-6">
+              <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+                <span className="inline-flex items-center rounded-full bg-teal-50 px-3 py-1 font-semibold text-teal-700">
+                  {selectedClassName || "Select class"}
+                </span>
+                <span>
+                  {activeReviewStage === "-"
+                    ? "No review stage is currently open."
+                    : `${formatTimelineStageLabel(activeReviewStage)} is currently active.`}
+                </span>
               </div>
 
-              <div className="border-t border-slate-200/70 pt-4">
-                <div className="flex items-center justify-between text-sm text-slate-600">
-                  <p className="font-semibold text-slate-700">Overall Progress</p>
-                  <p>{progressPercent}%</p>
-                </div>
-                <p className="text-sm text-slate-500 mt-1">{`${completedCount} of ${orderedReviewStages.length} completed`}</p>
-                <div className="mt-3 h-2 rounded-full bg-slate-100 overflow-hidden">
-                  <div className="h-full bg-teal-500 rounded-full" style={{ width: `${progressPercent}%` }} />
+              <div className="rounded-[28px] border border-slate-200 bg-white px-4 py-8 shadow-sm sm:px-6 lg:px-8">
+                <div className="relative">
+                  <div className="absolute left-[34px] right-[34px] top-7 h-0.5 bg-slate-200 sm:left-[42px] sm:right-[42px]" />
+                  <div
+                    className="absolute left-[34px] top-7 h-0.5 bg-[#00D2C4] transition-all duration-500 sm:left-[42px]"
+                    style={{
+                      width: orderedReviewStages.length > 1
+                        ? `${(currentTimelineIndex / (orderedReviewStages.length - 1)) * (100 - (84 / Math.max(orderedReviewStages.length, 1)))}%`
+                        : "0%",
+                    }}
+                  />
+                  <div className="relative grid grid-cols-3 gap-y-8 md:grid-cols-6">
+                    {orderedReviewStages.map((stage, index) => {
+                      const isCompleted = stage.status === "Completed";
+                      const isActive = stage.status === "Active";
+                      const isDimmed = !isCompleted && !isActive;
+                      const nodeClass = isCompleted
+                        ? "border-emerald-500 bg-emerald-500 text-white"
+                        : isActive
+                          ? "border-[#00D2C4] bg-white text-[#00D2C4] shadow-[0_0_0_6px_rgba(0,210,196,0.12)]"
+                          : "border-slate-200 bg-slate-50 text-slate-400";
+                      const pillClass = isCompleted
+                        ? "bg-emerald-50 text-emerald-700"
+                        : isActive
+                          ? "bg-[#E8FFFB] text-[#008E86]"
+                          : "bg-slate-100 text-slate-500";
+                      const pillLabel = isCompleted ? "Completed" : isActive ? "Active" : "Locked";
+
+                      return (
+                        <button
+                          key={stage.id || `${stage.name}-${index}`}
+                          type="button"
+                          onClick={() => navigate(`/admin/review-management?class=${encodeURIComponent(selectedClassName || "")}`)}
+                          className="flex flex-col items-center text-center"
+                        >
+                          <span className={`relative z-10 inline-flex h-14 w-14 items-center justify-center rounded-full border-2 text-lg font-bold transition-all ${nodeClass}`}>
+                            {isCompleted ? "OK" : isActive ? <span className="h-4 w-4 rounded-full bg-[#00D2C4]" /> : (
+                              <span className="material-symbols-outlined text-[20px]">lock</span>
+                            )}
+                          </span>
+                          <p className={`mt-4 text-base font-semibold ${isDimmed ? "text-slate-300" : "text-slate-900"}`}>
+                            {formatTimelineStageLabel(stage.name)}
+                          </p>
+                          <span className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-semibold ${pillClass}`}>
+                            {pillLabel}
+                          </span>
+                          <p className={`mt-2 text-xs ${isDimmed ? "text-slate-300" : "text-slate-400"}`}>
+                            {formatStageSubline(stage)}
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>
@@ -524,13 +632,6 @@ export default function AdminDashboard() {
           <PublishPanel verificationStatus="All review sheets verified by HOD panel" />
 
       </div>
-
-      <AcademicActivityPanel
-        reviewStages={reviewStages}
-        teams={teams}
-        classActiveStageMap={classActiveStageMap}
-        defaultSelectedClass={selectedClassName || "All"}
-      />
       <AdminProfileSettingsModal
         isOpen={showProfileSettings}
         onClose={() => setShowProfileSettings(false)}

@@ -21,14 +21,16 @@ export function formatRubricStage(stage) {
   return getRubricStageMeta(stage).label;
 }
 
-export async function fetchAdminRubrics(stage) {
-  return apiRequest(`/admin/rubrics?stage=${encodeURIComponent(stage)}`, { skipCache: true });
+export async function fetchAdminRubrics(stage, reviewStage = null) {
+  const params = new URLSearchParams({ stage });
+  if (reviewStage) params.set("review_stage", reviewStage);
+  return apiRequest(`/admin/rubrics?${params.toString()}`, { skipCache: true });
 }
 
-export async function saveAdminRubrics(stage, rubrics) {
+export async function saveAdminRubrics(stage, rubrics, reviewStage = null) {
   return apiRequest(`/admin/rubrics/${encodeURIComponent(stage)}`, {
     method: "PUT",
-    body: { rubrics },
+    body: { rubrics, review_stage: reviewStage },
   });
 }
 
@@ -51,8 +53,10 @@ export async function publishAdminFinalResults(studentIds = []) {
   });
 }
 
-export async function fetchEvaluatorRubrics(stage) {
-  return apiRequest(`/evaluation-rubrics?stage=${encodeURIComponent(stage)}`, { skipCache: true });
+export async function fetchEvaluatorRubrics(stage, reviewStage = null) {
+  const params = new URLSearchParams({ stage });
+  if (reviewStage) params.set("review_stage", reviewStage);
+  return apiRequest(`/evaluation-rubrics?${params.toString()}`, { skipCache: true });
 }
 
 export async function fetchProjectRubricMarks(projectId, stage, reviewStage = null) {
