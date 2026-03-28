@@ -196,8 +196,8 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
   const [savingId, setSavingId] = useState("");
   const [dlError, setDlError] = useState("");
   const [dlNotice, setDlNotice] = useState("");
-
-
+  // Local overrides so saved deadline shows instantly without waiting for classData refresh
+  const [savedDeadlines, setSavedDeadlines] = useState({});
 
   useEffect(() => {
     const drafts = (classData?.reviewStages || []).reduce((acc, s) => {
@@ -246,9 +246,6 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
     setEditingIds(p => ({ ...p, [stage.id]: true }));
     setDlError(""); setDlNotice("");
   };
-
-  // Local overrides so saved deadline shows instantly without waiting for classData refresh
-  const [savedDeadlines, setSavedDeadlines] = useState({});
 
   const handleSave = async (stage) => {
     const draft = deadlineDrafts[stage.id] || {};
@@ -1466,13 +1463,15 @@ function TabReviews({ classId }) {
   const [mentors, setMentors] = useState([]);
   const [selected, setSelected] = useState([]);
   const [mentorBatches, setMentorBatches] = useState({});
+  const [mentorSearch, setMentorSearch] = useState("");
+  const [reviewerView, setReviewerView] = useState("all");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       let rows = [];
       let hasBatchScope = true;
@@ -1532,7 +1531,7 @@ function TabReviews({ classId }) {
     } catch (e) {
       console.error(e);
     }
-    setLoading(false);
+    if (!silent) setLoading(false);
   }, [classId]);
 
   useEffect(() => {
@@ -1603,7 +1602,7 @@ function TabReviews({ classId }) {
         if (clearError) throw clearError;
       }
 
-      await load();
+      await load(true);
       setSaved(true); setTimeout(() => setSaved(false), 3000);
     } catch (e) {
       console.error(e);
@@ -1617,6 +1616,10 @@ function TabReviews({ classId }) {
   };
 
   const handleToggleChange = async (stageKey) => {
+    if (selected.length === 0) {
+      alert("Please assign at least one reviewer from the list below before opening a stage.");
+      return;
+    }
     const nextToggles = { ...toggles, [stageKey]: !toggles[stageKey] };
     setToggles(nextToggles);
     await persistAccess(selected, nextToggles, mentorBatches);
@@ -1630,11 +1633,25 @@ function TabReviews({ classId }) {
     await persistAccess(nextSelected, toggles, mentorBatches);
   };
 
-  const handleSelectAllReviewers = async (checked) => {
-    const nextSelected = checked ? mentors.map((mentor) => mentor.id) : [];
-    setSelected(nextSelected);
-    await persistAccess(nextSelected, toggles, mentorBatches);
-  };
+  const normalizedSearch = mentorSearch.trim().toLowerCase();
+  const visibleMentors = [...mentors]
+    .filter((mentor) => {
+      if (reviewerView === "assigned" && !selected.includes(mentor.id)) return false;
+      if (reviewerView === "unassigned" && selected.includes(mentor.id)) return false;
+      if (!normalizedSearch) return true;
+      return [
+        mentor.full_name,
+        mentor.email,
+        mentor.department,
+        mentor.designation,
+      ].some((value) => String(value || "").toLowerCase().includes(normalizedSearch));
+    })
+    .sort((a, b) => {
+      const aSelected = selected.includes(a.id);
+      const bSelected = selected.includes(b.id);
+      if (aSelected !== bSelected) return aSelected ? -1 : 1;
+      return String(a.full_name || a.email || "").localeCompare(String(b.full_name || b.email || ""));
+    });
 
   const handleReviewerBatchChange = async (mentorId, batchValue) => {
     const nextMentorBatches = { ...mentorBatches, [mentorId]: batchValue };
@@ -1704,48 +1721,95 @@ function TabReviews({ classId }) {
           </TealButton>
         </div>
 
-        {/* Select all */}
-        <div className="flex items-center justify-between px-6 py-3 bg-slate-50 border-b border-slate-100">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-400">All Mentors With Batch Scope</p>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <span className="text-xs text-slate-500 font-medium">Select all</span>
-            <input type="checkbox" checked={mentors.length > 0 && selected.length === mentors.length}
-              onChange={e => handleSelectAllReviewers(e.target.checked)}
-              className="w-4 h-4 cursor-pointer" style={{ accentColor: "#00D2C4" }} />
-          </label>
+        <div className="px-6 py-4 border-b border-slate-100 bg-white">
+          <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+            <div className="relative flex-1">
+              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[20px]">search</span>
+              <input
+                type="text"
+                value={mentorSearch}
+                onChange={(e) => setMentorSearch(e.target.value)}
+                placeholder="Search mentors by name, email, department..."
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:border-[#00D2C4] focus:bg-white"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {[
+                { key: "all", label: `All (${mentors.length})` },
+                { key: "assigned", label: `Assigned (${selected.length})` },
+                { key: "unassigned", label: `Unassigned (${Math.max(mentors.length - selected.length, 0)})` },
+              ].map((option) => {
+                const active = reviewerView === option.key;
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => setReviewerView(option.key)}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                      active
+                        ? "border-[#00D2C4] bg-[rgba(0,210,196,0.08)] text-[#009e93]"
+                        : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500">
+            <p>{visibleMentors.length} mentor{visibleMentors.length === 1 ? "" : "s"} shown</p>
+            {mentorSearch && (
+              <button
+                type="button"
+                onClick={() => setMentorSearch("")}
+                className="font-semibold text-[#009e93] hover:text-[#007f76]"
+              >
+                Clear search
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="divide-y divide-slate-50 max-h-72 overflow-y-auto">
           {mentors.length === 0 ? (
             <div className="px-6 py-10 text-center text-slate-400 text-sm">No mentors found.</div>
-          ) : mentors.map(m => {
+          ) : visibleMentors.length === 0 ? (
+            <div className="px-6 py-10 text-center text-slate-400 text-sm">No mentors match the current search or filter.</div>
+          ) : visibleMentors.map(m => {
             const checked = selected.includes(m.id);
             return (
-              <label key={m.id} className={`flex items-center gap-4 px-6 py-4 cursor-pointer transition-colors ${checked ? "bg-[rgba(0,210,196,0.04)]" : "hover:bg-slate-50/50"}`}>
-                <input type="checkbox" checked={checked}
+              <div key={m.id} className={`flex items-center gap-4 px-6 py-4 transition-colors ${checked ? "bg-[rgba(0,210,196,0.04)]" : "hover:bg-slate-50/50"}`}>
+                <input type="checkbox" id={`mentor-${m.id}`} checked={checked}
                   onChange={() => handleReviewerSelectionChange(m.id)}
                   disabled={saving}
                   className="w-4 h-4 cursor-pointer flex-shrink-0" style={{ accentColor: "#00D2C4" }} />
-                <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-black text-sm flex-shrink-0"
-                  style={{ backgroundColor: "#00D2C4" }}>
-                  {(m.full_name || m.email || "Mentor")?.[0]?.toUpperCase() || "M"}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-slate-900 text-sm">{m.full_name || m.email || "Unnamed Mentor"}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">{m.department}{m.designation ? ` · ${m.designation}` : ""}</p>
-                </div>
+                
+                <label htmlFor={`mentor-${m.id}`} className="flex flex-1 items-center gap-4 min-w-0 cursor-pointer">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-black text-sm flex-shrink-0"
+                    style={{ backgroundColor: "#00D2C4" }}>
+                    {(m.full_name || m.email || "Mentor")?.[0]?.toUpperCase() || "M"}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-slate-900 text-sm">{m.full_name || m.email || "Unnamed Mentor"}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">{m.department}{m.designation ? ` · ${m.designation}` : ""}</p>
+                  </div>
+                </label>
+
                 <select
                   value={mentorBatches[m.id] ?? "all"}
                   onChange={(e) => handleReviewerBatchChange(m.id, e.target.value)}
                   disabled={saving}
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none cursor-pointer"
                 >
                   <option value="all">All Batches</option>
                   <option value="1">Batch 1</option>
                   <option value="2">Batch 2</option>
                 </select>
                 {checked && <StatusPill label="Assigned" type="teal" />}
-              </label>
+              </div>
             );
           })}
         </div>
@@ -1819,9 +1883,7 @@ export default function MyClass({ classData, loading, onSaveStudentDeadline, act
               </div>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
-              <span className="text-xs font-bold px-3 py-1.5 rounded-full" style={{ border: "1px solid #10b981", color: "#10b981", backgroundColor: "#f0fdf4" }}>
-                Up to date
-              </span>
+
               <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full">
                 {evaluatedTeams} / {totalTeams} Evaluated
               </span>
