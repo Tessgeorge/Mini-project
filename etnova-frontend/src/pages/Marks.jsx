@@ -21,7 +21,11 @@ export default function Marks() {
         ]);
         if (!cancelled) {
           setResult(data || null);
-          setFeedbackItems((notifications || []).filter((item) => item.type === "guide_individual_feedback"));
+          setFeedbackItems(
+            (notifications || []).filter((item) =>
+              item.type === "guide_individual_feedback" || item.type === "review_individual_feedback"
+            )
+          );
         }
       } catch (err) {
         if (!cancelled) {
@@ -82,7 +86,7 @@ export default function Marks() {
             <div className="glass-card-strong p-5">
               <h2 className="font-black text-slate-900 mb-2">Individual Feedback</h2>
               {feedbackItems.length === 0 ? (
-                <p className="text-sm text-slate-500">No individual guide feedback has been shared yet.</p>
+                <p className="text-sm text-slate-500">No individual mentor feedback has been shared yet.</p>
               ) : (
                 <div className="space-y-3">
                   {feedbackItems.map((item) => (
