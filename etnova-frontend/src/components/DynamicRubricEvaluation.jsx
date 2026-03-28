@@ -37,6 +37,7 @@ export default function DynamicRubricEvaluation({ projectId, members = [], mode 
   const [stageData, setStageData] = useState({ stage, rubrics: [], students: [] });
   const [draft, setDraft] = useState({});
   const [feedbackDraft, setFeedbackDraft] = useState({});
+  const [isUiLocked, setIsUiLocked] = useState(false);
 
   const students = useMemo(
     () => (members || []).map((member) => ({
@@ -69,6 +70,8 @@ export default function DynamicRubricEvaluation({ projectId, members = [], mode 
         setStageData(data || { stage, rubrics: [], students: [] });
         setDraft(buildEmptyDraft(data?.students || students, data?.rubrics || [], data?.students || []));
         setFeedbackDraft(buildFeedbackDraft(data?.students || students));
+        const hasMarks = (data?.students || []).some(s => Array.isArray(s.marks) && s.marks.length > 0);
+        setIsUiLocked(hasMarks);
       } catch (err) {
         if (cancelled) return;
         setError(err.message || "Failed to load rubric marks.");
@@ -136,6 +139,7 @@ export default function DynamicRubricEvaluation({ projectId, members = [], mode 
       setStageData(refreshed || { stage, rubrics: [], students: [] });
       setDraft(buildEmptyDraft(refreshed?.students || students, refreshed?.rubrics || [], refreshed?.students || []));
       setFeedbackDraft(buildFeedbackDraft(refreshed?.students || students));
+      setIsUiLocked(true);
       setNotice(`${meta.label} marks saved successfully.`);
     } catch (err) {
       setError(err.message || "Failed to save rubric marks.");
@@ -189,10 +193,25 @@ export default function DynamicRubricEvaluation({ projectId, members = [], mode 
                 </div>
               )
             ) : null}
+            {!isReadOnly && (
+              <button
+                type="button"
+                onClick={() => setIsUiLocked(!isUiLocked)}
+                className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-colors ${
+                  isUiLocked ? "bg-amber-100 text-amber-700 hover:bg-amber-200" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                }`}
+              >
+                {isUiLocked ? (
+                  <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg> Locked</>
+                ) : (
+                  <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg> Unlocked</>
+                )}
+              </button>
+            )}
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving || loading || !stageData.rubrics.length || !stageData.students.length || isReadOnly}
+              disabled={saving || loading || !stageData.rubrics.length || !stageData.students.length || isReadOnly || isUiLocked}
               className="rounded-xl bg-teal-400 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-teal-500 disabled:opacity-50"
             >
               {saving ? "Saving..." : isReadOnly ? "Read Only" : "Save Marks"}
@@ -232,14 +251,14 @@ export default function DynamicRubricEvaluation({ projectId, members = [], mode 
           <table className={`w-full text-sm ${stage === "guide" ? "min-w-[1080px]" : "min-w-[1160px]"}`}>
             <thead className="bg-gray-50 text-gray-500">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Student</th>
+                <th className="px-4 py-3 text-left text-xs font-bold tracking-wide capitalize text-slate-500 sticky left-0 z-10 bg-gray-50 border-r border-gray-100 drop-shadow-[2px_0_5px_rgba(0,0,0,0.02)]">Student</th>
                 {(stageData.rubrics || []).map((rubric) => (
-                  <th key={rubric.id} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">
+                  <th key={rubric.id} className="px-4 py-3 text-left text-xs font-bold tracking-wide capitalize text-slate-500">
                     {rubric.title}
                     <span className="ml-1 text-[11px] normal-case text-gray-400">/ {rubric.max_marks}</span>
                   </th>
                 ))}
-                <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Individual Feedback</th>
+                <th className="px-4 py-3 text-left text-xs font-bold tracking-wide capitalize text-slate-500">Individual Feedback</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -250,8 +269,8 @@ export default function DynamicRubricEvaluation({ projectId, members = [], mode 
               ) : (
                 (stageData.students || []).map((student) => (
                   <tr key={student.student_id}>
-                    <td className="px-4 py-3">
-                      <p className="font-semibold text-gray-900">{student.full_name}</p>
+                    <td className="px-4 py-3 sticky left-0 z-10 bg-white border-r border-gray-100 drop-shadow-[2px_0_5px_rgba(0,0,0,0.02)] transition-colors">
+                      <p className="font-semibold text-gray-900 line-clamp-1">{student.full_name}</p>
                       <p className="text-xs text-gray-400">{student.roll_number}</p>
                     </td>
                     {stageData.rubrics.map((rubric) => (
@@ -259,22 +278,24 @@ export default function DynamicRubricEvaluation({ projectId, members = [], mode 
                         <input
                         type="number"
                         min="0"
+                        aria-label={`Score out of ${rubric.max_marks} for ${rubric.title} - ${student.full_name}`}
                         max={rubric.max_marks}
                         value={draft?.[student.student_id]?.[rubric.id] ?? ""}
                         onChange={(event) => handleCellChange(student.student_id, rubric.id, event.target.value)}
-                        readOnly={isReadOnly}
-                        className="w-24 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                        readOnly={isReadOnly || isUiLocked}
+                        className={`w-24 rounded-lg border ${isUiLocked ? "border-transparent bg-transparent font-bold text-center pl-0 pr-0 outline-none select-none appearance-none" : "border-gray-200 bg-gray-50 px-3"} py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-400`}
                       />
                     </td>
                   ))}
                     <td className="px-4 py-3">
                       <textarea
                         rows={3}
+                        aria-label={`Feedback for ${student.full_name}`}
                         value={feedbackDraft?.[student.student_id] ?? ""}
                         onChange={(event) => handleFeedbackChange(student.student_id, event.target.value)}
-                        placeholder="Write individual feedback for this student..."
-                        readOnly={isReadOnly}
-                        className="w-full min-w-[260px] rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-teal-400"
+                        placeholder={isUiLocked && !feedbackDraft?.[student.student_id] ? "No feedback provided." : "Write individual feedback for this student..."}
+                        readOnly={isReadOnly || isUiLocked}
+                        className={`w-full min-w-[260px] rounded-lg border ${isUiLocked ? "border-transparent bg-transparent outline-none overflow-hidden text-gray-700 pl-0 mt-1" : "border-gray-200 bg-gray-50 px-3 py-2"} text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-teal-400`}
                       />
                     </td>
                   </tr>
@@ -285,6 +306,19 @@ export default function DynamicRubricEvaluation({ projectId, members = [], mode 
         </div>
       </div>
 
+      {/* Floating Save Action Bar for Large Classes */}
+      {!isReadOnly && !isUiLocked && Object.keys(draft).length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-slate-900 border border-slate-700 text-white px-6 py-3 rounded-full shadow-2xl z-50">
+          <span className="text-sm font-medium whitespace-nowrap hidden sm:inline-block">You are currently editing marks.</span>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="bg-teal-500 hover:bg-teal-400 px-5 py-2 rounded-full text-sm font-extrabold shadow-lg transition-colors whitespace-nowrap"
+          >
+            {saving ? "Saving..." : "Save Marks Now"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

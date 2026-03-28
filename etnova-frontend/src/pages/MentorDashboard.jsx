@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import TeamWorkspace from "./Teamworkspace";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../config/supabaseClient";
@@ -34,11 +34,13 @@ const Icon = {
   Shield: () => (<svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>),
   Settings: () => (<svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.9" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 .99-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 .99 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51.99H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51.99z" /></svg>),
   Help: () => (<svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.9" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 1 1 5.82 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>),
+  Search: () => (<svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>),
+  Lock: () => (<svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>),
+  Unlock: () => (<svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 9.9-1" /></svg>),
 };
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 const scoreClr = s => s >= 90 ? "text-emerald-600" : s >= 70 ? "text-amber-500" : "text-red-500";
-const scoreBg = s => s >= 90 ? "bg-emerald-500" : s >= 70 ? "bg-amber-400" : "bg-red-400";
 
 let mentorEvalFilterStrategy = null;
 let mentorEvalInsertStrategy = null;
@@ -144,12 +146,10 @@ function normalizeMilestoneDueDate(value) {
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? "" : date.toISOString();
   }
-
   const maybeDate = new Date(value);
   if (!Number.isNaN(maybeDate.getTime())) {
     return maybeDate.toISOString();
   }
-
   return String(value);
 }
 
@@ -157,20 +157,16 @@ function resolveCoordinatorClassId(profile, projects) {
   if (!profile?.is_coordinator) {
     return { classId: null, error: "" };
   }
-
   if (profile.class_id) {
     return { classId: profile.class_id, error: "" };
   }
-
   const classIds = Array.from(new Set((projects || []).map((project) => project?.class_id).filter(Boolean)));
   if (classIds.length === 1) {
     return { classId: classIds[0], error: "" };
   }
-
   if (classIds.length > 1) {
     return { classId: null, error: "Coordinator is linked to multiple classes. Ask admin to assign a coordinator class." };
   }
-
   return { classId: null, error: "No coordinator class assigned." };
 }
 
@@ -201,11 +197,6 @@ function StatusBadge({ status }) {
 
 function Spinner() {
   return <div className="flex justify-center py-20"><div className="w-8 h-8 border-4 border-teal-400 border-t-transparent rounded-full animate-spin" /></div>;
-}
-
-function formatClassScore(value) {
-  if (value == null || Number.isNaN(Number(value))) return "-";
-  return Number(value).toFixed(1);
 }
 
 const REVIEW_STAGE_ORDER = ["Idea", "Abstract", "Zeroth Review", "First Review", "Second Review", "Final Review"];
@@ -269,30 +260,6 @@ function normalizeReviewStageValue(value) {
   return normalized;
 }
 
-function formatDeadlineDateTime(value) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleString("en-IN", {
-    day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
-  });
-}
-
-function toDateInputValue(value) {
-  if (!value) return "";
-  return value.slice(0, 10);
-}
-
-function toTimeInputValue(value) {
-  if (!value) return "";
-  return value.slice(11, 16) || "";
-}
-
-function buildDeadlineIso(datePart, timePart) {
-  if (!datePart || !timePart) return "";
-  return datePart + "T" + timePart + ":00";
-}
-
 function sortReviewStages(rows) {
   const grouped = new Map();
   for (const row of rows || []) {
@@ -344,7 +311,7 @@ function sortReviewStages(rows) {
   });
 }
 
-function WeeklyChart({ projects, evaluations }) {
+function WeeklyChart({ evaluations }) {
   const days = [];
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
@@ -405,8 +372,13 @@ function ReviewModal({ project, onClose, onSubmit }) {
   const submit = async () => {
     if (!form.score || !form.feedback) { setErr("Please fill in score and feedback."); return; }
     setSaving(true); setErr("");
-    await onSubmit({ projectId: project.id, ...form });
-    setSaving(false);
+    try {
+      await onSubmit({ projectId: project.id, ...form });
+    } catch (error) {
+      setErr(error.message || "Failed to submit evaluation. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const cls = "w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-gray-50 text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-400";
@@ -494,8 +466,6 @@ function MentorProfileModal({ profile, onClose, onSave, onSignOut, startEditing 
   const [err, setErr] = useState("");
 
   const initial = (form.full_name || "M")[0].toUpperCase();
-  const field = "w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-400 transition-all";
-  const fieldRO = "w-full border border-gray-100 rounded-xl px-4 py-2.5 text-sm bg-slate-100 text-gray-500 cursor-not-allowed";
 
   const handleSave = async () => {
     if (!form.full_name.trim()) { setErr("Full name is required."); return; }
@@ -513,19 +483,6 @@ function MentorProfileModal({ profile, onClose, onSave, onSignOut, startEditing 
     } catch (e) { setErr(e.message || "Failed to update profile."); }
     finally { setSaving(false); }
   };
-
-  const Label = ({ text, required }) => (
-    <label className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-1.5">
-      {text}{required && <span className="text-red-400 ml-0.5">*</span>}
-    </label>
-  );
-
-  const infoItems = [
-    { label: "Full Name", value: form.full_name || "Not set" },
-    { label: "Email", value: form.email || "Not set" },
-    { label: "Role", value: "Mentor" },
-    { label: "Department", value: form.department || "-" },
-  ];
 
   const openSupport = () => { window.location.href = "mailto:support@etnova.ac.in?subject=Mentor%20Portal%20Support"; };
 
@@ -613,7 +570,12 @@ function MentorProfileModal({ profile, onClose, onSave, onSignOut, startEditing 
             </div>
           )}
           <div className="grid grid-cols-2 gap-3">
-            {infoItems.map((item) => (
+            {[
+              { label: "Full Name", value: form.full_name || "Not set" },
+              { label: "Email", value: form.email || "Not set" },
+              { label: "Role", value: "Mentor" },
+              { label: "Department", value: form.department || "-" },
+            ].map((item) => (
               <div key={item.label} className="rounded-2xl border border-slate-200 bg-slate-50/90 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
                 <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">{item.label}</p>
                 <p className="mt-1 break-words text-sm font-extrabold text-slate-900">{item.value}</p>
@@ -645,76 +607,64 @@ function MentorProfileModal({ profile, onClose, onSave, onSignOut, startEditing 
 }
 
 // ─── Sidebar ────────────────────────────────────────────────────────────────
-function Sidebar({ active, setActive, onSignOut, showMyClass, showEvaluation }) {
-  // My Class is expanded when any of its sub-pages is active, or when user manually opens it
+function Sidebar({ active, setActive, onSignOut, showMyClass, showEvaluation, isOpen }) {
   const myClassSubs = ["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews"];
   const isMyClassActive = myClassSubs.includes(active);
-  const [myClassOpen, setMyClassOpen] = useState(isMyClassActive);
-
-  // Keep open when navigating between sub-pages
-  useEffect(() => {
-    if (isMyClassActive) setMyClassOpen(true);
-  }, [isMyClassActive]);
+  const [myClassManuallyOpen, setMyClassManuallyOpen] = useState(isMyClassActive);
+  const myClassOpen = isMyClassActive || myClassManuallyOpen;
 
   const topItems = [
-    { key: "overview",   label: "Dashboard",  I: Icon.Dashboard  },
-    { key: "teams",      label: "My Teams",   I: Icon.Teams      },
-    ...(showEvaluation ? [{ key: "evaluation", label: "Review Evaluation", I: Icon.Evaluation }] : []),
+    { key: "overview", label: "Dashboard", icon: <Icon.Dashboard /> },
+    { key: "teams", label: "My Teams", icon: <Icon.Teams /> },
+    ...(showEvaluation ? [{ key: "evaluation", label: "Review Evaluation", icon: <Icon.Evaluation /> }] : []),
   ];
 
   const myClassSubItems = [
-    { key: "my-class-overview",     label: "Overview"     },
-    { key: "my-class-teams",        label: "Team"         },
-    { key: "my-class-submissions",  label: "Submissions"  },
-    { key: "my-class-reviews",      label: "Reviews"      },
+    { key: "my-class-overview", label: "Overview" },
+    { key: "my-class-teams", label: "Team" },
+    { key: "my-class-submissions", label: "Submissions" },
+    { key: "my-class-reviews", label: "Reviews" },
   ];
 
   return (
-	    <aside className="w-72 h-[100dvh] fixed inset-y-0 left-0 bg-white border-r border-slate-100 flex flex-col shadow-[0_8px_30px_rgba(15,23,42,0.06)] flex-shrink-0 overflow-hidden z-20">
-	      <div className="flex items-center gap-3 px-6 py-6 border-b border-slate-100">
-	        <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#00D2C4] to-[#00a89d] flex items-center justify-center shadow-sm">
-	          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-	            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-	          </svg>
-	        </div>
-	        <div>
-	          <p className="font-black text-slate-900 leading-tight tracking-wide">ETNOVA</p>
-	          <p className="text-xs text-slate-400 font-semibold">Mentor Portal</p>
-	        </div>
-	      </div>
-	      <nav className="flex-1 px-4 py-5 space-y-1.5">
-        {/* Top-level items: Dashboard, My Teams, Evaluation */}
-        {topItems.map(({ key, label, I }) => (
-	          <button key={key} onClick={() => setActive(key)}
-	            className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold transition-all border ${
-	              active === key
-	                ? "bg-[rgba(0,210,196,0.08)] text-teal-700 border-[rgba(0,210,196,0.35)]"
-	                : "bg-transparent text-slate-600 border-transparent hover:bg-slate-50 hover:text-slate-800"
-	            }`}>
-	            <span className={active === key ? "text-teal-600" : "text-slate-400"}><I /></span>
-	            {label}
-	          </button>
-	        ))}
+    <aside className={`w-72 h-[100dvh] fixed inset-y-0 left-0 bg-white border-r border-slate-100 flex flex-col shadow-[0_8px_30px_rgba(15,23,42,0.1)] flex-shrink-0 overflow-hidden z-40 transform transition-transform duration-300 md:translate-x-0 ${isOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      <div className="flex items-center gap-3 px-6 py-6 border-b border-slate-100">
+        <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#00D2C4] to-[#00a89d] flex items-center justify-center shadow-sm">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+          </svg>
+        </div>
+        <div>
+          <p className="font-black text-slate-900 leading-tight tracking-wide">ETNOVA</p>
+          <p className="text-xs text-slate-400 font-semibold">Mentor Portal</p>
+        </div>
+      </div>
+      <nav className="flex-1 px-4 py-5 space-y-1.5">
+        {topItems.map(({ key, label, icon }) => (
+          <button key={key} onClick={() => setActive(key)}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold transition-all border ${active === key
+                ? "bg-[rgba(0,210,196,0.08)] text-teal-700 border-[rgba(0,210,196,0.35)]"
+                : "bg-transparent text-slate-600 border-transparent hover:bg-slate-50 hover:text-slate-800"
+              }`}>
+            <span className={active === key ? "text-teal-600" : "text-slate-400"}>{icon}</span>
+            {label}
+          </button>
+        ))}
 
-        {/* My Class — expandable, only shown to coordinators */}
         {showMyClass && (
           <div>
-            {/* Parent row — clicking toggles the sub-list open/closed */}
-	            <button
-	              onClick={() => {
-	                setMyClassOpen(o => !o);
-	                if (!isMyClassActive) setActive("my-class-overview");
-	              }}
-	              className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold transition-all border ${
-	                isMyClassActive
-	                  ? "bg-[rgba(0,210,196,0.08)] text-teal-700 border-[rgba(0,210,196,0.35)]"
-	                  : "bg-transparent text-slate-600 border-transparent hover:bg-slate-50 hover:text-slate-800"
-	              }`}>
-	              <span className={isMyClassActive ? "text-teal-600" : "text-slate-400"}>
-	                <Icon.Building />
-	              </span>
-	              <span className="flex-1 text-left">My Class</span>
-              {/* Chevron rotates when open — same as LMS */}
+            <button
+              onClick={() => {
+                setMyClassManuallyOpen((open) => !open);
+              }}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold transition-all border ${isMyClassActive
+                  ? "bg-[rgba(0,210,196,0.08)] text-teal-700 border-[rgba(0,210,196,0.35)]"
+                  : "bg-transparent text-slate-600 border-transparent hover:bg-slate-50 hover:text-slate-800"
+                }`}>
+              <span className={isMyClassActive ? "text-teal-600" : "text-slate-400"}>
+                <Icon.Building />
+              </span>
+              <span className="flex-1 text-left">My Class</span>
               <svg
                 width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"
                 className={`transition-transform duration-200 ${myClassOpen ? "rotate-180" : "rotate-0"}`}>
@@ -722,37 +672,34 @@ function Sidebar({ active, setActive, onSignOut, showMyClass, showEvaluation }) 
               </svg>
             </button>
 
-            {/* Sub-items — slide down when open */}
-	            {myClassOpen && (
-	              <div className="mt-1 space-y-1 pl-2">
-	                {myClassSubItems.map(({ key, label }) => (
-	                  <button key={key} onClick={() => setActive(key)}
-	                    className={`w-full flex items-center gap-2 pl-9 pr-3 py-2.5 rounded-2xl text-sm font-semibold transition-all border ${
-	                      active === key
-	                        ? "text-teal-700 bg-[rgba(0,210,196,0.08)] border-[rgba(0,210,196,0.35)]"
-	                        : "text-slate-600 bg-transparent border-transparent hover:bg-slate-50 hover:text-slate-800"
-	                    }`}>
-	                    {/* Tree connector dot */}
-	                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${active === key ? "bg-teal-500" : "bg-slate-300"}`} />
-	                    {label}
-	                  </button>
-	                ))}
-	              </div>
-	            )}
+            {myClassOpen && (
+              <div className="mt-1 space-y-1 pl-2">
+                {myClassSubItems.map(({ key, label }) => (
+                  <button key={key} onClick={() => setActive(key)}
+                    className={`w-full flex items-center gap-2 pl-9 pr-3 py-2.5 rounded-2xl text-sm font-semibold transition-all border ${active === key
+                        ? "text-teal-700 bg-[rgba(0,210,196,0.08)] border-[rgba(0,210,196,0.35)]"
+                        : "text-slate-600 bg-transparent border-transparent hover:bg-slate-50 hover:text-slate-800"
+                      }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${active === key ? "bg-teal-500" : "bg-slate-300"}`} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </nav>
-	      <div className="px-6 pb-6 pt-3 mt-auto">
-	        <button onClick={onSignOut}
-	          className="w-full flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#0a9688] via-[#13b5a4] to-[#2dcfc0] px-4 py-3.5 text-sm font-extrabold text-white shadow-[0_18px_28px_rgba(19,181,164,0.22)] transition-all hover:-translate-y-0.5 active:translate-y-0">
-	          <Icon.Logout />Sign Out
-	        </button>
-	      </div>
-	    </aside>
-	  );
-	}
+      <div className="px-6 pb-6 pt-3 mt-auto">
+        <button onClick={onSignOut}
+          className="w-full flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#0a9688] via-[#13b5a4] to-[#2dcfc0] px-4 py-3.5 text-sm font-extrabold text-white shadow-[0_18px_28px_rgba(19,181,164,0.22)] transition-all hover:-translate-y-0.5 active:translate-y-0">
+          <Icon.Logout />Sign Out
+        </button>
+      </div>
+    </aside>
+  );
+}
 
-function Topbar({ active, mentorName, onProfileClick, showMyClass }) {
+function Topbar({ active, mentorName, onProfileClick, onToggleSidebar }) {
   const labels = {
     overview:                "Dashboard",
     teams:                   "My Teams",
@@ -763,9 +710,12 @@ function Topbar({ active, mentorName, onProfileClick, showMyClass }) {
     "my-class-reviews":      "My Class — Reviews",
   };
   return (
-    <header className="bg-white border-b border-gray-100 px-8 py-4 flex items-center justify-between">
-      <div className="flex items-center gap-2 text-sm text-gray-400">
-        <span>Home</span><Icon.ChevronRight />
+    <header className="bg-white border-b border-gray-100 px-4 md:px-8 py-4 flex items-center justify-between sticky top-0 z-30">
+      <div className="flex items-center gap-2 md:gap-3 text-sm text-gray-400">
+        <button onClick={onToggleSidebar} className="md:hidden p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors">
+          <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <span className="hidden sm:inline">Home</span><Icon.ChevronRight className="hidden sm:inline" />
         <span className="text-gray-700 font-semibold">{labels[active]}</span>
       </div>
       <button onClick={onProfileClick}
@@ -864,8 +814,8 @@ function OverviewTab({ projects, evaluations, milestones, recentActivity, loadin
                 const tag = m.status === "completed" ? "Completed" : isToday ? "Today" : isPast ? "Overdue" : "Upcoming";
                 const tagStyle = tag === "Completed" ? "bg-blue-50 text-blue-600 border-blue-200"
                   : tag === "Overdue" ? "bg-red-50 text-red-600 border-red-200"
-                  : tag === "Today" ? "bg-amber-50 text-amber-600 border-amber-200"
-                  : "bg-teal-50 text-teal-600 border-teal-200";
+                    : tag === "Today" ? "bg-amber-50 text-amber-600 border-amber-200"
+                      : "bg-teal-50 text-teal-600 border-teal-200";
                 return (
                   <div key={i} className="flex items-center justify-between p-4 rounded-xl border border-gray-100 bg-gray-50 hover:bg-gray-100 transition-colors">
                     <div className="flex items-center gap-3">
@@ -939,26 +889,19 @@ function OverviewTab({ projects, evaluations, milestones, recentActivity, loadin
 }
 
 // ─── TEAMS TAB ──────────────────────────────────────────────────────────────
-function FileIcon({ name }) {
-  const ext = name?.split(".").pop()?.toLowerCase();
-  const map = { pdf: ["#ef4444", "PDF"], pptx: ["#f97316", "PPT"], ppt: ["#f97316", "PPT"], xlsx: ["#22c55e", "XLS"], xls: ["#22c55e", "XLS"], docx: ["#3b82f6", "DOC"], doc: ["#3b82f6", "DOC"], zip: ["#8b5cf6", "ZIP"] };
-  const [color, label] = map[ext] || ["#6b7280", "FILE"];
-  return <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-xs font-extrabold flex-shrink-0" style={{ background: color }}>{label}</div>;
-}
-
-function TeamsTab({ projects, evaluations, loading, onStartReview, mentorId, mentorName }) {
+function TeamsTab({ projects, evaluations, loading, mentorId, mentorName }) {
   const [sel, setSel] = useState(null);
 
   if (loading) return <Spinner />;
 
   if (sel) {
-      const proj = projects.find(p => p.id === sel);
-      return (
-        <TeamWorkspace
-          key={proj?.id || sel}
-          proj={proj}
-          mentorId={mentorId}
-          mentorName={mentorName}
+    const proj = projects.find(p => p.id === sel);
+    return (
+      <TeamWorkspace
+        key={proj?.id || sel}
+        proj={proj}
+        mentorId={mentorId}
+        mentorName={mentorName}
         onBack={() => setSel(null)}
       />
     );
@@ -1044,177 +987,161 @@ function TeamsTab({ projects, evaluations, loading, onStartReview, mentorId, men
   );
 }
 
-// ─── EVALUATION TAB ─────────────────────────────────────────────────────────
-function LegacyEvaluationTab({ projects, evaluations, setEvaluations, mentorId, loading }) {
-  const [form, setForm] = useState({ projectId: "", phase: EVALUATION_STAGE_OPTIONS[0], score: "", feedback: "" });
-  const [ok, setOk] = useState(false);
-  const [err, setErr] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [filterProj, setFilterProj] = useState("all");
-
-  if (loading) return <Spinner />;
-
-  const submit = async () => {
-    if (!form.projectId || !form.score || !form.feedback) { setErr("Please fill all fields."); return; }
-    setSaving(true); setErr("");
-    try {
-      const data = await insertMentorEvaluation(mentorId, {
-        projectId: form.projectId,
-        phase: form.phase,
-        score: Number(form.score),
-        maxScore: 100,
-        feedback: form.feedback,
-      });
-      setEvaluations(p => [data, ...p]);
-      setForm({ projectId: "", phase: EVALUATION_STAGE_OPTIONS[0], score: "", feedback: "" });
-      setOk(true); setTimeout(() => setOk(false), 2500);
-    } catch (e) { setErr(e.message); }
-    finally { setSaving(false); }
-  };
-
-  const filtered = filterProj === "all" ? evaluations : evaluations.filter(e => e.project_id === filterProj);
-  const cls = "w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-gray-50 text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-400";
-
-  return (
-    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-      <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
-        <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-5">Submit Evaluation</p>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Team</label>
-            <select className={cls} value={form.projectId} onChange={e => setForm({ ...form, projectId: e.target.value })}>
-              <option value="">— Choose a team —</option>
-              {projects.map(p => <option key={p.id} value={p.id}>{getProjectDisplayName(p)}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Review Stage</label>
-            <select className={cls} value={form.phase} onChange={e => setForm({ ...form, phase: e.target.value })}>
-              {EVALUATION_STAGE_OPTIONS.map((stage) => <option key={stage}>{stage}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Score (0–100)</label>
-            <input type="number" min="0" max="100" placeholder="e.g. 85" className={cls}
-              value={form.score} onChange={e => setForm({ ...form, score: e.target.value })} />
-          </div>
-          {form.score && (
-            <div className={`flex items-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold ${Number(form.score) >= 90 ? "bg-emerald-50 text-emerald-700" : Number(form.score) >= 70 ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"}`}>
-              <div className={`w-2 h-2 rounded-full ${scoreBg(Number(form.score))}`} />
-              {Number(form.score) >= 90 ? "Excellent performance" : Number(form.score) >= 70 ? "Good performance" : "Needs improvement"}
-            </div>
-          )}
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Feedback</label>
-            <textarea rows={4} placeholder="Detailed feedback for the team..." className={`${cls} resize-none`}
-              value={form.feedback} onChange={e => setForm({ ...form, feedback: e.target.value })} />
-          </div>
-          {err && <p className="text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2">{err}</p>}
-          <button onClick={submit} disabled={saving}
-            className="w-full bg-teal-400 hover:bg-teal-500 active:scale-95 text-white font-bold py-3 rounded-xl transition-all disabled:opacity-50">
-            {saving ? "Submitting..." : "Submit Evaluation"}
-          </button>
-          {ok && <p className="text-center text-sm font-semibold text-teal-600 flex items-center justify-center gap-1.5"><Icon.Check /> Evaluation submitted!</p>}
-        </div>
-      </div>
-      <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
-        <div className="flex justify-between items-center mb-5">
-          <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Evaluation Records</p>
-          <select className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 bg-gray-50 focus:outline-none" value={filterProj} onChange={e => setFilterProj(e.target.value)}>
-            <option value="all">All Teams</option>
-            {projects.map(p => <option key={p.id} value={p.id}>{getProjectDisplayName(p)}</option>)}
-          </select>
-        </div>
-        <div className="space-y-3 overflow-y-auto max-h-[540px] pr-1">
-          {filtered.length === 0 ? <p className="text-sm text-gray-400">No evaluations submitted yet.</p>
-            : filtered.map((ev, index) => (
-              <div key={ev.id || `${ev.project_id || "project"}-${ev.created_at || "time"}-${index}`} className="bg-gray-50 border border-gray-100 rounded-xl p-4">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <span className="font-bold text-gray-800 text-sm">{getProjectDisplayName(projects.find(p => p.id === ev.project_id))}</span>
-                    <span className="ml-2 text-xs bg-teal-50 text-teal-700 font-semibold px-2 py-0.5 rounded-full">{ev.phase}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <div className={`w-2 h-2 rounded-full ${scoreBg(ev.score)}`} />
-                    <span className={`font-extrabold text-xl ${scoreClr(ev.score)}`}>{ev.score}</span>
-                  </div>
-                </div>
-                {ev.feedback && <p className="text-xs text-gray-500 mt-2 leading-relaxed">{ev.feedback}</p>}
-                <p className="text-xs text-gray-400 mt-1.5">{ev.created_at?.split("T")[0]}</p>
-              </div>
-            ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── MAIN ──────────────────────────────────────────────────────────────────
+// ─── EVALUATION TAB (ENHANCED) ──────────────────────────────────────────────
 function EvaluationTab({ projects, loading, allowedReviewStages = [], writableReviewStages = [] }) {
   const [selectedProject, setSelectedProject] = useState(null);
-  const groupedProjects = projects.reduce((acc, project) => {
-    const classKey = project.class_name || "Assigned Class";
-    if (!acc[classKey]) acc[classKey] = [];
-    acc[classKey].push(project);
+  const [search, setSearch] = useState("");
+  const [batchFilter, setBatchFilter] = useState("all"); // "all" | "1" | "2" | "unassigned"
+
+  // ── derive class name & batch buckets ──────────────────────────────────
+  const className = projects.length > 0
+    ? (projects[0].class_name || projects[0].classes?.class_section || "Assigned Class")
+    : "Assigned Class";
+
+  // Collect all unique batches present
+  const batchOptions = ["all"];
+  const batchNums = [...new Set(projects.map(p => p.batch).filter(b => b != null))].sort();
+  batchNums.forEach(b => batchOptions.push(String(b)));
+  if (projects.some(p => p.batch == null)) batchOptions.push("unassigned");
+
+  // Filter by search + batch
+  const filtered = projects.filter(project => {
+    const name = getProjectDisplayName(project).toLowerCase();
+    const members = (project.team_members || [])
+      .map(m => m.profiles?.full_name || "").join(" ").toLowerCase();
+    const matchSearch = !search.trim() || name.includes(search.toLowerCase()) || members.includes(search.toLowerCase());
+
+    const matchBatch = batchFilter === "all"
+      || (batchFilter === "unassigned" && project.batch == null)
+      || String(project.batch) === batchFilter;
+
+    return matchSearch && matchBatch;
+  });
+
+  // Group filtered teams by batch
+  const groupedByBatch = filtered.reduce((acc, project) => {
+    const batchKey = project.batch != null ? `Batch ${project.batch}` : "Unassigned";
+    if (!acc[batchKey]) acc[batchKey] = [];
+    acc[batchKey].push(project);
     return acc;
   }, {});
 
+  // Sort batch groups: Batch 1 first, then Batch 2, etc., Unassigned last
+  const sortedBatchKeys = Object.keys(groupedByBatch).sort((a, b) => {
+    if (a === "Unassigned") return 1;
+    if (b === "Unassigned") return -1;
+    const numA = parseInt(a.replace("Batch ", ""), 10);
+    const numB = parseInt(b.replace("Batch ", ""), 10);
+    return numA - numB;
+  });
+
+  // ── batch color helpers ─────────────────────────────────────────────────
+  const batchColors = {
+    "Batch 1": { bg: "bg-teal-50", border: "border-teal-200", text: "text-teal-700", dot: "bg-teal-500", header: "from-teal-500 to-emerald-500" },
+    "Batch 2": { bg: "bg-indigo-50", border: "border-indigo-200", text: "text-indigo-700", dot: "bg-indigo-500", header: "from-indigo-500 to-purple-500" },
+    "Unassigned": { bg: "bg-slate-50", border: "border-slate-200", text: "text-slate-600", dot: "bg-slate-400", header: "from-slate-400 to-slate-500" },
+  };
+  const getBatchColor = (key) => batchColors[key] || batchColors["Batch 2"];
+
+  // ── open/closed stage indicator ─────────────────────────────────────────
+  const openStageLabel = writableReviewStages.length > 0
+    ? REVIEW_ROUND_OPTIONS.find(o => o.value === writableReviewStages[0])?.label || writableReviewStages[0]
+    : null;
+
   if (loading) return <Spinner />;
 
+  // ── detail view ─────────────────────────────────────────────────────────
   if (selectedProject) {
     return (
       <div className="space-y-5">
-        <button
-          type="button"
-          onClick={() => setSelectedProject(null)}
-          className="inline-flex items-center gap-2 text-sm font-semibold text-teal-600 hover:text-teal-700"
-        >
-          <span className="rotate-180 inline-flex"><Icon.ArrowRight /></span>
-          Back to Assigned Teams
-        </button>
-        <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
-          <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Selected Team</p>
-          <h2 className="mt-2 text-xl font-extrabold text-gray-900">{getProjectDisplayName(selectedProject)}</h2>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="rounded-full border border-teal-200 bg-teal-50 px-3 py-1 text-xs font-bold text-teal-700">
-              {selectedProject.class_name || "Assigned Class"}
-            </span>
-            <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-600">
-              {selectedProject.batch ? `Batch ${selectedProject.batch}` : "All Batches"}
-            </span>
-            <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-bold text-slate-600">
-              {(selectedProject.team_members || []).length} {(selectedProject.team_members || []).length === 1 ? "Student" : "Students"}
-            </span>
-          </div>
-          <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Allowed Review Stages</p>
+        {/* Breadcrumb */}
+        <div className="flex items-center gap-2 text-sm">
+          <button
+            type="button"
+            onClick={() => setSelectedProject(null)}
+            className="text-teal-600 hover:text-teal-700 font-semibold flex items-center gap-1.5"
+          >
+            <span className="rotate-180 inline-flex"><Icon.ArrowRight /></span>
+            Review Evaluation
+          </button>
+          <Icon.ChevronRight />
+          <span className="text-gray-500">{className}</span>
+          <Icon.ChevronRight />
+          <span className="text-gray-800 font-semibold">{getProjectDisplayName(selectedProject)}</span>
+        </div>
+
+        {/* Team detail header */}
+        <div className="bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm">
+          <div className="bg-gradient-to-r from-[#00D2C4] to-[#00a89d] px-6 py-5">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-white/70 mb-1">
+                  {selectedProject.batch != null ? `Batch ${selectedProject.batch}` : "Unassigned Batch"}
+                </p>
+                <h2 className="text-xl font-extrabold text-white">{getProjectDisplayName(selectedProject)}</h2>
+              </div>
+              <StatusBadge status={selectedProject.status} />
+            </div>
             <div className="mt-3 flex flex-wrap gap-2">
-              {allowedReviewStages.length > 0 ? allowedReviewStages.map((stageKey) => {
-                const label = REVIEW_ROUND_OPTIONS.find((item) => item.value === stageKey)?.label || stageKey;
-                return (
-                  <span key={stageKey} className="rounded-full border border-teal-200 bg-white px-3 py-1 text-xs font-bold text-teal-700">
-                    {label}
-                  </span>
-                );
-              }) : (
-                <span className="text-sm font-semibold text-slate-500">No review stage assigned yet.</span>
+              <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">
+                {className}
+              </span>
+              <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">
+                {(selectedProject.team_members || []).length} {(selectedProject.team_members || []).length === 1 ? "Student" : "Students"}
+              </span>
+              {selectedProject.batch != null && (
+                <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">
+                  Batch {selectedProject.batch}
+                </span>
               )}
             </div>
           </div>
-          <div className="mt-4 rounded-2xl border border-slate-100 bg-white px-4 py-4">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Team Members</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {(selectedProject.team_members || []).map((member) => (
-                <span key={member.id || member.student_id} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-700">
-                  {member.profiles?.full_name || member.profiles?.email || "Student"}
-                </span>
-              ))}
+
+          <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Allowed stages */}
+            <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-3">Review Stages</p>
+              <div className="flex flex-wrap gap-2">
+                {allowedReviewStages.length > 0 ? allowedReviewStages.map((stageKey) => {
+                  const label = REVIEW_ROUND_OPTIONS.find((item) => item.value === stageKey)?.label || stageKey;
+                  const isWritable = writableReviewStages.includes(stageKey);
+                  return (
+                    <span key={stageKey} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold ${isWritable ? "border-teal-200 bg-teal-50 text-teal-700" : "border-slate-200 bg-white text-slate-500"}`}>
+                      {isWritable ? <Icon.Unlock /> : <Icon.Lock />}
+                      {label}
+                    </span>
+                  );
+                }) : (
+                  <span className="text-sm font-semibold text-slate-500">No stage assigned yet.</span>
+                )}
+              </div>
+            </div>
+
+            {/* Team members */}
+            <div className="rounded-2xl border border-slate-100 bg-white px-4 py-4">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-3">Team Members</p>
+              <div className="flex flex-wrap gap-2">
+                {(selectedProject.team_members || []).map((member, i) => {
+                  const name = member.profiles?.full_name || member.profiles?.email || "Student";
+                  const colors = ["bg-teal-400", "bg-indigo-400", "bg-purple-400", "bg-amber-400", "bg-rose-400"];
+                  return (
+                    <div key={member.id || i} className="flex items-center gap-2 rounded-full bg-slate-50 border border-slate-200 pr-3 pl-1 py-1">
+                      <div className={`w-6 h-6 rounded-full ${colors[i % 5]} text-white text-xs font-bold flex items-center justify-center`}>
+                        {name[0]}
+                      </div>
+                      <span className="text-xs font-semibold text-slate-700">{name}</span>
+                    </div>
+                  );
+                })}
+                {(selectedProject.team_members || []).length === 0 && (
+                  <span className="text-sm text-slate-400">No students linked</span>
+                )}
+              </div>
             </div>
           </div>
-          <p className="mt-3 text-sm text-gray-500">
-            Open the required review stage below and enter rubric-wise marks individually for each student in this team.
-          </p>
         </div>
+
+        {/* Rubric evaluation */}
         <DynamicRubricEvaluation
           projectId={selectedProject.id}
           members={selectedProject.team_members || []}
@@ -1226,80 +1153,206 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
     );
   }
 
+  // ── list view ───────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
+
+      {/* Page header */}
       <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
-        <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Review Evaluation</p>
-        <h2 className="text-2xl font-extrabold text-gray-900">Assigned Teams</h2>
-        <p className="text-sm text-gray-500 mt-2 max-w-3xl">Teams from the assigned class and batch appear here. Click a team to open the review stage and enter rubric-wise marks individually.</p>
+        <div className="flex items-start justify-between flex-wrap gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-1">Review Evaluation</p>
+            <h2 className="text-2xl font-extrabold text-gray-900">Assigned Teams</h2>
+            <p className="text-sm text-gray-500 mt-1 max-w-2xl">
+              Teams from the assigned class appear below, grouped by batch. Click a team to enter rubric-wise marks.
+            </p>
+          </div>
+          {/* Open stage indicator */}
+          {openStageLabel ? (
+            <div className="flex items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-4 py-2.5">
+              <span className="w-2 h-2 rounded-full bg-teal-500 animate-pulse" />
+              <span className="text-xs font-bold text-teal-700">{openStageLabel} — Open for entry</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5">
+              <Icon.Lock />
+              <span className="text-xs font-bold text-slate-500">No stage open yet</span>
+            </div>
+          )}
+        </div>
+
+        {/* Search + batch filter */}
+        <div className="mt-5 flex flex-wrap gap-3">
+          {/* Search box */}
+          <div className="flex-1 min-w-[200px] relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><Icon.Search /></span>
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search team or student name…"
+              className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-400 focus:border-transparent"
+            />
+            {search && (
+              <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                <Icon.X />
+              </button>
+            )}
+          </div>
+
+          {/* Batch filter pills */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {batchOptions.map(opt => {
+              const label = opt === "all" ? "All Batches" : opt === "unassigned" ? "Unassigned" : `Batch ${opt}`;
+              const isActive = batchFilter === opt;
+              const color = opt === "1" ? "teal" : opt === "2" ? "indigo" : "slate";
+              return (
+                <button
+                  key={opt}
+                  onClick={() => setBatchFilter(opt)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${
+                    isActive
+                      ? opt === "1" ? "bg-teal-500 text-white border-teal-500"
+                        : opt === "2" ? "bg-indigo-500 text-white border-indigo-500"
+                        : "bg-slate-700 text-white border-slate-700"
+                      : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Stats row */}
+        <div className="mt-4 flex flex-wrap gap-4">
+          <span className="text-sm text-slate-500">
+            <span className="font-bold text-slate-800">{filtered.length}</span> team{filtered.length !== 1 ? "s" : ""} shown
+            {search && <span className="text-teal-600"> · matching "{search}"</span>}
+          </span>
+          {batchNums.map(b => (
+            <span key={b} className="text-sm text-slate-400">
+              Batch {b}: <span className="font-bold text-slate-700">{projects.filter(p => p.batch === b).length}</span>
+            </span>
+          ))}
+        </div>
       </div>
 
-      {projects.length === 0 ? (
+      {/* No access state */}
+      {projects.length === 0 && (
         <div className="bg-white rounded-2xl p-10 border border-gray-100 shadow-sm text-center">
+          <div className="w-14 h-14 mx-auto rounded-full bg-slate-100 flex items-center justify-center mb-3">
+            <Icon.Lock />
+          </div>
           <p className="text-gray-700 font-semibold">No review access assigned</p>
           <p className="text-gray-400 text-sm mt-1">Once the coordinator grants reviewer access, teams will appear here.</p>
         </div>
-      ) : (
-        Object.entries(groupedProjects).map(([className, classProjects]) => (
-          <div key={className} className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Assigned Class</p>
-                <h3 className="mt-1 text-lg font-extrabold text-gray-900">{className}</h3>
-              </div>
-              <div className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600">
-                {classProjects.length} {classProjects.length === 1 ? "Team" : "Teams"}
-              </div>
-            </div>
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-              {classProjects.map((project) => (
-                <div key={project.id} className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-lg font-extrabold text-gray-900">{getProjectDisplayName(project)}</p>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-600">
-                          {project.batch ? `Batch ${project.batch}` : "All Batches"}
-                        </span>
-                        <span className="rounded-full border border-teal-200 bg-teal-50 px-3 py-1 text-xs font-bold text-teal-700">
-                          Review Entry
-                        </span>
-                      </div>
-                    </div>
-                    <StatusBadge status={project.status} />
-                  </div>
-                  <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
-                    <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Students</p>
-                    <p className="mt-2 text-sm font-semibold text-slate-700">
-                      {(project.team_members || [])
-                        .map((member) => member.profiles?.full_name || member.profiles?.email || "Student")
-                        .slice(0, 3)
-                        .join(", ") || "No students linked"}
-                      {(project.team_members || []).length > 3 ? ` +${project.team_members.length - 3} more` : ""}
-                    </p>
-                  </div>
-                  <p className="mt-4 text-sm text-gray-500">
-                    Click to open this team and enter individual marks for the shown review stage using the review rubric criteria.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedProject(project)}
-                    className="mt-4 inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 transition-all hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
-                  >
-                    Open Team Review <Icon.ArrowRight />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))
       )}
+
+      {/* No results from search/filter */}
+      {projects.length > 0 && filtered.length === 0 && (
+        <div className="bg-white rounded-2xl p-10 border border-gray-100 shadow-sm text-center">
+          <p className="text-gray-600 font-semibold">No teams match your search</p>
+          <button onClick={() => { setSearch(""); setBatchFilter("all"); }} className="mt-3 text-sm text-teal-600 font-semibold hover:underline">
+            Clear filters
+          </button>
+        </div>
+      )}
+
+      {/* Flat team list */}
+      <div className="flex flex-col gap-2.5">
+        {filtered.map((project) => {
+          const batchKey = project.batch ? `Batch ${project.batch}` : "Unassigned";
+          const colors = getBatchColor(batchKey);
+          const memberNames = (project.team_members || [])
+            .map(m => m.profiles?.full_name || m.profiles?.email || "Student");
+          const memberColors = ["#14b8a6", "#6366f1", "#8b5cf6", "#f59e0b", "#ef4444"];
+
+          return (
+            <div
+              key={project.id}
+              onClick={() => setSelectedProject(project)}
+              className="group bg-white rounded-xl border border-gray-100 shadow-[0_1px_2px_rgba(0,0,0,0.02)] hover:shadow-md hover:border-teal-300 transition-all duration-200 p-3 sm:px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer relative overflow-hidden"
+            >
+              {/* Batch colour accent bar on the left */}
+              <div className={`absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b ${colors.header}`} />
+
+              {/* Left: Avatar & Title info */}
+              <div className="flex items-center gap-3.5 min-w-0 pl-1 flex-1">
+                <div className={`w-10 h-10 rounded-lg ${colors.bg} border ${colors.border} flex items-center justify-center flex-shrink-0`}>
+                  <span className={`text-sm font-extrabold ${colors.text}`}>
+                    {getProjectDisplayName(project)[0]?.toUpperCase() || "?"}
+                  </span>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <h4 className="font-extrabold text-gray-900 leading-tight truncate text-sm">
+                      {getProjectDisplayName(project)}
+                    </h4>
+                    <span className={`rounded-full border ${colors.border} ${colors.bg} px-1.5 py-0.5 text-[10px] font-bold ${colors.text} hidden sm:inline-block`}>
+                      {batchKey}
+                    </span>
+                  </div>
+                  {/* Students line */}
+                  {memberNames.length > 0 ? (
+                    <div className="flex items-center gap-2 mt-1">
+                      <div className="flex">
+                        {(project.team_members || []).slice(0, 3).map((tm, i) => (
+                          <div key={i}
+                            className="w-4 h-4 rounded-full border border-white text-white text-[8px] font-bold flex items-center justify-center flex-shrink-0"
+                            style={{ background: memberColors[i % 5], marginLeft: i > 0 ? "-2px" : "0" }}>
+                            {(tm.profiles?.full_name || "?")[0]}
+                          </div>
+                        ))}
+                      </div>
+                      <span className="text-xs text-slate-500 font-medium truncate">
+                        {memberNames.slice(0, 3).join(", ")}
+                        {memberNames.length > 3 ? ` +${memberNames.length - 3}` : ""}
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-slate-400 font-medium mt-1">No students</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Right: Status, Stage & Button */}
+              <div className="flex items-center gap-4 sm:gap-6 ml-11 sm:ml-0 flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  {openStageLabel && (
+                    <span className="rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-700 hidden md:flex items-center gap-1">
+                      <Icon.Unlock />
+                      {openStageLabel}
+                    </span>
+                  )}
+                  <StatusBadge status={project.status} />
+                </div>
+                
+                {/* CTA Button */}
+                <button
+                  type="button"
+                  className={`flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                    writableReviewStages.length > 0
+                      ? "bg-teal-50 text-teal-700 border-teal-200 group-hover:bg-teal-400 group-hover:text-white group-hover:border-teal-400"
+                      : "bg-white border-slate-200 text-slate-600 group-hover:border-teal-200 group-hover:bg-teal-50 group-hover:text-teal-700"
+                  }`}
+                >
+                  Review <Icon.ArrowRight />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
+// ─── MAIN ──────────────────────────────────────────────────────────────────
 export default function MentorDashboard() {
   const [active, setActive] = useState("overview");
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [projects, setProjects] = useState([]);
   const [guideProjects, setGuideProjects] = useState([]);
   const [reviewProjects, setReviewProjects] = useState([]);
@@ -1378,12 +1431,8 @@ export default function MentorDashboard() {
     }
 
     const stageProgress = {
-      idea: 0,
-      abstract: 0,
-      zeroth_review: 0,
-      first_review: 0,
-      second_review: 0,
-      final_review: 0,
+      idea: 0, abstract: 0, zeroth_review: 0,
+      first_review: 0, second_review: 0, final_review: 0,
     };
 
     const projectRows = projectsInClass.map(project => {
@@ -1395,10 +1444,7 @@ export default function MentorDashboard() {
       }
 
       const abstractDocument = latestDocumentByProjectType[`${project.id}:abstract`];
-      if (
-        Boolean(abstractDocument?.coordinator_verified) ||
-        String(abstractDocument?.status || "").toLowerCase() === "approved"
-      ) {
+      if (Boolean(abstractDocument?.coordinator_verified) || String(abstractDocument?.status || "").toLowerCase() === "approved") {
         stageProgress.abstract += 1;
       }
 
@@ -1427,14 +1473,10 @@ export default function MentorDashboard() {
     const classAverageScore = allScores.length ? allScores.reduce((sum, s) => sum + s, 0) / allScores.length : null;
 
     return {
-      classId,
-      classTitle: classRow?.class_section || "Untitled Class",
-      totalProjects: projectRows.length,
-      evaluatedProjects: evaluatedCount,
+      classId, classTitle: classRow?.class_section || "Untitled Class",
+      totalProjects: projectRows.length, evaluatedProjects: evaluatedCount,
       pendingEvaluations: projectRows.length - evaluatedCount,
-      classAverageScore,
-      stageProgress,
-      projects: projectRows,
+      classAverageScore, stageProgress, projects: projectRows,
       reviewStages: sortReviewStages(reviewStageRows || []),
       deadlineLoadError: reviewStageError
         ? (/coordinator_deadline/i.test(String(reviewStageError.message || ""))
@@ -1446,7 +1488,7 @@ export default function MentorDashboard() {
 
   useEffect(() => {
     const init = async () => {
-      setLoading(true);
+      setLoading(prev => !mentorProfile?.id ? true : false);
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) { navigate("/"); return; }
@@ -1491,7 +1533,6 @@ export default function MentorDashboard() {
                   .from("reviewer_access")
                   .select("class_id, stage, is_open")
                   .eq("mentor_id", profile.id);
-
                 if (legacyAccessError) throw legacyAccessError;
                 reviewerAccessRows = legacyAccessRows || [];
               } else {
@@ -1506,35 +1547,22 @@ export default function MentorDashboard() {
           const reviewerClassIds = [...new Set((reviewerAccessRows || []).map((row) => row.class_id).filter(Boolean))];
           const reviewerBatchMap = (reviewerAccessRows || []).reduce((acc, row) => {
             if (!row?.class_id) return acc;
-            if (!acc[row.class_id]) {
-              acc[row.class_id] = { batches: new Set(), hasSpecificBatch: false };
-            }
+            if (!acc[row.class_id]) acc[row.class_id] = { batches: new Set(), hasSpecificBatch: false };
             if (!hasBatchScope || row.batch == null) {
-              if (!acc[row.class_id].hasSpecificBatch) {
-                acc[row.class_id].batches.add("all");
-              }
+              if (!acc[row.class_id].hasSpecificBatch) acc[row.class_id].batches.add("all");
             } else {
-              if (!acc[row.class_id].hasSpecificBatch) {
-                acc[row.class_id].batches.clear();
-                acc[row.class_id].hasSpecificBatch = true;
-              }
+              if (!acc[row.class_id].hasSpecificBatch) { acc[row.class_id].batches.clear(); acc[row.class_id].hasSpecificBatch = true; }
               acc[row.class_id].batches.add(String(row.batch));
             }
             return acc;
           }, {});
-          let classIdBySection = new Map();
 
+          let classIdBySection = new Map();
           if (reviewerClassIds.length > 0) {
             const { data: reviewerClasses, error: reviewerClassesError } = await supabase
-              .from("classes")
-              .select("id, class_section")
-              .in("id", reviewerClassIds);
-
+              .from("classes").select("id, class_section").in("id", reviewerClassIds);
             if (reviewerClassesError) throw reviewerClassesError;
-
-            classIdBySection = new Map(
-              (reviewerClasses || []).map((row) => [normalizeSectionKey(row.class_section), row.id])
-            );
+            classIdBySection = new Map((reviewerClasses || []).map((row) => [normalizeSectionKey(row.class_section), row.id]));
           }
 
           const resolveProjectClassId = (project) => {
@@ -1550,7 +1578,6 @@ export default function MentorDashboard() {
           };
 
           const backendProjects = await apiRequest("/projects", { skipCache: true });
-
           const guideProjectRows = (backendProjects || []).filter(
             (project) => project.guide_id === profile.id || project.mentor_id === profile.id
           );
@@ -1571,14 +1598,9 @@ export default function MentorDashboard() {
           if (reviewerProjectRows.length === 0 && reviewerClassIds.length > 0) {
             const { data: fallbackProjects, error: fallbackProjectsError } = await supabase
               .from("projects")
-              .select(`
-                *,
-                classes(class_section),
-                team_members(id, student_id, role, profiles:student_id(full_name, email, roll_number, department, batch, class_section))
-              `)
+              .select(`*, classes(class_section), team_members(id, student_id, role, profiles:student_id(full_name, email, roll_number, department, batch, class_section))`)
               .or(`class_id.in.(${reviewerClassIds.join(",")}),class_id.is.null`)
               .order("created_at", { ascending: false });
-
             if (fallbackProjectsError) throw fallbackProjectsError;
 
             reviewerProjectRows = (fallbackProjects || []).filter((project) => {
@@ -1596,9 +1618,7 @@ export default function MentorDashboard() {
           }
 
           const mergedProjects = [...(guideProjectRows || []), ...reviewerProjectRows].reduce((acc, project) => {
-            if (!acc.some((item) => item.id === project.id)) {
-              acc.push(project);
-            }
+            if (!acc.some((item) => item.id === project.id)) acc.push(project);
             return acc;
           }, []);
 
@@ -1629,8 +1649,9 @@ export default function MentorDashboard() {
 
         const coordinatorResolution = resolveCoordinatorClassId(profile, projData);
         if (coordinatorResolution.classId) {
-          setMyClassLoading(true);
-          setMyClassData(await loadCoordinatorClassData(coordinatorResolution.classId));
+          if (!myClassData) setMyClassLoading(true);
+          const freshData = await loadCoordinatorClassData(coordinatorResolution.classId);
+          setMyClassData(freshData);
           setMyClassLoading(false);
         } else {
           setMyClassData(null);
@@ -1645,18 +1666,10 @@ export default function MentorDashboard() {
   useEffect(() => {
     if (!mentorProfile?.id) return undefined;
     const channel = supabase.channel(`mentor-reviewer-access-${mentorProfile.id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "reviewer_access", filter: `mentor_id=eq.${mentorProfile.id}` },
-        async () => {
-          setReviewAccessVersion((value) => value + 1);
-        }
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "reviewer_access", filter: `mentor_id=eq.${mentorProfile.id}` },
+        async () => { setReviewAccessVersion((value) => value + 1); })
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [mentorProfile?.id]);
 
   const coordinatorClassId = resolveCoordinatorClassId(mentorProfile, projects).classId;
@@ -1664,7 +1677,7 @@ export default function MentorDashboard() {
   const canOpenEvaluationPanel = hasReviewAccess;
 
   useEffect(() => {
-    if (!isCoordinatorWithClass && ["my-class-overview","my-class-teams","my-class-submissions","my-class-reviews"].includes(active)) {
+    if (!isCoordinatorWithClass && ["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews"].includes(active)) {
       setActive("overview");
     }
   }, [active, isCoordinatorWithClass]);
@@ -1683,30 +1696,19 @@ export default function MentorDashboard() {
     };
     const queueRefresh = () => {
       if (refreshTimer) clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(async () => {
-        await refreshMyClassData();
-      }, 250);
+      refreshTimer = setTimeout(async () => { await refreshMyClassData(); }, 250);
     };
     const channel = supabase.channel(`mentor-my-class-review-stages-${coordinatorClassId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "review_stages", filter: `class_id=eq.${coordinatorClassId}` },
-        async () => { queueRefresh(); })
-      .on("postgres_changes", { event: "*", schema: "public", table: "projects", filter: `class_id=eq.${coordinatorClassId}` },
-        async () => { queueRefresh(); })
-      .on("postgres_changes", { event: "*", schema: "public", table: "documents" },
-        async () => { queueRefresh(); })
-      .on("postgres_changes", { event: "*", schema: "public", table: "evaluations" },
-        async () => { queueRefresh(); })
-      .on("postgres_changes", { event: "*", schema: "public", table: "review_marks" },
-        async () => { queueRefresh(); })
-      .on("postgres_changes", { event: "*", schema: "public", table: "team_members" },
-        async () => { queueRefresh(); })
-      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" },
-        async () => { queueRefresh(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "review_stages", filter: `class_id=eq.${coordinatorClassId}` }, async () => { queueRefresh(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "projects", filter: `class_id=eq.${coordinatorClassId}` }, async () => { queueRefresh(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "documents" }, async () => { queueRefresh(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "evaluations" }, async () => { queueRefresh(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "review_marks" }, async () => { queueRefresh(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "team_members" }, async () => { queueRefresh(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, async () => { queueRefresh(); })
       .subscribe();
     const onAdminDataUpdated = () => { queueRefresh(); };
-    const onStorage = (event) => {
-      if (event.key === ADMIN_DATA_SYNC_KEY) queueRefresh();
-    };
+    const onStorage = (event) => { if (event.key === ADMIN_DATA_SYNC_KEY) queueRefresh(); };
     window.addEventListener("admin-data-updated", onAdminDataUpdated);
     window.addEventListener("storage", onStorage);
     return () => {
@@ -1730,11 +1732,7 @@ export default function MentorDashboard() {
   const handleSubmitReview = async ({ projectId, phase, score, feedback }) => {
     try {
       const data = await insertMentorEvaluation(mentorProfile?.id, {
-        projectId,
-        phase,
-        score: Number(score),
-        maxScore: 100,
-        feedback,
+        projectId, phase, score: Number(score), maxScore: 100, feedback,
       });
       setEvaluations(p => [data, ...p]);
       const proj = projects.find(p => p.id === projectId);
@@ -1742,14 +1740,16 @@ export default function MentorDashboard() {
         { text: `Evaluation submitted for ${getProjectDisplayName(proj)} (${phase})`, time: "Just now" },
         ...prev.slice(0, 4),
       ]);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      throw e;
+    }
   };
 
   const handleSaveStudentDeadline = async (stageId, deadlineIso) => {
     if (!coordinatorClassId) throw new Error("No coordinator class assigned.");
     const targetStage = myClassData?.reviewStages?.find(s => s.id === stageId);
     if (!targetStage) throw new Error("Review stage not found.");
-    // null means remove — skip validation
     if (deadlineIso !== null && targetStage.coordinator_deadline) {
       const studentDate = new Date(deadlineIso);
       const adminDate = new Date(targetStage.coordinator_deadline);
@@ -1757,10 +1757,7 @@ export default function MentorDashboard() {
         throw new Error("Student deadline must be earlier than admin evaluation deadline.");
     }
     const { error } = await supabase.from("review_stages")
-      .update({
-        deadline: deadlineIso,
-        student_deadline_set_by_coordinator: deadlineIso !== null,
-      })
+      .update({ deadline: deadlineIso, student_deadline_set_by_coordinator: deadlineIso !== null })
       .eq("id", stageId).eq("class_id", coordinatorClassId);
     if (error) throw new Error(error.message || "Failed to update student deadline.");
     emitAdminDataUpdated();
@@ -1770,16 +1767,15 @@ export default function MentorDashboard() {
   const handleSignOut = async () => { await supabase.auth.signOut(); navigate("/signin"); };
 
   return (
-    <div className="flex h-[100dvh] bg-gray-50 overflow-hidden">
-      <Sidebar active={active} setActive={setActive} onSignOut={handleSignOut} showMyClass={isCoordinatorWithClass} showEvaluation={canOpenEvaluationPanel} />
-      <div className="flex-1 min-w-0 ml-72 h-[100dvh] flex flex-col overflow-hidden">
+    <div className="flex h-[100dvh] bg-gray-50 overflow-hidden relative">
+      {/* Mobile overlay */}
+      {isSidebarOpen && (
+        <div className="fixed inset-0 bg-gray-900/50 z-30 md:hidden backdrop-blur-sm transition-opacity" onClick={() => setIsSidebarOpen(false)} />
+      )}
+      <Sidebar active={active} setActive={(k) => { setActive(k); setIsSidebarOpen(false); }} onSignOut={handleSignOut} showMyClass={isCoordinatorWithClass} showEvaluation={canOpenEvaluationPanel} isOpen={isSidebarOpen} />
+      <div className="flex-1 min-w-0 md:ml-72 h-[100dvh] flex flex-col overflow-hidden">
         <div className="relative">
-          <Topbar
-            active={active}
-            mentorName={mentorProfile?.full_name}
-            showMyClass={isCoordinatorWithClass}
-            onProfileClick={() => setShowProfileMenu(v => !v)}
-          />
+          <Topbar active={active} mentorName={mentorProfile?.full_name} showMyClass={isCoordinatorWithClass} onProfileClick={() => setShowProfileMenu(v => !v)} onToggleSidebar={() => setIsSidebarOpen(true)} />
           {showProfileMenu && (
             <div className="fixed top-14 right-2 sm:right-6 md:right-8 z-50">
               <ProfileMenu
@@ -1801,27 +1797,35 @@ export default function MentorDashboard() {
           )}
         </div>
         <main className="flex-1 overflow-y-auto p-8">
-        {active === "overview" && (
-          <OverviewTab projects={guideProjects} evaluations={evaluations} milestones={milestones}
-            recentActivity={recentActivity} loading={loading} onNavigate={setActive} onSubmitReview={handleSubmitReview} showEvaluationPanel={canOpenEvaluationPanel} />
-        )}
-        {active === "teams" && (
-          <TeamsTab projects={guideProjects} evaluations={evaluations} loading={loading}
-            onStartReview={handleSubmitReview} mentorId={mentorProfile?.id} mentorName={mentorProfile?.full_name} />
-        )}
-        {active === "evaluation" && canOpenEvaluationPanel && (
-          <EvaluationTab projects={reviewProjects} evaluations={evaluations} setEvaluations={setEvaluations}
-            mentorId={mentorProfile?.id} loading={loading} allowedReviewStages={allowedReviewStages} writableReviewStages={writableReviewStages} />
-        )}
-        {["my-class-overview","my-class-teams","my-class-submissions","my-class-reviews"].includes(active) && isCoordinatorWithClass && (
-          <MyClass
-            classData={myClassData}
-            loading={myClassLoading}
-            onSaveStudentDeadline={handleSaveStudentDeadline}
-            activeSubPage={active.replace("my-class-", "")}
-            onNavigate={(sub) => setActive("my-class-" + sub)}
-          />
-        )}
+          {active === "overview" && (
+            <OverviewTab projects={guideProjects} evaluations={evaluations} milestones={milestones}
+              recentActivity={recentActivity} loading={loading} onNavigate={setActive}
+              onSubmitReview={handleSubmitReview} showEvaluationPanel={canOpenEvaluationPanel} />
+          )}
+          {active === "teams" && (
+            <TeamsTab projects={guideProjects} evaluations={evaluations} loading={loading}
+              onStartReview={handleSubmitReview} mentorId={mentorProfile?.id} mentorName={mentorProfile?.full_name} />
+          )}
+          {active === "evaluation" && canOpenEvaluationPanel && (
+            <EvaluationTab
+              projects={reviewProjects}
+              evaluations={evaluations}
+              setEvaluations={setEvaluations}
+              mentorId={mentorProfile?.id}
+              loading={loading}
+              allowedReviewStages={allowedReviewStages}
+              writableReviewStages={writableReviewStages}
+            />
+          )}
+          {["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews"].includes(active) && isCoordinatorWithClass && (
+            <MyClass
+              classData={myClassData}
+              loading={myClassLoading}
+              onSaveStudentDeadline={handleSaveStudentDeadline}
+              activeSubPage={active.replace("my-class-", "")}
+              onNavigate={(sub) => setActive("my-class-" + sub)}
+            />
+          )}
         </main>
       </div>
 
