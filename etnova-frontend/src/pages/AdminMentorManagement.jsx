@@ -493,6 +493,10 @@ export default function AdminMentorManagement() {
     }
     if (itemId === "review-management") {
       navigate("/admin/review-stages");
+      return;
+    }
+    if (itemId === "rubrics-management") {
+      navigate("/admin/rubrics");
     }
   };
 

@@ -1,4 +1,9 @@
 import { supabaseAdmin } from '../config/supabase.js';
+import {
+  recalculateClassFinalResults,
+  getCoordinatorInternalComponents,
+  saveCoordinatorInternalComponents,
+} from '../services/rubricEvaluationService.js';
 
 const supabase = supabaseAdmin;
 
@@ -40,11 +45,12 @@ export const getClassOverview = async (req, res) => {
       return res.status(403).json({ message: 'You are not assigned as a coordinator.' });
     }
     const { class_id, department } = coord;
+    await recalculateClassFinalResults(class_id);
 
     // Get class name
     const { data: classRow } = await supabase
       .from('classes')
-      .select('id, class_name, department')
+      .select('id, class_section, department')
       .eq('id', class_id)
       .single();
 
@@ -256,17 +262,50 @@ export const getClassTeams = async (req, res) => {
   try {
     const coord = await getCoordinatorClassId(req.user.id);
     if (!coord?.class_id) return res.status(403).json({ message: 'Not a coordinator.' });
+    await recalculateClassFinalResults(coord.class_id);
+    const { data: coordinatorClass } = await supabase
+      .from('classes')
+      .select('id, class_section')
+      .eq('id', coord.class_id)
+      .maybeSingle();
 
-    const { data: projects } = await supabase
+    const { data: scopedProjects } = await supabase
       .from('projects')
       .select(`
-        id, title, status, guide_id, created_at,
+        id, title, status, guide_id, batch, created_at,
         team_members(id)
       `)
       .eq('class_id', coord.class_id)
       .order('created_at', { ascending: false });
 
-    if (!projects?.length) return res.json([]);
+    const { data: nullClassProjects } = await supabase
+      .from('projects')
+      .select(`
+        id, title, status, guide_id, batch, created_at,
+        team_members(id, role, profiles!team_members_student_id_fkey(class_id, class_section))
+      `)
+      .is('class_id', null)
+      .order('created_at', { ascending: false });
+
+    const matchedLegacyProjects = (nullClassProjects || []).filter((project) => {
+      const members = project?.team_members || [];
+      const leader = members.find((member) => member.role === 'leader');
+      const anchor = leader?.profiles || members[0]?.profiles || null;
+      if (!anchor) return false;
+      if (anchor.class_id && anchor.class_id === coord.class_id) return true;
+      return Boolean(
+        coordinatorClass?.class_section &&
+        anchor.class_section &&
+        String(anchor.class_section).trim() === String(coordinatorClass.class_section).trim()
+      );
+    });
+
+    const projects = [...(scopedProjects || []), ...matchedLegacyProjects].reduce((acc, project) => {
+      if (!acc.some((row) => row.id === project.id)) acc.push(project);
+      return acc;
+    }, []);
+
+    if (!projects.length) return res.json([]);
 
     // Guide names
     const guideIds = [...new Set(projects.map(p => p.guide_id).filter(Boolean))];
@@ -316,6 +355,7 @@ export const getClassTeams = async (req, res) => {
         id: p.id,
         title: p.title,
         status: p.status,
+        batch: p.batch ?? null,
         guide_name: guideMap[p.guide_id] || '—',
         team_size: (p.team_members || []).length,
         latest_stage: latestDoc?.document_type || '—',
@@ -326,6 +366,91 @@ export const getClassTeams = async (req, res) => {
     });
 
     res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ─── 5a. PUT /coordinator/teams/batches ─────────────────────────────────────
+// Body: { assignments: [{ project_id: "uuid", batch: 1|2|null }, ...] }
+export const saveTeamBatches = async (req, res) => {
+  try {
+    const coord = await getCoordinatorClassId(req.user.id);
+    if (!coord?.class_id) return res.status(403).json({ message: 'Not a coordinator.' });
+    const { data: coordinatorClass } = await supabase
+      .from('classes')
+      .select('id, class_section')
+      .eq('id', coord.class_id)
+      .maybeSingle();
+
+    const assignments = Array.isArray(req.body?.assignments) ? req.body.assignments : [];
+    if (!assignments.length) {
+      return res.status(400).json({ message: 'Provide at least one batch assignment.' });
+    }
+
+    const normalized = assignments.map((entry) => {
+      const projectId = String(entry?.project_id || '').trim();
+      const rawBatch = entry?.batch;
+      const batch = rawBatch == null || rawBatch === '' ? null : Number(rawBatch);
+      return { project_id: projectId, batch };
+    });
+
+    const invalid = normalized.find(
+      (entry) => !entry.project_id || (entry.batch != null && ![1, 2].includes(entry.batch))
+    );
+    if (invalid) {
+      return res.status(400).json({ message: 'Each assignment must include project_id and batch as 1, 2, or null.' });
+    }
+
+    const projectIds = [...new Set(normalized.map((entry) => entry.project_id))];
+    const { data: candidateProjects, error: candidateError } = await supabase
+      .from('projects')
+      .select(`
+        id, class_id,
+        team_members(role, profiles!team_members_student_id_fkey(class_id, class_section))
+      `)
+      .in('id', projectIds);
+    if (candidateError) throw candidateError;
+
+    const allowedIds = new Set(
+      (candidateProjects || [])
+        .filter((project) => {
+          if (project.class_id && project.class_id === coord.class_id) return true;
+          if (project.class_id) return false;
+          const members = project?.team_members || [];
+          const leader = members.find((member) => member.role === 'leader');
+          const anchor = leader?.profiles || members[0]?.profiles || null;
+          if (!anchor) return false;
+          if (anchor.class_id && anchor.class_id === coord.class_id) return true;
+          return Boolean(
+            coordinatorClass?.class_section &&
+            anchor.class_section &&
+            String(anchor.class_section).trim() === String(coordinatorClass.class_section).trim()
+          );
+        })
+        .map((row) => row.id)
+    );
+    const projectById = new Map((candidateProjects || []).map((row) => [row.id, row]));
+    const outOfScope = projectIds.filter((id) => !allowedIds.has(id));
+    if (outOfScope.length > 0) {
+      return res.status(403).json({ message: 'One or more teams do not belong to your class.' });
+    }
+
+    for (const entry of normalized) {
+      const currentProject = projectById.get(entry.project_id);
+      const updatePayload = { batch: entry.batch };
+      if (currentProject && !currentProject.class_id) {
+        // Auto-heal legacy records so future coordinator queries are class_id-based.
+        updatePayload.class_id = coord.class_id;
+      }
+      const { error: updateError } = await supabase
+        .from('projects')
+        .update(updatePayload)
+        .eq('id', entry.project_id);
+      if (updateError) throw updateError;
+    }
+
+    res.json({ updated: normalized.length });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -376,6 +501,12 @@ export const saveDeadlines = async (req, res) => {
       .select();
 
     if (error) throw error;
+    const hasClosedEvaluationStage = rows.some((row) =>
+      ['review', 'guide', 'ese'].includes(row.stage) && row.deadline && new Date(row.deadline).getTime() <= Date.now()
+    );
+    if (hasClosedEvaluationStage) {
+      await recalculateClassFinalResults(coord.class_id);
+    }
     res.json(data);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -455,6 +586,9 @@ export const saveReviewerAccess = async (req, res) => {
           .eq('class_id', coord.class_id)
           .eq('stage', stage);
       }
+      if (stages.some((stage) => stageToggles[stage] === false)) {
+        await recalculateClassFinalResults(coord.class_id);
+      }
       return res.json({ message: 'Stage access updated.' });
     }
 
@@ -464,6 +598,9 @@ export const saveReviewerAccess = async (req, res) => {
       .select();
 
     if (error) throw error;
+    if (stages.some((stage) => stageToggles[stage] === false)) {
+      await recalculateClassFinalResults(coord.class_id);
+    }
     res.json(data);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -471,28 +608,16 @@ export const saveReviewerAccess = async (req, res) => {
 };
 
 // ─── 10. GET /coordinator/department-mentors ─────────────────────────────────
-// All mentors in coordinator's department (for reviewer selection checkboxes)
+// All users with mentor role (for reviewer selection checkboxes)
 export const getDepartmentMentors = async (req, res) => {
   try {
     const coord = await getCoordinatorClassId(req.user.id);
     if (!coord) return res.status(403).json({ message: 'Not a coordinator.' });
 
-    // Get coordinator's own department
-    const { data: coordProfile } = await supabase
-      .from('profiles')
-      .select('department')
-      .eq('id', req.user.id)
-      .single();
-
-    if (!coordProfile?.department) {
-      return res.status(400).json({ message: 'Coordinator department not set.' });
-    }
-
     const { data, error } = await supabase
       .from('profiles')
       .select('id, full_name, email, department, designation')
       .eq('role', 'mentor')
-      .ilike('department', `%${coordProfile.department}%`)
       .order('full_name');
 
     if (error) throw error;
@@ -511,6 +636,34 @@ export const getDepartmentMentors = async (req, res) => {
     }));
 
     res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const listInternalMarks = async (req, res) => {
+  try {
+    const coord = await getCoordinatorClassId(req.user.id);
+    if (!coord?.class_id) return res.status(403).json({ message: 'Not a coordinator.' });
+
+    const rows = await getCoordinatorInternalComponents(coord.class_id);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const saveInternalMarks = async (req, res) => {
+  try {
+    const coord = await getCoordinatorClassId(req.user.id);
+    if (!coord?.class_id) return res.status(403).json({ message: 'Not a coordinator.' });
+
+    const { entries = [] } = req.body || {};
+    const rows = await saveCoordinatorInternalComponents({
+      classId: coord.class_id,
+      entries,
+    });
+    res.json(rows);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

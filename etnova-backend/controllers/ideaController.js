@@ -46,6 +46,167 @@ const normalizeIdeaStatus = (value, allowed = IDEA_STATUSES) => {
   return normalized;
 };
 
+const clampScore = (value, min = 0, max = 100) => Math.max(min, Math.min(max, Math.round(Number(value) || 0)));
+
+function scoreIdeaSubmission(idea) {
+  const title = String(idea?.title || '').trim();
+  const description = String(idea?.description || '').trim().toLowerCase();
+  const technologies = Array.isArray(idea?.technologies) ? idea.technologies.filter(Boolean) : [];
+
+  // Effectiveness: problem clarity + expected impact.
+  let effectiveness = 40;
+  if (title.length >= 10) effectiveness += 8;
+  if (description.length >= 80) effectiveness += 12;
+  if (/(problem|challenge|issue|inefficient|delay|manual|error)/i.test(description)) effectiveness += 20;
+  if (/(improve|optimize|reduce|increase|efficiency|accuracy|speed)/i.test(description)) effectiveness += 10;
+
+  // Feasibility: practical implementation details.
+  let feasibility = 40;
+  if (technologies.length >= 1) feasibility += 12;
+  if (technologies.length >= 2) feasibility += 8;
+  if (/(api|database|module|implementation|deploy|prototype|integration)/i.test(description)) feasibility += 20;
+  if (description.length >= 40) feasibility += 8;
+
+  effectiveness = clampScore(effectiveness);
+  feasibility = clampScore(feasibility);
+  const score = clampScore((effectiveness + feasibility) / 2);
+  const status = score >= 70 ? 'Good' : 'Needs Improvement';
+
+  const feedback = [];
+  feedback.push(
+    effectiveness >= 70
+      ? 'Effectiveness is strong. The problem statement and expected impact are clear.'
+      : 'Effectiveness needs work. Clarify the core problem and measurable impact (especially efficiency gains).'
+  );
+  feedback.push(
+    feasibility >= 70
+      ? 'Feasibility looks practical with a workable scope and technical direction.'
+      : 'Feasibility needs improvement. Add concrete implementation steps and realistic technical scope.'
+  );
+
+  return {
+    score,
+    status,
+    criteria: { effectiveness, feasibility },
+    feedback,
+  };
+}
+
+function extractFirstJsonObject(text) {
+  const source = String(text || '');
+  const start = source.indexOf('{');
+  const end = source.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return null;
+  return source.slice(start, end + 1);
+}
+
+function parseAiEvaluationText(text) {
+  try {
+    const jsonBlock = extractFirstJsonObject(text);
+    if (!jsonBlock) return null;
+    const parsed = JSON.parse(jsonBlock);
+    const effectiveness = clampScore(parsed?.effectiveness);
+    const feasibility = clampScore(parsed?.feasibility);
+    const score = clampScore(parsed?.score ?? ((effectiveness + feasibility) / 2));
+    const status = String(parsed?.status || '').trim() === 'Good' ? 'Good' : 'Needs Improvement';
+    const feedback = Array.isArray(parsed?.feedback)
+      ? parsed.feedback.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 4)
+      : [];
+    if (!feedback.length) return null;
+    return {
+      score,
+      status,
+      criteria: { effectiveness, feasibility },
+      feedback,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function scoreIdeaSubmissionWithAI(idea) {
+  const heuristic = scoreIdeaSubmission(idea);
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return heuristic;
+
+  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  const prompt = [
+    'Evaluate this student project idea.',
+    'Criteria: Effectiveness (0-100), Feasibility (0-100).',
+    'Output ONLY valid JSON with keys: effectiveness, feasibility, score, status, feedback.',
+    'status must be exactly "Good" or "Needs Improvement".',
+    'feedback must be an array of 2-4 concise points.',
+    'If uncertain, be conservative.',
+  ].join('\n');
+
+  const payload = {
+    model,
+    input: [
+      { role: 'system', content: prompt },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          title: idea?.title || '',
+          description: idea?.description || '',
+          technologies: Array.isArray(idea?.technologies) ? idea.technologies : [],
+        }),
+      },
+    ],
+    temperature: 0.1,
+    max_output_tokens: 350,
+  };
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) return heuristic;
+    const data = await response.json();
+    const text = data?.output_text || JSON.stringify(data?.output || '');
+    const parsed = parseAiEvaluationText(text);
+    return parsed || heuristic;
+  } catch {
+    return heuristic;
+  }
+}
+
+async function saveAutoIdeaEvaluation({ projectId, evaluatorId, evaluation }) {
+  const AUTO_EVAL_PREFIX = '[AUTO IDEA EVAL]';
+
+  // Keep latest auto-evaluation per project to avoid duplicate rows across resubmissions.
+  await supabase
+    .from('evaluations')
+    .delete()
+    .eq('project_id', projectId)
+    .eq('evaluation_type', 'approval_feedback')
+    .like('feedback', `${AUTO_EVAL_PREFIX}%`);
+
+  const { error } = await supabase
+    .from('evaluations')
+    .insert({
+      project_id: projectId,
+      evaluator_id: evaluatorId,
+      evaluation_type: 'approval_feedback',
+      max_marks: 100,
+      obtained_marks: evaluation.score,
+      feedback: [
+        AUTO_EVAL_PREFIX,
+        `Status: ${evaluation.status}`,
+        `Effectiveness: ${evaluation.criteria.effectiveness}/100`,
+        `Feasibility: ${evaluation.criteria.feasibility}/100`,
+        ...evaluation.feedback,
+      ].join('\n'),
+    });
+
+  if (error) throw error;
+}
+
 const createNotifications = async (rows) => {
   const validRows = (rows || []).filter((row) => row?.user_id && row?.type && row?.title && row?.message);
   if (!validRows.length) return;
@@ -403,10 +564,20 @@ export const submitProjectIdea = async (req, res) => {
       approvedIdeaId: project.approved_idea_id || null,
     });
 
+    const autoEvaluation = await scoreIdeaSubmissionWithAI(updated);
+    await saveAutoIdeaEvaluation({
+      projectId: project.id,
+      evaluatorId: req.user.id,
+      evaluation: autoEvaluation,
+    });
+
     await notifyMentorsOfSubmission(project, project.team_name || project.title, updated, safeProfileName(req.userProfile, 'Student'));
 
     const reviews = await fetchIdeaReviews([updated.id]);
-    res.json(attachReviewHistory([updated], reviews)[0]);
+    res.json({
+      ...attachReviewHistory([updated], reviews)[0],
+      auto_evaluation: autoEvaluation,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

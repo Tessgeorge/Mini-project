@@ -8,6 +8,8 @@ import ReviewTimeline from "../components/admin/ReviewTimeline";
 import StageTable from "../components/admin/StageTable";
 import DeadlineModal from "../components/admin/DeadlineModal";
 import StageStatCard from "../components/admin/StageStatCard";
+import Modal from "../components/Modal";
+import { emitAdminDataUpdated } from "../utils/adminLiveSync";
 
 const ADMIN_NAME = "Meenakshi";
 
@@ -16,18 +18,10 @@ const STATUS = {
   ACTIVE: "active",
   COMPLETED: "completed",
   LOCKED: "locked",
+  PENDING: "pending",
 };
+
 const STAGE_ORDER = ["Idea", "Abstract", "Zeroth Review", "First Review", "Second Review", "Final Review"];
-
-let submissionCountStrategy = null;
-let submissionCountStrategyChecked = false;
-
-function normalizeStatusFromFlags(row) {
-  if (row?.is_locked) return STATUS.LOCKED;
-  if (row?.is_completed) return STATUS.COMPLETED;
-  if (row?.is_active) return STATUS.ACTIVE;
-  return STATUS.INACTIVE;
-}
 
 function normalizeStageName(stageName) {
   const value = String(stageName || "").trim().toLowerCase();
@@ -49,9 +43,37 @@ function stageOrderIndex(stageName) {
   return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
 }
 
+function parseStageOrder(value, fallback = Number.MAX_SAFE_INTEGER) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function stageNameToEvaluationKey(stageName) {
+  const value = normalizeStageName(stageName).toLowerCase();
+  if (value === "idea") return "idea";
+  if (value === "abstract") return "abstract";
+  if (value === "zeroth review") return "zeroth_review";
+  if (value === "first review") return "first_review";
+  if (value === "second review") return "second_review";
+  if (value === "final review") return "final_review";
+  return "";
+}
+
+function normalizeEvaluationKey(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "idea" || normalized === "idea approval") return "idea";
+  if (normalized === "abstract" || normalized === "abstract submission") return "abstract";
+  if (normalized === "zeroth review" || normalized === "0th review" || normalized === "proposal" || normalized === "srs") return "zeroth_review";
+  if (normalized === "first review" || normalized === "1st review" || normalized === "report") return "first_review";
+  if (normalized === "second review" || normalized === "2nd review" || normalized === "presentation") return "second_review";
+  if (normalized === "final review" || normalized === "final_report") return "final_review";
+  return normalized;
+}
+
 function toDisplayStatus(status) {
   if (status === STATUS.ACTIVE) return "Active";
   if (status === STATUS.COMPLETED) return "Completed";
+  if (status === STATUS.PENDING) return "Pending";
   if (status === STATUS.LOCKED) return "Locked";
   return "Inactive";
 }
@@ -66,48 +88,83 @@ function toTimePart(iso, fallback = "") {
   return iso.slice(11, 16) || fallback;
 }
 
-function isUuid(value) {
-  return typeof value === "string"
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+function isEvaluationStageName(stageName) {
+  return Boolean(stageNameToEvaluationKey(stageName));
 }
 
-function stageNameFromDocumentType(documentType) {
-  const value = String(documentType || "").trim().toLowerCase();
-  if (value === "abstract") return "Abstract";
-  if (value === "proposal" || value === "srs") return "Zeroth Review";
-  if (value === "report") return "First Review";
-  if (value === "presentation") return "Second Review";
-  if (value === "final_report") return "Final Review";
-  return "";
+function resolveStatusValue(row, evaluationCompleted) {
+  if (row?.is_locked) return evaluationCompleted ? STATUS.COMPLETED : STATUS.PENDING;
+  if (row?.is_completed) return STATUS.COMPLETED;
+  if (row?.is_active) return STATUS.ACTIVE;
+  return STATUS.INACTIVE;
 }
 
-async function fetchSubmissionCountsByStage(stageRows, classId) {
+async function fetchCoordinatorEvaluationProgressByStage(stageRows, classId) {
   if (!Array.isArray(stageRows) || stageRows.length === 0 || !classId) return {};
 
-  const stageIdByName = new Map(
-    stageRows.map((row) => [normalizeStageName(row?.stage_name).toLowerCase(), row?.id]).filter((item) => item[1])
-  );
-  if (stageIdByName.size === 0) return {};
+  const stageRowsByKey = new Map();
+  stageRows.forEach((row) => {
+    const key = stageNameToEvaluationKey(row?.stage_name);
+    if (!key || !row?.id) return;
+    if (!stageRowsByKey.has(key)) stageRowsByKey.set(key, []);
+    stageRowsByKey.get(key).push(row.id);
+  });
+  if (stageRowsByKey.size === 0) return {};
 
-  const { data, error } = await supabase
-    .from("documents")
-    .select("id, document_type, projects!inner(class_id)")
+  const { data: coordinatorRows, error: coordinatorError } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("class_id", classId)
+    .eq("is_coordinator", true);
+
+  if (coordinatorError) return {};
+  const coordinatorIds = new Set((coordinatorRows || []).map((row) => row.id).filter(Boolean));
+  if (coordinatorIds.size === 0) return {};
+
+  const { data: evaluationRows, error: evaluationError } = await supabase
+    .from("evaluations")
+    .select("project_id, evaluation_type, phase, evaluator_id, guide_id, obtained_marks, max_marks, projects!inner(class_id)")
     .eq("projects.class_id", classId);
 
-  if (error) return {};
+  if (evaluationError) return {};
 
-  const counts = {};
-  (data || []).forEach((row) => {
-    const stageName = stageNameFromDocumentType(row?.document_type);
-    if (!stageName) return;
-    const stageId = stageIdByName.get(stageName.toLowerCase());
-    if (!stageId) return;
-    counts[stageId] = (counts[stageId] || 0) + 1;
+  const progressSets = {};
+  (evaluationRows || []).forEach((row) => {
+    const evaluatorId = row?.evaluator_id || row?.guide_id;
+    if (!coordinatorIds.has(evaluatorId)) return;
+    if (row?.obtained_marks == null || row?.max_marks == null) return;
+
+    const stageKey = normalizeEvaluationKey(row?.phase || row?.evaluation_type);
+    const stageIds = stageRowsByKey.get(stageKey) || [];
+    if (stageIds.length === 0) return;
+
+    stageIds.forEach((stageId) => {
+      if (!progressSets[stageId]) {
+        progressSets[stageId] = new Set();
+      }
+      if (row?.project_id) {
+        progressSets[stageId].add(row.project_id);
+      }
+    });
   });
 
-  submissionCountStrategy = { table: "documents", idColumn: "document_type", classColumn: "projects.class_id" };
-  submissionCountStrategyChecked = true;
+  const counts = {};
+  Object.keys(progressSets).forEach((stageId) => {
+    counts[stageId] = progressSets[stageId].size;
+  });
   return counts;
+}
+
+async function fetchProjectCount(classId) {
+  if (!classId) return 0;
+
+  const { count, error } = await supabase
+    .from("projects")
+    .select("id", { count: "exact", head: true })
+    .eq("class_id", classId);
+
+  if (error) return 0;
+  return count || 0;
 }
 
 export default function AdminReviewManagement() {
@@ -127,12 +184,18 @@ export default function AdminReviewManagement() {
   const [deadlineDate, setDeadlineDate] = useState("");
   const [deadlineTime, setDeadlineTime] = useState("");
   const [savingDeadline, setSavingDeadline] = useState(false);
+  const [stageNameModalOpen, setStageNameModalOpen] = useState(false);
+  const [stageNameInput, setStageNameInput] = useState("");
+  const [editingNameStageId, setEditingNameStageId] = useState("");
+  const [savingStageName, setSavingStageName] = useState(false);
+  const [deletingStageId, setDeletingStageId] = useState("");
+  const [savingDeleteStage, setSavingDeleteStage] = useState(false);
 
   const fetchClasses = useCallback(async () => {
     const { data, error: fetchError } = await supabase
       .from("classes")
-      .select("id, class_name")
-      .order("class_name", { ascending: true });
+      .select("id, class_section")
+      .order("class_section", { ascending: true });
 
     if (fetchError) {
       throw new Error(fetchError.message || "Failed to load classes.");
@@ -140,7 +203,7 @@ export default function AdminReviewManagement() {
 
     const normalized = (data || []).map((row) => ({
       id: row.id,
-      name: row.class_name || String(row.id),
+      name: row.class_section || String(row.id),
     }));
     setClasses(normalized);
     return normalized;
@@ -163,9 +226,10 @@ export default function AdminReviewManagement() {
     if (existingRows.length > 0) return;
     const missing = [...STAGE_ORDER];
 
-    const inserts = missing.map((stageName) => ({
+    const inserts = missing.map((stageName, index) => ({
       class_id: classId,
       stage_name: stageName,
+      stage_order: index + 1,
       coordinator_deadline: null,
       is_active: false,
       is_completed: false,
@@ -191,11 +255,25 @@ export default function AdminReviewManagement() {
 
     await ensureDefaultStages(classId, { silentRls: true });
 
-    const { data, error: fetchError } = await supabase
-      .from("review_stages")
-      .select("id, stage_name, class_id, coordinator_deadline, is_active, is_completed, is_locked")
-      .eq("class_id", classId)
-      .order("stage_name", { ascending: true });
+    let data = null;
+    let fetchError = null;
+    {
+      const result = await supabase
+        .from("review_stages")
+        .select("id, stage_name, stage_order, class_id, coordinator_deadline, is_active, is_completed, is_locked")
+        .eq("class_id", classId);
+      data = result.data;
+      fetchError = result.error;
+    }
+
+    if (fetchError && /stage_order/i.test(String(fetchError.message || ""))) {
+      const fallbackResult = await supabase
+        .from("review_stages")
+        .select("id, stage_name, class_id, coordinator_deadline, is_active, is_completed, is_locked")
+        .eq("class_id", classId);
+      data = fallbackResult.data;
+      fetchError = fallbackResult.error;
+    }
 
     if (fetchError) {
       if (/coordinator_deadline/i.test(String(fetchError.message || ""))) {
@@ -205,6 +283,8 @@ export default function AdminReviewManagement() {
     }
 
     const rows = [...(data || [])].sort((a, b) => {
+      const byExplicitOrder = parseStageOrder(a.stage_order) - parseStageOrder(b.stage_order);
+      if (byExplicitOrder !== 0) return byExplicitOrder;
       const byOrder = stageOrderIndex(a.stage_name) - stageOrderIndex(b.stage_name);
       if (byOrder !== 0) return byOrder;
       return String(a.stage_name || "").localeCompare(String(b.stage_name || ""));
@@ -224,17 +304,33 @@ export default function AdminReviewManagement() {
       return;
     }
 
-    const submissionCounts = await fetchSubmissionCountsByStage(rows, classId);
+    const [coordinatorEvaluationCounts, classProjectCount] = await Promise.all([
+      fetchCoordinatorEvaluationProgressByStage(rows, classId),
+      fetchProjectCount(classId),
+    ]);
 
-    const mappedStages = rows.map((row) => ({
-      id: row.id,
-      name: normalizeStageName(row.stage_name),
-      className: row.class_id,
-      deadline: row.coordinator_deadline || null,
-      status: toDisplayStatus(normalizeStatusFromFlags(row)),
-      statusValue: normalizeStatusFromFlags(row),
-      submissions: submissionCounts[row.id] || 0,
-    }));
+    const mappedStages = rows.map((row) => {
+      const normalizedName = normalizeStageName(row.stage_name);
+      const shouldTrackEvaluation = isEvaluationStageName(normalizedName);
+      const completedOnTime = shouldTrackEvaluation
+        ? (classProjectCount > 0 && (coordinatorEvaluationCounts[row.id] || 0) >= classProjectCount)
+        : Boolean(row.is_completed);
+      const statusValue = shouldTrackEvaluation
+        ? (completedOnTime ? STATUS.COMPLETED : STATUS.PENDING)
+        : resolveStatusValue(row, completedOnTime);
+
+      return {
+        id: row.id,
+        order: parseStageOrder(row.stage_order, rows.findIndex((item) => item.id === row.id) + 1),
+        name: normalizedName,
+        className: row.class_id,
+        deadline: row.coordinator_deadline || null,
+        status: toDisplayStatus(statusValue),
+        statusValue,
+        isLocked: Boolean(row.is_locked),
+        submissions: coordinatorEvaluationCounts[row.id] || 0,
+      };
+    });
 
     setStages(mappedStages);
   }, [ensureDefaultStages]);
@@ -272,23 +368,100 @@ export default function AdminReviewManagement() {
     const nowIso = new Date().toISOString();
     const { data, error: fetchError } = await supabase
       .from("review_stages")
-      .select("id")
+      .select("id, stage_name, coordinator_deadline, is_completed")
       .eq("class_id", classId)
-      .eq("is_active", true)
-      .eq("is_completed", false)
+      .eq("is_locked", false)
       .not("coordinator_deadline", "is", null)
       .lt("coordinator_deadline", nowIso);
+
+    if (fetchError || !data || data.length === 0) return false;
+
+    const [classProjectCount, coordinatorEvaluationCounts] = await Promise.all([
+      fetchProjectCount(classId),
+      fetchCoordinatorEvaluationProgressByStage(data, classId),
+    ]);
+
+    for (const row of data) {
+      const shouldTrackEvaluation = isEvaluationStageName(row.stage_name);
+      const completedOnTime = shouldTrackEvaluation
+        ? (classProjectCount > 0 && (coordinatorEvaluationCounts[row.id] || 0) >= classProjectCount)
+        : Boolean(row.is_completed);
+
+      const { error: updateError } = await supabase
+        .from("review_stages")
+        .update({
+          is_locked: true,
+          is_active: false,
+          is_completed: completedOnTime,
+          coordinator_deadline: null,
+        })
+        .eq("id", row.id)
+        .eq("class_id", classId);
+
+      if (updateError) return false;
+    }
+
+    return true;
+  }, []);
+
+  const clearDeadlinesForLockedStages = useCallback(async (classId) => {
+    if (!classId) return false;
+
+    const { data, error: fetchError } = await supabase
+      .from("review_stages")
+      .select("id")
+      .eq("class_id", classId)
+      .eq("is_locked", true)
+      .not("coordinator_deadline", "is", null);
 
     if (fetchError || !data || data.length === 0) return false;
 
     const ids = data.map((row) => row.id);
     const { error: updateError } = await supabase
       .from("review_stages")
-      .update({ is_locked: true, is_active: false, is_completed: true })
-      .in("id", ids);
+      .update({ coordinator_deadline: null })
+      .in("id", ids)
+      .eq("class_id", classId);
 
     if (updateError) return false;
     return true;
+  }, []);
+
+  const reconcileStageCompletionFlags = useCallback(async (classId) => {
+    if (!classId) return false;
+
+    const { data: rows, error: fetchError } = await supabase
+      .from("review_stages")
+      .select("id, stage_name, class_id, coordinator_deadline, is_locked, is_completed")
+      .eq("class_id", classId);
+
+    if (fetchError || !rows || rows.length === 0) return false;
+
+    const [classProjectCount, coordinatorEvaluationCounts] = await Promise.all([
+      fetchProjectCount(classId),
+      fetchCoordinatorEvaluationProgressByStage(rows, classId),
+    ]);
+
+    let didChange = false;
+    for (const row of rows) {
+      const shouldTrackEvaluation = isEvaluationStageName(row.stage_name);
+      const desiredCompleted = shouldTrackEvaluation
+        ? (classProjectCount > 0 && (coordinatorEvaluationCounts[row.id] || 0) >= classProjectCount)
+        : false;
+
+      if (Boolean(row.is_completed) === desiredCompleted) continue;
+
+      const { error: updateError } = await supabase
+        .from("review_stages")
+        .update({ is_completed: desiredCompleted })
+        .eq("id", row.id)
+        .eq("class_id", classId);
+
+      if (updateError) continue;
+      didChange = true;
+    }
+
+    return didChange;
   }, []);
 
   const refreshData = useCallback(async (classRef, options = {}) => {
@@ -320,10 +493,12 @@ export default function AdminReviewManagement() {
       if (effectiveClassId !== selectedClassId) setSelectedClassId(effectiveClassId);
 
       const didAutoLock = await autoLockExpiredStages(effectiveClassId);
+      const didClearLockedDeadlines = await clearDeadlinesForLockedStages(effectiveClassId);
+      const didReconcile = await reconcileStageCompletionFlags(effectiveClassId);
       if (latestRefreshTokenRef.current !== refreshToken) return;
       await fetchStages(effectiveClassId);
       if (latestRefreshTokenRef.current !== refreshToken) return;
-      if (didAutoLock) {
+      if (didAutoLock || didReconcile || didClearLockedDeadlines) {
         await fetchStages(effectiveClassId);
         if (latestRefreshTokenRef.current !== refreshToken) return;
       }
@@ -334,11 +509,11 @@ export default function AdminReviewManagement() {
     } finally {
       if (!keepLoading && latestRefreshTokenRef.current === refreshToken) setLoading(false);
     }
-  }, [autoLockExpiredStages, fetchClasses, fetchStages, selectedClassId, selectedClassName]);
+  }, [autoLockExpiredStages, clearDeadlinesForLockedStages, fetchClasses, fetchStages, reconcileStageCompletionFlags, selectedClassId, selectedClassName]);
 
   useEffect(() => {
     const classParam = searchParams.get("class");
-    refreshData(classParam || selectedClassId || selectedClassName || "");
+    refreshData(classParam || "");
   }, [refreshData, searchParams]);
 
   useEffect(() => {
@@ -355,6 +530,8 @@ export default function AdminReviewManagement() {
       setError("");
       try {
         await autoLockExpiredStages(selectedClassId);
+        await clearDeadlinesForLockedStages(selectedClassId);
+        await reconcileStageCompletionFlags(selectedClassId);
         if (latestRefreshTokenRef.current !== refreshToken) return;
         await fetchStages(selectedClassId);
         if (latestRefreshTokenRef.current !== refreshToken) return;
@@ -368,7 +545,7 @@ export default function AdminReviewManagement() {
     };
 
     run();
-  }, [autoLockExpiredStages, fetchStages, selectedClassId]);
+  }, [autoLockExpiredStages, clearDeadlinesForLockedStages, fetchStages, reconcileStageCompletionFlags, selectedClassId]);
 
   useEffect(() => {
     resetDeadlineModal();
@@ -379,13 +556,15 @@ export default function AdminReviewManagement() {
 
     const timer = setInterval(async () => {
       const didAutoLock = await autoLockExpiredStages(selectedClassId);
-      if (didAutoLock) {
+      const didClearLockedDeadlines = await clearDeadlinesForLockedStages(selectedClassId);
+      const didReconcile = await reconcileStageCompletionFlags(selectedClassId);
+      if (didAutoLock || didReconcile || didClearLockedDeadlines) {
         await fetchStages(selectedClassId);
       }
     }, 60000);
 
     return () => clearInterval(timer);
-  }, [autoLockExpiredStages, fetchStages, selectedClassId]);
+  }, [autoLockExpiredStages, clearDeadlinesForLockedStages, fetchStages, reconcileStageCompletionFlags, selectedClassId]);
 
   useEffect(() => {
     const channel = supabase
@@ -396,8 +575,32 @@ export default function AdminReviewManagement() {
         async (payload) => {
           const changedClass = payload.new?.class_id || payload.old?.class_id || "";
           if (!selectedClassId || changedClass === selectedClassId || !changedClass) {
-            await refreshData(selectedClassName || "", { keepLoading: true });
+            await refreshData(selectedClassId || selectedClassName || "", { keepLoading: true });
           }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "evaluations" },
+        async () => {
+          if (!selectedClassId) return;
+          await refreshData(selectedClassId, { keepLoading: true });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "documents" },
+        async () => {
+          if (!selectedClassId) return;
+          await refreshData(selectedClassId, { keepLoading: true });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "projects" },
+        async () => {
+          if (!selectedClassId) return;
+          await refreshData(selectedClassId, { keepLoading: true });
         }
       )
       .subscribe();
@@ -411,55 +614,49 @@ export default function AdminReviewManagement() {
     const totalStages = stages.length;
     const activeStage = stages.find((stage) => stage.statusValue === STATUS.ACTIVE)?.name || "-";
     const completedStages = stages.filter((stage) => stage.statusValue === STATUS.COMPLETED).length;
-    const inactiveStages = stages.filter((stage) => stage.statusValue === STATUS.INACTIVE).length;
+    const inactiveStages = stages.filter((stage) => stage.statusValue === STATUS.INACTIVE || stage.statusValue === STATUS.PENDING).length;
     return { totalStages, activeStage, completedStages, inactiveStages };
   }, [stages]);
 
-  const setSingleStageStatus = useCallback(async (stageId, nextStatus) => {
-    let effectiveStageId = stageId;
-    if (!isUuid(effectiveStageId)) {
-      const stage = stages.find((item) => item.id === stageId);
-      effectiveStageId = await resolveStageId(stage);
-    }
-
-    const payload = {
-      is_active: nextStatus === STATUS.ACTIVE,
-      is_completed: nextStatus === STATUS.COMPLETED,
-      is_locked: nextStatus === STATUS.LOCKED,
-    };
-    const { data: updatedRows, error: updateError } = await supabase
-      .from("review_stages")
-      .update(payload)
-      .select("id")
-      .eq("id", effectiveStageId)
-      .eq("class_id", selectedClassId);
-
-    if (updateError) {
-      throw new Error(updateError.message || "Failed to update stage status.");
-    }
-    if (!updatedRows || updatedRows.length === 0) {
-      throw new Error("Review stage update was not applied.");
-    }
-  }, [resolveStageId, selectedClassId, stages]);
-
-  const activateStage = async (stageId) => {
+  const lockStage = async (stageId) => {
     const stage = stages.find((item) => item.id === stageId);
-    if (!stage || !selectedClassId) return;
-    if (!stage.deadline && stage.statusValue !== STATUS.ACTIVE) {
-      setError("Set a deadline before activating this stage.");
-      return;
-    }
-    if (stage.statusValue !== STATUS.INACTIVE && stage.statusValue !== STATUS.ACTIVE) return;
+    if (!stage || stage.isLocked) return;
 
     setActionBusyId(stageId);
     setError("");
     try {
       const effectiveStageId = await resolveStageId(stage);
-      if (stage.statusValue === STATUS.ACTIVE) {
-        await setSingleStageStatus(effectiveStageId, STATUS.INACTIVE);
-        await fetchStages(selectedClassId);
-        return;
+      const { error: updateError } = await supabase
+        .from("review_stages")
+        .update({
+          is_locked: true,
+          is_active: false,
+          coordinator_deadline: null,
+        })
+        .eq("id", effectiveStageId)
+        .eq("class_id", selectedClassId);
+
+      if (updateError) {
+        throw new Error(updateError.message || "Failed to lock stage.");
       }
+
+      await fetchStages(selectedClassId);
+      emitAdminDataUpdated();
+    } catch (err) {
+      setError(err.message || "Failed to lock stage.");
+    } finally {
+      setActionBusyId("");
+    }
+  };
+
+  const unlockStage = async (stageId) => {
+    const stage = stages.find((item) => item.id === stageId);
+    if (!stage || !stage.isLocked) return;
+
+    setActionBusyId(stageId);
+    setError("");
+    try {
+      const effectiveStageId = await resolveStageId(stage);
 
       const { error: deactivateError } = await supabase
         .from("review_stages")
@@ -472,90 +669,22 @@ export default function AdminReviewManagement() {
         throw new Error(deactivateError.message || "Failed to reset active stage.");
       }
 
-      await setSingleStageStatus(effectiveStageId, STATUS.ACTIVE);
-      await fetchStages(selectedClassId);
-    } catch (err) {
-      setError(err.message || "Failed to activate stage.");
-    } finally {
-      setActionBusyId("");
-    }
-  };
+      const { error: unlockError } = await supabase
+        .from("review_stages")
+        .update({
+          is_locked: false,
+          is_active: true,
+          is_completed: false,
+        })
+        .eq("id", effectiveStageId)
+        .eq("class_id", selectedClassId);
 
-  const completeStage = async (stageId) => {
-    const currentIndex = stages.findIndex((item) => item.id === stageId);
-    const stage = stages[currentIndex];
-    if (!stage || !selectedClassId) return;
-    if (stage.statusValue !== STATUS.ACTIVE && stage.statusValue !== STATUS.COMPLETED) {
-      return;
-    }
-
-    setActionBusyId(stageId);
-    setError("");
-    try {
-      const effectiveStageId = await resolveStageId(stage);
-      if (stage.statusValue === STATUS.COMPLETED) {
-        await setSingleStageStatus(effectiveStageId, STATUS.INACTIVE);
-        await fetchStages(selectedClassId);
-        return;
-      }
-
-      await setSingleStageStatus(effectiveStageId, STATUS.COMPLETED);
-
-      const nextStage = stages
-        .slice(currentIndex + 1)
-        .find((item) => item.statusValue === STATUS.INACTIVE);
-
-      if (nextStage) {
-        const effectiveNextStageId = await resolveStageId(nextStage);
-        const { error: deactivateError } = await supabase
-          .from("review_stages")
-          .update({ is_active: false })
-          .eq("class_id", selectedClassId)
-          .eq("is_active", true)
-          .neq("id", effectiveNextStageId);
-
-        if (deactivateError) {
-          throw new Error(deactivateError.message || "Failed to reset active stage.");
-        }
-
-        await setSingleStageStatus(effectiveNextStageId, STATUS.ACTIVE);
+      if (unlockError) {
+        throw new Error(unlockError.message || "Failed to unlock stage.");
       }
 
       await fetchStages(selectedClassId);
-    } catch (err) {
-      setError(err.message || "Failed to complete stage.");
-    } finally {
-      setActionBusyId("");
-    }
-  };
-
-  const lockStage = async (stageId) => {
-    const stage = stages.find((item) => item.id === stageId);
-    if (!stage || stage.statusValue === STATUS.LOCKED || stage.statusValue === STATUS.COMPLETED) return;
-
-    setActionBusyId(stageId);
-    setError("");
-    try {
-      const effectiveStageId = await resolveStageId(stage);
-      await setSingleStageStatus(effectiveStageId, STATUS.LOCKED);
-      await fetchStages(selectedClassId);
-    } catch (err) {
-      setError(err.message || "Failed to lock stage.");
-    } finally {
-      setActionBusyId("");
-    }
-  };
-
-  const unlockStage = async (stageId) => {
-    const stage = stages.find((item) => item.id === stageId);
-    if (!stage || stage.statusValue !== STATUS.LOCKED) return;
-
-    setActionBusyId(stageId);
-    setError("");
-    try {
-      const effectiveStageId = await resolveStageId(stage);
-      await setSingleStageStatus(effectiveStageId, STATUS.INACTIVE);
-      await fetchStages(selectedClassId);
+      emitAdminDataUpdated();
     } catch (err) {
       setError(err.message || "Failed to unlock stage.");
     } finally {
@@ -566,51 +695,114 @@ export default function AdminReviewManagement() {
   const toggleLockStage = async (stageId) => {
     const stage = stages.find((item) => item.id === stageId);
     if (!stage) return;
-    if (stage.statusValue === STATUS.COMPLETED) return;
-    if (stage.statusValue === STATUS.LOCKED) {
+    if (stage.isLocked) {
       await unlockStage(stageId);
       return;
     }
     await lockStage(stageId);
   };
 
-  const renameStage = async (stageId) => {
+  const openAddStageModal = () => {
+    setEditingNameStageId("");
+    setStageNameInput("");
+    setStageNameModalOpen(true);
+  };
+
+  const openRenameStageModal = (stageId) => {
     const stage = stages.find((item) => item.id === stageId);
-    if (!stage || !selectedClassId) return;
+    if (!stage) return;
+    setEditingNameStageId(stageId);
+    setStageNameInput(stage.name || "");
+    setStageNameModalOpen(true);
+  };
 
-    const nextNameRaw = window.prompt("Enter new stage name", stage.name);
-    const nextName = String(nextNameRaw || "").trim();
-    if (!nextName || nextName === stage.name) return;
+  const closeStageNameModal = () => {
+    setStageNameModalOpen(false);
+    setEditingNameStageId("");
+    setStageNameInput("");
+  };
 
-    setActionBusyId(stageId);
+  const submitStageName = async () => {
+    if (!selectedClassId) return;
+    const nextName = String(stageNameInput || "").trim();
+    if (!nextName) {
+      setError("Stage name is required.");
+      return;
+    }
+
+      const duplicate = stages.some((stage) => {
+      if (editingNameStageId && stage.id === editingNameStageId) return false;
+      return normalizeStageName(stage.name).toLowerCase() === normalizeStageName(nextName).toLowerCase();
+    });
+    if (duplicate) {
+      setError("A stage with this name already exists.");
+      return;
+    }
+
+    setSavingStageName(true);
     setError("");
     try {
-      const effectiveStageId = await resolveStageId(stage);
-      const { error: updateError } = await supabase
-        .from("review_stages")
-        .update({ stage_name: nextName })
-        .eq("id", effectiveStageId)
-        .eq("class_id", selectedClassId);
+      if (editingNameStageId) {
+        const stage = stages.find((item) => item.id === editingNameStageId);
+        if (!stage) throw new Error("Stage not found.");
+        const effectiveStageId = await resolveStageId(stage);
+        const { error: updateError } = await supabase
+          .from("review_stages")
+          .update({ stage_name: nextName })
+          .eq("id", effectiveStageId)
+          .eq("class_id", selectedClassId);
 
-      if (updateError) {
-        throw new Error(updateError.message || "Failed to rename stage.");
+        if (updateError) {
+          throw new Error(updateError.message || "Failed to edit stage.");
+        }
+      } else {
+        const { error: insertError } = await supabase
+          .from("review_stages")
+          .insert({
+            class_id: selectedClassId,
+            stage_name: nextName,
+            stage_order: stages.length + 1,
+            coordinator_deadline: null,
+            is_active: false,
+            is_completed: false,
+            is_locked: false,
+          });
+
+        if (insertError) {
+          throw new Error(insertError.message || "Failed to add stage.");
+        }
       }
 
       await fetchStages(selectedClassId);
+      closeStageNameModal();
+      emitAdminDataUpdated();
     } catch (err) {
-      setError(err.message || "Failed to rename stage.");
+      setError(err.message || "Failed to save stage.");
     } finally {
-      setActionBusyId("");
+      setSavingStageName(false);
     }
   };
 
-  const deleteStage = async (stageId) => {
-    const stage = stages.find((item) => item.id === stageId);
-    if (!stage || !selectedClassId) return;
-    const ok = window.confirm(`Remove stage "${stage.name}"?`);
-    if (!ok) return;
+  const openDeleteStageModal = (stageId) => {
+    setDeletingStageId(stageId || "");
+  };
 
-    setActionBusyId(stageId);
+  const closeDeleteStageModal = () => {
+    if (savingDeleteStage) return;
+    setDeletingStageId("");
+  };
+
+  const confirmDeleteStage = async () => {
+    if (!selectedClassId || !deletingStageId) return;
+
+    const stage = stages.find((item) => item.id === deletingStageId);
+    if (!stage) {
+      closeDeleteStageModal();
+      return;
+    }
+
+    setSavingDeleteStage(true);
+    setActionBusyId(stage.id);
     setError("");
     try {
       const effectiveStageId = await resolveStageId(stage);
@@ -621,18 +813,82 @@ export default function AdminReviewManagement() {
         .eq("class_id", selectedClassId);
 
       if (deleteError) {
-        throw new Error(deleteError.message || "Failed to remove stage.");
+        throw new Error(deleteError.message || "Failed to delete stage.");
       }
 
       await fetchStages(selectedClassId);
+      setDeletingStageId("");
+      emitAdminDataUpdated();
     } catch (err) {
-      setError(err.message || "Failed to remove stage.");
+      setError(err.message || "Failed to delete stage.");
+    } finally {
+      setSavingDeleteStage(false);
+      setActionBusyId("");
+    }
+  };
+
+  const moveStage = async (stageId, direction) => {
+    if (!selectedClassId) return;
+    const currentIndex = stages.findIndex((item) => item.id === stageId);
+    if (currentIndex === -1) return;
+
+    const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= stages.length) return;
+
+    const current = stages[currentIndex];
+    const target = stages[targetIndex];
+    setActionBusyId(stageId);
+    setError("");
+    try {
+      const currentOrder = parseStageOrder(current.order, currentIndex + 1);
+      const targetOrder = parseStageOrder(target.order, targetIndex + 1);
+
+      const { error: currentErr } = await supabase
+        .from("review_stages")
+        .update({ stage_order: targetOrder })
+        .eq("id", current.id)
+        .eq("class_id", selectedClassId);
+      if (currentErr) {
+        if (/stage_order/i.test(String(currentErr.message || ""))) {
+          throw new Error('The "stage_order" column is missing in "review_stages".');
+        }
+        throw new Error(currentErr.message || "Failed to move stage.");
+      }
+
+      const { error: targetErr } = await supabase
+        .from("review_stages")
+        .update({ stage_order: currentOrder })
+        .eq("id", target.id)
+        .eq("class_id", selectedClassId);
+      if (targetErr) {
+        if (/stage_order/i.test(String(targetErr.message || ""))) {
+          throw new Error('The "stage_order" column is missing in "review_stages".');
+        }
+        throw new Error(targetErr.message || "Failed to move stage.");
+      }
+
+      await fetchStages(selectedClassId);
+      emitAdminDataUpdated();
+    } catch (err) {
+      setError(err.message || "Failed to reorder stages.");
     } finally {
       setActionBusyId("");
     }
   };
 
+  const moveStageUp = async (stageId) => {
+    await moveStage(stageId, "up");
+  };
+
+  const moveStageDown = async (stageId) => {
+    await moveStage(stageId, "down");
+  };
+
   const handleOpenDeadlineModal = (stage) => {
+    if (stage?.isLocked) {
+      setError("Unlock this stage before setting deadline.");
+      return;
+    }
     setEditingStage(stage);
     setDeadlineDate(toDatePart(stage.deadline));
     setDeadlineTime(toTimePart(stage.deadline));
@@ -652,12 +908,15 @@ export default function AdminReviewManagement() {
 
     try {
       const stage = stages.find((item) => item.id === stageId) || editingStage;
+      if (stage?.isLocked) {
+        throw new Error("Unlock this stage before setting deadline.");
+      }
       const deadlineDate = new Date(deadlineIso);
       const isFutureDeadline = !Number.isNaN(deadlineDate.getTime()) && deadlineDate.getTime() > Date.now();
       const updatePayload = { coordinator_deadline: deadlineIso };
       if (isFutureDeadline) {
         updatePayload.is_locked = false;
-        if (stage?.statusValue === STATUS.LOCKED) {
+        if (stage?.statusValue === STATUS.LOCKED || stage?.statusValue === STATUS.PENDING) {
           updatePayload.is_completed = false;
           updatePayload.is_active = false;
         }
@@ -680,6 +939,7 @@ export default function AdminReviewManagement() {
       await autoLockExpiredStages(selectedClassId);
       await fetchStages(selectedClassId);
       resetDeadlineModal();
+      emitAdminDataUpdated();
     } catch (err) {
       setError(err.message || "Failed to save deadline.");
       setSavingDeadline(false);
@@ -709,6 +969,10 @@ export default function AdminReviewManagement() {
     }
     if (itemId === "review-management") {
       navigate("/admin/review-management");
+      return;
+    }
+    if (itemId === "rubrics-management") {
+      navigate("/admin/rubrics");
     }
   };
 
@@ -754,6 +1018,14 @@ export default function AdminReviewManagement() {
                   <option key={classItem.id} value={classItem.id}>{classItem.name}</option>
                 ))}
               </select>
+              <button
+                type="button"
+                onClick={openAddStageModal}
+                disabled={actionBusyId !== ""}
+                className="px-4 py-2.5 rounded-xl bg-teal-600 text-white text-sm font-semibold hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Add Stage
+              </button>
             </div>
           </section>
 
@@ -780,11 +1052,11 @@ export default function AdminReviewManagement() {
             simplifiedActions={false}
             actionBusyId={actionBusyId}
             onEditDeadline={handleOpenDeadlineModal}
-            onActivateStage={activateStage}
-            onCompleteStage={completeStage}
             onToggleLockStage={toggleLockStage}
-            onRenameStage={renameStage}
-            onDeleteStage={deleteStage}
+            onRenameStage={openRenameStageModal}
+            onDeleteStage={openDeleteStageModal}
+            onMoveStageUp={moveStageUp}
+            onMoveStageDown={moveStageDown}
           />
 
           <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
@@ -794,6 +1066,82 @@ export default function AdminReviewManagement() {
             <StageStatCard title="Inactive Stages" value={summary.inactiveStages} icon="upcoming" borderClass="border-t-gray-400" />
           </section>
       </div>
+
+      <Modal
+        isOpen={stageNameModalOpen}
+        onClose={closeStageNameModal}
+        title={editingNameStageId ? "Edit Stage Name" : "Add New Stage"}
+        maxWidth="max-w-md"
+        disableClose={savingStageName}
+      >
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm text-slate-600 mb-1.5">Stage Name</label>
+            <input
+              type="text"
+              value={stageNameInput}
+              onChange={(event) => setStageNameInput(event.target.value)}
+              placeholder="Enter stage name"
+              className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-teal-500/40"
+              autoFocus
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={closeStageNameModal}
+              disabled={savingStageName}
+              className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 font-medium hover:bg-gray-200 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={submitStageName}
+              disabled={savingStageName || !stageNameInput.trim()}
+              className="px-4 py-2 rounded-lg bg-teal-600 text-white font-semibold hover:bg-teal-700 disabled:opacity-60"
+            >
+              {savingStageName ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(deletingStageId)}
+        onClose={closeDeleteStageModal}
+        title="Delete Stage"
+        maxWidth="max-w-md"
+        disableClose={savingDeleteStage}
+      >
+        <div className="p-6 space-y-4">
+          <p className="text-sm text-slate-700">
+            Are you sure you want to delete{" "}
+            <span className="font-semibold">
+              {stages.find((stage) => stage.id === deletingStageId)?.name || "this stage"}
+            </span>
+            ?
+          </p>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={closeDeleteStageModal}
+              disabled={savingDeleteStage}
+              className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 font-medium hover:bg-gray-200 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmDeleteStage}
+              disabled={savingDeleteStage}
+              className="px-4 py-2 rounded-lg bg-rose-600 text-white font-semibold hover:bg-rose-700 disabled:opacity-60"
+            >
+              {savingDeleteStage ? "Deleting..." : "Delete"}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <DeadlineModal
         stage={editingStage}

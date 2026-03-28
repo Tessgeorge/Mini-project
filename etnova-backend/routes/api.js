@@ -7,6 +7,7 @@ import {
   // Project management
   createProject,
   getProjects,
+  getMyReviewerAccess,
   getProjectById,
   updateProject,
   deleteProject,
@@ -58,6 +59,17 @@ import {
   getMentorIdeas,
   reviewProjectIdea,
 } from '../controllers/ideaController.js';
+import {
+  getAdminClassList,
+  getAdminFinalMarks,
+  getMyPublishedResult,
+  getStageMarksBreakdown,
+  listRubrics,
+  publishResults,
+  removeRubric,
+  saveStageRubrics,
+  submitStageMarks,
+} from '../controllers/rubricController.js';
 import { authenticateUser, requireRole, requireCoordinator, canAccessProject } from '../middleware/supabaseAuth.js';
 
 const router = express.Router();
@@ -73,6 +85,7 @@ router.get('/projects/public/pending', authenticateUser, requireRole(['student']
 // Student routes
 router.post('/projects', authenticateUser, requireRole(['student']), createProject);
 router.get('/projects', authenticateUser, getProjects); // Get projects based on user role
+router.get('/reviewer-access/me', authenticateUser, requireRole(['mentor']), getMyReviewerAccess);
 router.get('/projects/:id', authenticateUser, canAccessProject(), getProjectById);
 router.put('/projects/:id', authenticateUser, requireRole(['student']), canAccessProject(), updateProject);
 router.delete('/projects/:id', authenticateUser, requireRole(['student', 'admin']), canAccessProject({ studentMustBeLeader: true }), deleteProject);
@@ -115,6 +128,9 @@ router.put('/notifications/:id/read', authenticateUser, markNotificationRead);
 router.post('/projects/:id/evaluations', authenticateUser, requireRole(['mentor']), canAccessProject(), createEvaluation);
 router.get('/projects/:id/evaluations', authenticateUser, canAccessProject(), getEvaluations);
 router.put('/evaluations/:id', authenticateUser, requireRole(['mentor']), updateEvaluation);
+router.get('/evaluation-rubrics', authenticateUser, requireRole(['admin', 'mentor']), listRubrics);
+router.get('/projects/:id/rubric-marks/:stage', authenticateUser, requireRole(['mentor']), canAccessProject(), getStageMarksBreakdown);
+router.put('/projects/:id/rubric-marks/:stage', authenticateUser, requireRole(['mentor']), canAccessProject(), submitStageMarks);
 
 // Individual student marks (Coordinator only)
 router.get('/projects/:id/individual-marks', authenticateUser, requireRole(['mentor']), requireCoordinator, canAccessProject(), getIndividualMarks);
@@ -125,6 +141,15 @@ router.get('/admin/users', authenticateUser, requireRole(['admin']), getAllUsers
 router.get('/admin/settings', authenticateUser, requireRole(['admin']), getSystemSettings);
 router.put('/admin/settings', authenticateUser, requireRole(['admin']), updateSystemSettings);
 router.post('/admin/assign-mentor', authenticateUser, requireRole(['admin']), assignMentor);
+router.get('/admin/rubrics', authenticateUser, requireRole(['admin']), listRubrics);
+router.put('/admin/rubrics/:stage', authenticateUser, requireRole(['admin']), saveStageRubrics);
+router.delete('/admin/rubrics/:id', authenticateUser, requireRole(['admin']), removeRubric);
+router.get('/admin/classes', authenticateUser, requireRole(['admin']), getAdminClassList);
+router.get('/admin/final-results', authenticateUser, requireRole(['admin']), getAdminFinalMarks);
+router.post('/admin/final-results/publish', authenticateUser, requireRole(['admin']), publishResults);
+
+// Student published result route
+router.get('/results/me', authenticateUser, requireRole(['student']), getMyPublishedResult);
 
 // ====== PUBLIC ROUTES ======
 router.get('/public/info', (req, res) => {
