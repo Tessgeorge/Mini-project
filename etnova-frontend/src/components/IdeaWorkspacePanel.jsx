@@ -453,6 +453,8 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
 
   const mentorName = project?.guide?.full_name || project?.mentor?.full_name || "Mentor not assigned";
   const approvedIdea = ideas.find((idea) => String(idea.status).toLowerCase() === "approved") || null;
+  const normalizedProjectStatus = String(project?.status || "").toLowerCase();
+  const workspaceLocked = Boolean((project?.approved_idea_id || approvedIdea?.id) && normalizedProjectStatus !== "rejected");
   const activeChat = useMemo(
     () => chats.find((chat) => chat.id === activeChatId) || null,
     [activeChatId, chats]
@@ -467,6 +469,11 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
   );
 
   const openCreate = () => {
+    if (workspaceLocked) {
+      setError("");
+      setNotice("Idea submission is locked after approval. It will reopen only if the approved idea is later rejected during review.");
+      return;
+    }
     setEditingIdeaId("");
     setForm(EMPTY_FORM);
     setIsFormOpen(true);
@@ -476,6 +483,11 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
 
   const openEdit = (idea) => {
     if (!idea) return;
+    if (workspaceLocked) {
+      setError("");
+      setNotice("Idea submission is locked after approval. It will reopen only if the approved idea is later rejected during review.");
+      return;
+    }
     setEditingIdeaId(idea.id);
     setForm({
       title: idea.title || "",
@@ -498,6 +510,11 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
   };
 
   const ensureFormOpen = () => {
+    if (workspaceLocked) {
+      setError("");
+      setNotice("Idea submission is locked after approval. It will reopen only if the approved idea is later rejected during review.");
+      return;
+    }
     if (isFormOpen) return;
     if (selectedIdea && EDITABLE_STATUSES.has(String(selectedIdea.status || "").toLowerCase())) {
       openEdit(selectedIdea);
@@ -531,6 +548,12 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
 
   const applyAssistantSuggestion = (mode = "all") => {
     if (!assistantDraft) return;
+    if (workspaceLocked) {
+      setError("");
+      setNotice("The copilot can still help refine ideas, but the idea submission form is locked after approval until a later rejection reopens it.");
+      setAssistantWidgetState(COPILOT_STATES.CLOSED);
+      return;
+    }
     ensureFormOpen();
     setForm((prev) => ({
       title: mode === "all" || mode === "title" ? assistantDraft.title || prev.title : prev.title,
@@ -747,6 +770,11 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
       document.body.style.overflow = previousOverflow;
     };
   }, [assistantIsOpen]);
+
+  useEffect(() => {
+    if (!workspaceLocked || !isFormOpen) return;
+    closeForm();
+  }, [workspaceLocked, isFormOpen]);
 
   useEffect(() => {
     setAssistantInput("");
@@ -1479,6 +1507,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
               <button
                 type="button"
                 onClick={openCreate}
+                disabled={workspaceLocked}
                 className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-black text-black transition-all hover:opacity-90"
                 style={{ backgroundColor: "#00D2C4" }}
               >
@@ -1525,8 +1554,13 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
               <div>
                 <p className="text-sm font-black text-slate-900">Idea Details</p>
                 <p className="text-xs text-slate-500 mt-0.5">Only one approved idea can be active for a team at a time.</p>
+                {workspaceLocked ? (
+                  <p className="mt-1 text-xs font-medium text-amber-700">
+                    Idea submission is locked after approval. It will reopen only if the approved idea is later rejected during review.
+                  </p>
+                ) : null}
               </div>
-              {selectedIdea && EDITABLE_STATUSES.has(String(selectedIdea.status).toLowerCase()) ? (
+              {selectedIdea && !workspaceLocked && EDITABLE_STATUSES.has(String(selectedIdea.status).toLowerCase()) ? (
                 <button
                   type="button"
                   onClick={() => openEdit(selectedIdea)}
@@ -1734,7 +1768,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                   )}
                 </div>
 
-                {EDITABLE_STATUSES.has(String(selectedIdea.status).toLowerCase()) ? (
+                {!workspaceLocked && EDITABLE_STATUSES.has(String(selectedIdea.status).toLowerCase()) ? (
                   <div className="flex flex-col sm:flex-row gap-3">
                     <button
                       type="button"
@@ -1752,6 +1786,10 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                     >
                       {submittingIdeaId === selectedIdea.id ? "Submitting..." : "Submit for Mentor Review"}
                     </button>
+                  </div>
+                ) : workspaceLocked ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                    This idea section is locked because an idea has already been approved. You can continue using the copilot, but editing or resubmitting ideas will reopen only if the approved idea is later rejected during review.
                   </div>
                 ) : null}
               </div>

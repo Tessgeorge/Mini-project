@@ -1,11 +1,14 @@
 import { apiRequest } from "../config/apiClient";
+import supabase from "../config/supabaseClient";
 
 const DASHBOARD_DATA_UNSUPPORTED_KEY = "etnova:dashboardDataUnsupported";
 const BOOTSTRAP_TTL_MS = 60_000;
 
 let bootstrapCache = null;
 let bootstrapCacheAt = 0;
+let bootstrapCacheUserId = null;
 let inflightBootstrap = null;
+let inflightBootstrapUserId = null;
 
 function isDashboardEndpointSupported() {
   if (typeof window === "undefined") return true;
@@ -17,8 +20,20 @@ function markDashboardEndpointUnsupported() {
   window.sessionStorage.setItem(DASHBOARD_DATA_UNSUPPORTED_KEY, "1");
 }
 
-function isCacheFresh() {
+async function getCurrentUserId() {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    return session?.user?.id || null;
+  } catch {
+    return null;
+  }
+}
+
+function isCacheFresh(userId) {
   if (!bootstrapCache) return false;
+  if (!userId || bootstrapCacheUserId !== userId) return false;
   return Date.now() - bootstrapCacheAt <= BOOTSTRAP_TTL_MS;
 }
 
@@ -38,12 +53,15 @@ async function loadWithLegacyCalls(reqOptions) {
 export async function fetchStudentBootstrapData(options = {}) {
   const { force = false } = options;
   const reqOptions = force ? { skipCache: true } : {};
+  const userId = await getCurrentUserId();
 
-  if (!force && isCacheFresh()) {
+  if (!force && isCacheFresh(userId)) {
     return bootstrapCache;
   }
 
-  if (!force && inflightBootstrap) return inflightBootstrap;
+  if (!force && inflightBootstrap && inflightBootstrapUserId === userId) {
+    return inflightBootstrap;
+  }
 
   inflightBootstrap = (async () => {
     let data;
@@ -67,17 +85,23 @@ export async function fetchStudentBootstrapData(options = {}) {
 
     bootstrapCache = data;
     bootstrapCacheAt = Date.now();
+    bootstrapCacheUserId = userId;
     return data;
   })();
+  inflightBootstrapUserId = userId;
 
   try {
     return await inflightBootstrap;
   } finally {
     inflightBootstrap = null;
+    inflightBootstrapUserId = null;
   }
 }
 
 export function invalidateStudentBootstrapCache() {
   bootstrapCache = null;
   bootstrapCacheAt = 0;
+  bootstrapCacheUserId = null;
+  inflightBootstrap = null;
+  inflightBootstrapUserId = null;
 }

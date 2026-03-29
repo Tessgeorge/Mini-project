@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import EditProjectModal from "../components/EditProjectModal";
 import ProjectDiaryPanel from "../components/ProjectDiaryPanel";
 import {
   fetchStudentBootstrapData,
@@ -27,14 +26,14 @@ function normalizeTechnologyStacks(stacks) {
 
 function SectionHead({ icon, title, badge }) {
   return (
-    <div className="flex items-center justify-between mb-5">
-      <h2 className="font-black text-slate-900 flex items-center gap-2 text-base">
+    <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <h2 className="flex items-center gap-2 text-base font-black text-slate-900 leading-tight">
         <span className="material-symbols-outlined text-lg" style={{ color: "#00D2C4" }}>
           {icon}
         </span>
         {title}
       </h2>
-      {badge}
+      {badge ? <div className="self-start sm:self-auto">{badge}</div> : null}
     </div>
   );
 }
@@ -111,7 +110,6 @@ export default function MyProject() {
   const [error, setError] = useState("");
   const [project, setProject] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [showEditModal, setShowEditModal] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -130,27 +128,23 @@ export default function MyProject() {
   }, []);
 
   const teamName = project?.title ? `${project.title} Team` : "My Team";
-  const mentorContact = project?.guide || project?.mentor || null;
+  const mentorContact = project?.mentor || project?.guide || null;
+  const mentorDepartment =
+    mentorContact?.department || project?.mentor?.department || project?.guide?.department || "-";
   const department =
     profile?.department || project?.team_members?.[0]?.profiles?.department || "-";
-
-  const canEditProject = useMemo(() => {
-    if (!profile?.id) return false;
-    if (!project?.team_members?.length) return false;
-    return project.team_members.some(
-      (member) => member.student_id === profile.id,
-    );
-  }, [profile?.id, project?.team_members]);
-
-  const technologyStacks = useMemo(
-    () => normalizeTechnologyStacks(project?.technology_stacks),
-    [project?.technology_stacks],
+  const displayedIdea = useMemo(
+    () => project?.approved_idea || project?.current_idea || project?.active_idea || null,
+    [project?.active_idea, project?.approved_idea, project?.current_idea],
   );
 
-  const handleProjectSaved = (updatedProject) => {
-    setProject((prev) => (prev ? { ...prev, ...updatedProject } : updatedProject));
-    invalidateStudentBootstrapCache();
-  };
+  const technologyStacks = useMemo(
+    () => normalizeTechnologyStacks(displayedIdea?.technologies || project?.technology_stacks),
+    [displayedIdea?.technologies, project?.technology_stacks],
+  );
+
+  const displayedDomain = displayedIdea?.domain || project?.domain || "";
+  const displayedDescription = displayedIdea?.description || project?.description || "";
 
   if (loading) {
     return (
@@ -210,32 +204,21 @@ export default function MyProject() {
             <SectionHead
               icon="article"
               title="Project Overview"
-              badge={
-                canEditProject ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowEditModal(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-black text-xs font-bold transition-all hover:opacity-90"
-                    style={{ backgroundColor: "#00D2C4" }}
-                  >
-                    <span className="material-symbols-outlined text-sm">edit</span>
-                    Edit Project
-                  </button>
-                ) : null
-              }
             />
 
-            <div className="mb-6 p-5 rounded-xl border border-white/60 bg-white/40">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+            <div className="mb-5">
+              <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Project Title
               </p>
-              <h3 className="text-xl font-black text-slate-900">{project.title}</h3>
+              <h3 className="max-w-4xl break-words text-xl font-black leading-snug text-slate-900 sm:text-2xl">
+                {project?.title || "Untitled Project"}
+              </h3>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
               <FieldBlock label="Academic Year">{getAcademicYear()}</FieldBlock>
               <FieldBlock label="Department">{department}</FieldBlock>
-              <FieldBlock label="Domain / Category">{project.domain || "Not specified"}</FieldBlock>
+              <FieldBlock label="Domain / Category">{displayedDomain || "Not specified"}</FieldBlock>
               <FieldBlock label="Project ID">
                 <span className="font-mono text-xs text-slate-600">
                   {`PRJ-${project.id?.slice(0, 8)?.toUpperCase()}`}
@@ -243,17 +226,11 @@ export default function MyProject() {
               </FieldBlock>
             </div>
 
-            <div className="border-t border-slate-100 pt-4 grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="border-t border-slate-100 pt-4">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Description</p>
                 <p className="text-sm text-slate-700 leading-relaxed">
-                  {project.description || "Description not added yet."}
-                </p>
-              </div>
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Abstract</p>
-                <p className="text-sm text-slate-700 leading-relaxed">
-                  {project.abstract || "Abstract not added yet."}
+                  {displayedDescription || "Description not added yet."}
                 </p>
               </div>
             </div>
@@ -369,7 +346,7 @@ export default function MyProject() {
                       {[
                         { label: "Role", value: project?.guide ? "Project Guide" : "Mentor" },
                         { label: "Email", value: mentorContact.email || "-" },
-                        { label: "Department", value: mentorContact.department || "-" },
+                        { label: "Department", value: mentorDepartment },
                       ].map((row) => (
                         <div key={row.label}>
                           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{row.label}</p>
@@ -392,13 +369,6 @@ export default function MyProject() {
         />
 
       </main>
-
-      <EditProjectModal
-        isOpen={showEditModal}
-        onClose={() => setShowEditModal(false)}
-        project={project}
-        onSaved={handleProjectSaved}
-      />
     </div>
   );
 }

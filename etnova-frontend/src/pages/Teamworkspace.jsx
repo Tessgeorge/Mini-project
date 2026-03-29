@@ -176,9 +176,18 @@ function fmtSz2(b) { return fmtSz(b); }
 function getTeamDisplayName(proj) {
   return proj?.team_name || proj?.title || "Untitled Team";
 }
+function getActiveIdea(proj) {
+  return proj?.approved_idea || proj?.current_idea || proj?.active_idea || null;
+}
 function getIdeaTitle(proj) {
+  const idea = getActiveIdea(proj);
+  if (idea?.title) return idea.title;
   if (!proj?.title || proj?.team_name === proj?.title) return "";
   return proj.title;
+}
+function getIdeaDescription(proj) {
+  const idea = getActiveIdea(proj);
+  return idea?.description || proj?.description || "";
 }
 
 const ST_PILL = {
@@ -1849,6 +1858,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
   const logoUrl = getLogoUrl(proj);
   const teamDisplayName = getTeamDisplayName(proj);
   const ideaTitle = getIdeaTitle(proj);
+  const ideaDescription = getIdeaDescription(proj);
   const projInitials = getInitials(teamDisplayName);
   const projGradient = gradFromTitle(teamDisplayName);
   const isDiscussionTab = tab === "feedback";
@@ -1885,10 +1895,10 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
                 {!isDiscussionTab && proj.approved_idea_id && ideaTitle && (
                   <p className="text-slate-300 text-sm mt-1 max-w-xl line-clamp-1 leading-relaxed">Approved idea: {ideaTitle}</p>
                 )}
-                {!isDiscussionTab && proj.description && (
-                  <p className="text-slate-300 text-sm mt-1 max-w-xl line-clamp-2 leading-relaxed">{proj.description}</p>
+                {!isDiscussionTab && ideaDescription && (
+                  <p className="text-slate-300 text-sm mt-1 max-w-xl line-clamp-2 leading-relaxed">{ideaDescription}</p>
                 )}
-                {!isDiscussionTab && proj.abstract && proj.abstract !== proj.description && (
+                {!isDiscussionTab && proj.abstract && proj.abstract !== ideaDescription && (
                   <p className="text-slate-400 text-sm mt-1 max-w-xl line-clamp-1 leading-relaxed">{proj.abstract}</p>
                 )}
                 <div className={`flex items-center gap-3 ${isDiscussionTab ? "mt-1.5" : "mt-2.5"} flex-wrap`}>

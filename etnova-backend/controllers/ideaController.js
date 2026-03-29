@@ -606,6 +606,94 @@ async function getProjectAccessRow(projectId) {
   return data;
 }
 
+function mapIdeaContextSnapshot(idea) {
+  if (!idea?.id) return null;
+  return {
+    id: idea.id,
+    version_no: idea.version_no || null,
+    title: idea.title || '',
+    domain: idea.domain || '',
+    subdomain: idea.subdomain || '',
+    description: idea.description || '',
+    technologies: Array.isArray(idea.technologies) ? idea.technologies : [],
+    confidence_score: typeof idea.confidence_score === 'number' ? idea.confidence_score : 0,
+    keywords: Array.isArray(idea.keywords) ? idea.keywords : [],
+    status: idea.status || '',
+    submitted_at: idea.submitted_at || null,
+    created_at: idea.created_at || null,
+    updated_at: idea.updated_at || null,
+  };
+}
+
+async function getProjectIdeaContext(project) {
+  if (!project?.id) {
+    return {
+      approvedIdea: null,
+      currentIdea: null,
+      activeIdea: null,
+      recentIdeas: [],
+    };
+  }
+
+  const ideaIds = [...new Set([project.approved_idea_id, project.current_idea_id].filter(Boolean))];
+  const { data: selectedIdeas, error: selectedIdeasError } = ideaIds.length > 0
+    ? await supabase
+      .from('project_ideas')
+      .select(`
+        id,
+        version_no,
+        title,
+        domain,
+        subdomain,
+        description,
+        technologies,
+        confidence_score,
+        keywords,
+        status,
+        submitted_at,
+        created_at,
+        updated_at
+      `)
+      .in('id', ideaIds)
+    : { data: [], error: null };
+
+  if (selectedIdeasError) throw selectedIdeasError;
+
+  const { data: recentIdeas, error: recentIdeasError } = await supabase
+    .from('project_ideas')
+    .select(`
+      id,
+      version_no,
+      title,
+      domain,
+      subdomain,
+      description,
+      technologies,
+      confidence_score,
+      keywords,
+      status,
+      submitted_at,
+      created_at,
+      updated_at
+    `)
+    .eq('project_id', project.id)
+    .order('version_no', { ascending: false })
+    .limit(4);
+
+  if (recentIdeasError) throw recentIdeasError;
+
+  const selectedIdeaById = new Map((selectedIdeas || []).map((idea) => [idea.id, mapIdeaContextSnapshot(idea)]));
+  const approvedIdea = selectedIdeaById.get(project.approved_idea_id) || null;
+  const currentIdea = selectedIdeaById.get(project.current_idea_id) || null;
+
+  return {
+    approvedIdea,
+    currentIdea,
+    activeIdea: approvedIdea || currentIdea || null,
+    recentIdeas: (recentIdeas || []).map(mapIdeaContextSnapshot),
+  };
+}
+
 async function assertStudentCanAccessIdea(ideaId, userId) {
   const idea = await getIdeaRow(ideaId);
   const project = await getProjectAccessRow(idea.project_id);
@@ -825,6 +913,11 @@ async function syncProjectFromIdea(project, idea, nextStatus, { currentIdeaId, a
   if (error) throw error;
 }
 
+function isIdeaWorkspaceUnlocked(project) {
+  if (!project?.approved_idea_id) return true;
+  return String(project.status || '').trim().toLowerCase() === 'rejected';
+}
+
 async function notifyMentorsOfSubmission(project, teamName, idea, actorName) {
   const recipientIds = [...new Set([
     project.guide_id,
@@ -1035,13 +1128,27 @@ async function enrichAttachmentForChat(attachment) {
   };
 }
 
-function buildIdeaAssistantUserPrompt({ project, prompt, currentDraft }) {
+function buildIdeaAssistantUserPrompt({ project, prompt, currentDraft, ideaContext }) {
+  const approvedIdea = ideaContext?.approvedIdea;
+  const currentIdea = ideaContext?.currentIdea;
+  const recentIdeaSummary = (ideaContext?.recentIdeas || [])
+    .map((idea) => {
+      const tags = [idea.status || 'draft', idea.domain || 'General', idea.subdomain || ''];
+      return `v${idea.version_no || '?'}: ${idea.title || 'Untitled Idea'} [${tags.filter(Boolean).join(' / ')}]`;
+    })
+    .join(' | ');
+
   return [
     `Team name: ${project.team_name || project.title || 'Untitled Team'}`,
     `Existing project domain: ${project.domain || 'General'}`,
     `Existing project title: ${project.title || 'Not set'}`,
     `Existing project description: ${project.description || 'Not set'}`,
     `Existing technologies: ${Array.isArray(project.technology_stacks) && project.technology_stacks.length ? project.technology_stacks.join(', ') : 'Not set'}`,
+    `Approved idea title: ${approvedIdea?.title || 'Not set'}`,
+    `Approved idea description: ${approvedIdea?.description || 'Not set'}`,
+    `Current workspace idea title: ${currentIdea?.title || 'Not set'}`,
+    `Current workspace idea description: ${currentIdea?.description || 'Not set'}`,
+    `Recent idea versions: ${recentIdeaSummary || 'No idea versions yet.'}`,
     `Current draft title: ${currentDraft?.title || 'Not set'}`,
     `Current draft description: ${currentDraft?.description || 'Not set'}`,
     `Current draft technologies: ${Array.isArray(currentDraft?.technologies) && currentDraft.technologies.length ? currentDraft.technologies.join(', ') : 'Not set'}`,
@@ -1087,7 +1194,7 @@ function collectRecentImageAttachments(messages = [], limit = 3) {
     .slice(-limit);
 }
 
-function buildIdeaAssistantConversationText({ project, currentDraft, messages }) {
+function buildIdeaAssistantConversationText({ project, currentDraft, messages, ideaContext }) {
   const currentDraftJson = JSON.stringify({
     title: currentDraft?.title || '',
     domain: currentDraft?.domain || '',
@@ -1105,12 +1212,30 @@ function buildIdeaAssistantConversationText({ project, currentDraft, messages })
     })
     .join('\n');
 
+  const approvedIdea = ideaContext?.approvedIdea;
+  const currentIdea = ideaContext?.currentIdea;
+  const recentIdeaJson = JSON.stringify(
+    (ideaContext?.recentIdeas || []).map((idea) => ({
+      version_no: idea.version_no,
+      title: idea.title,
+      domain: idea.domain,
+      subdomain: idea.subdomain,
+      status: idea.status,
+      submitted_at: idea.submitted_at,
+      keywords: idea.keywords,
+      technologies: idea.technologies,
+    }))
+  );
+
   return [
     `Team name: ${project.team_name || project.title || 'Untitled Team'}`,
     `Existing project domain: ${project.domain || 'General'}`,
     `Existing project title: ${project.title || 'Not set'}`,
     `Existing project description: ${project.description || 'Not set'}`,
     `Existing technologies: ${Array.isArray(project.technology_stacks) && project.technology_stacks.length ? project.technology_stacks.join(', ') : 'Not set'}`,
+    `Approved idea JSON: ${JSON.stringify(approvedIdea || {})}`,
+    `Current workspace idea JSON: ${JSON.stringify(currentIdea || {})}`,
+    `Recent submitted/workspace ideas JSON: ${recentIdeaJson || '[]'}`,
     `Current draft title: ${currentDraft?.title || 'Not set'}`,
     `Current draft description: ${currentDraft?.description || 'Not set'}`,
     `Current draft technologies: ${Array.isArray(currentDraft?.technologies) && currentDraft.technologies.length ? currentDraft.technologies.join(', ') : 'Not set'}`,
@@ -1122,7 +1247,7 @@ function buildIdeaAssistantConversationText({ project, currentDraft, messages })
   ].join('\n');
 }
 
-async function generateIdeaAssistantDraftWithOpenAI({ project, prompt, imageDataUrl, currentDraft }) {
+async function generateIdeaAssistantDraftWithOpenAI({ project, prompt, imageDataUrl, currentDraft, ideaContext }) {
   if (!process.env.OPENAI_API_KEY) {
     const error = new Error('OPENAI_API_KEY is not configured on the backend.');
     error.statusCode = 503;
@@ -1132,7 +1257,7 @@ async function generateIdeaAssistantDraftWithOpenAI({ project, prompt, imageData
   const content = [
     {
       type: 'input_text',
-      text: buildIdeaAssistantUserPrompt({ project, prompt, currentDraft }),
+      text: buildIdeaAssistantUserPrompt({ project, prompt, currentDraft, ideaContext }),
     },
   ];
 
@@ -1197,10 +1322,10 @@ async function generateIdeaAssistantDraftWithOpenAI({ project, prompt, imageData
   };
 }
 
-async function generateIdeaAssistantDraftWithOllama({ project, prompt, imageDataUrl, currentDraft }) {
+async function generateIdeaAssistantDraftWithOllama({ project, prompt, imageDataUrl, currentDraft, ideaContext }) {
   const message = {
     role: 'user',
-    content: buildIdeaAssistantUserPrompt({ project, prompt, currentDraft }),
+    content: buildIdeaAssistantUserPrompt({ project, prompt, currentDraft, ideaContext }),
   };
 
   const base64Image = extractBase64Image(imageDataUrl);
@@ -1263,7 +1388,7 @@ async function generateIdeaAssistantDraftWithOllama({ project, prompt, imageData
   };
 }
 
-async function generateIdeaAssistantDraftWithGemini({ project, prompt, imageDataUrl, currentDraft }) {
+async function generateIdeaAssistantDraftWithGemini({ project, prompt, imageDataUrl, currentDraft, ideaContext }) {
   if (!GOOGLE_API_KEY) {
     const error = new Error('GOOGLE_API_KEY is not configured on the backend.');
     error.statusCode = 503;
@@ -1272,7 +1397,7 @@ async function generateIdeaAssistantDraftWithGemini({ project, prompt, imageData
 
   const parts = [
     {
-      text: buildIdeaAssistantUserPrompt({ project, prompt, currentDraft }),
+      text: buildIdeaAssistantUserPrompt({ project, prompt, currentDraft, ideaContext }),
     },
   ];
 
@@ -1343,7 +1468,7 @@ async function generateIdeaAssistantDraftWithGemini({ project, prompt, imageData
   };
 }
 
-async function generateIdeaAssistantChatWithOpenAI({ project, messages, currentDraft }) {
+async function generateIdeaAssistantChatWithOpenAI({ project, messages, currentDraft, ideaContext }) {
   if (!process.env.OPENAI_API_KEY) {
     const error = new Error('OPENAI_API_KEY is not configured on the backend.');
     error.statusCode = 503;
@@ -1353,7 +1478,7 @@ async function generateIdeaAssistantChatWithOpenAI({ project, messages, currentD
   const content = [
     {
       type: 'input_text',
-      text: buildIdeaAssistantConversationText({ project, currentDraft, messages }),
+      text: buildIdeaAssistantConversationText({ project, currentDraft, messages, ideaContext }),
     },
   ];
 
@@ -1414,10 +1539,10 @@ async function generateIdeaAssistantChatWithOpenAI({ project, messages, currentD
   };
 }
 
-async function generateIdeaAssistantChatWithOllama({ project, messages, currentDraft }) {
+async function generateIdeaAssistantChatWithOllama({ project, messages, currentDraft, ideaContext }) {
   const message = {
     role: 'user',
-    content: buildIdeaAssistantConversationText({ project, currentDraft, messages }),
+    content: buildIdeaAssistantConversationText({ project, currentDraft, messages, ideaContext }),
   };
 
   const recentImages = collectRecentImageAttachments(messages)
@@ -1477,7 +1602,7 @@ async function generateIdeaAssistantChatWithOllama({ project, messages, currentD
   };
 }
 
-async function generateIdeaAssistantChatWithGemini({ project, messages, currentDraft }) {
+async function generateIdeaAssistantChatWithGemini({ project, messages, currentDraft, ideaContext }) {
   if (!GOOGLE_API_KEY) {
     const error = new Error('GOOGLE_API_KEY is not configured on the backend.');
     error.statusCode = 503;
@@ -1486,7 +1611,7 @@ async function generateIdeaAssistantChatWithGemini({ project, messages, currentD
 
   const parts = [
     {
-      text: buildIdeaAssistantConversationText({ project, currentDraft, messages }),
+      text: buildIdeaAssistantConversationText({ project, currentDraft, messages, ideaContext }),
     },
   ];
 
@@ -1554,28 +1679,28 @@ async function generateIdeaAssistantChatWithGemini({ project, messages, currentD
   };
 }
 
-async function generateIdeaAssistantDraft({ project, prompt, imageDataUrl, currentDraft }) {
+async function generateIdeaAssistantDraft({ project, prompt, imageDataUrl, currentDraft, ideaContext }) {
   if (IDEA_ASSISTANT_PROVIDER === 'gemini') {
-    return generateIdeaAssistantDraftWithGemini({ project, prompt, imageDataUrl, currentDraft });
+    return generateIdeaAssistantDraftWithGemini({ project, prompt, imageDataUrl, currentDraft, ideaContext });
   }
 
   if (IDEA_ASSISTANT_PROVIDER === 'ollama') {
-    return generateIdeaAssistantDraftWithOllama({ project, prompt, imageDataUrl, currentDraft });
+    return generateIdeaAssistantDraftWithOllama({ project, prompt, imageDataUrl, currentDraft, ideaContext });
   }
 
-  return generateIdeaAssistantDraftWithOpenAI({ project, prompt, imageDataUrl, currentDraft });
+  return generateIdeaAssistantDraftWithOpenAI({ project, prompt, imageDataUrl, currentDraft, ideaContext });
 }
 
-async function generateIdeaAssistantChat({ project, messages, currentDraft }) {
+async function generateIdeaAssistantChat({ project, messages, currentDraft, ideaContext }) {
   if (IDEA_ASSISTANT_PROVIDER === 'gemini') {
-    return generateIdeaAssistantChatWithGemini({ project, messages, currentDraft });
+    return generateIdeaAssistantChatWithGemini({ project, messages, currentDraft, ideaContext });
   }
 
   if (IDEA_ASSISTANT_PROVIDER === 'ollama') {
-    return generateIdeaAssistantChatWithOllama({ project, messages, currentDraft });
+    return generateIdeaAssistantChatWithOllama({ project, messages, currentDraft, ideaContext });
   }
 
-  return generateIdeaAssistantChatWithOpenAI({ project, messages, currentDraft });
+  return generateIdeaAssistantChatWithOpenAI({ project, messages, currentDraft, ideaContext });
 }
 
 export const getProjectIdeaChats = async (req, res) => {
@@ -1659,6 +1784,8 @@ export const sendProjectIdeaChatMessage = async (req, res) => {
     }
 
     const { chat, project } = await assertStudentCanAccessProjectChat(req.params.chatId, req.user.id);
+    const ideaContext = await getProjectIdeaContext(project);
+    const activeIdea = ideaContext.activeIdea;
     const persistedMessages = await listProjectIdeaChatMessages(chat.id);
     const normalizedPersistedMessages = sanitizeAssistantMessages(persistedMessages);
     const attachments = attachment?.dataUrl ? [await enrichAttachmentForChat(attachment)].filter(Boolean) : [];
@@ -1672,19 +1799,20 @@ export const sendProjectIdeaChatMessage = async (req, res) => {
     ];
 
     const currentDraft = buildAssistantCurrentDraft({
-      title: requestCurrentDraft?.title || chat?.latest_draft?.title || project.title || '',
-      description: requestCurrentDraft?.description || chat?.latest_draft?.description || project.description || '',
-      technologies: requestCurrentDraft?.technologies || chat?.latest_draft?.technologies || project.technology_stacks,
-      domain: requestCurrentDraft?.domain || chat?.latest_draft?.domain || project.domain || '',
-      subdomain: requestCurrentDraft?.subdomain || chat?.latest_draft?.subdomain || '',
-      confidence_score: requestCurrentDraft?.confidence_score ?? chat?.latest_draft?.confidence_score ?? 0,
-      keywords: requestCurrentDraft?.keywords || chat?.latest_draft?.keywords || [],
+      title: requestCurrentDraft?.title || chat?.latest_draft?.title || activeIdea?.title || project.title || '',
+      description: requestCurrentDraft?.description || chat?.latest_draft?.description || activeIdea?.description || project.description || '',
+      technologies: requestCurrentDraft?.technologies || chat?.latest_draft?.technologies || activeIdea?.technologies || project.technology_stacks,
+      domain: requestCurrentDraft?.domain || chat?.latest_draft?.domain || activeIdea?.domain || project.domain || '',
+      subdomain: requestCurrentDraft?.subdomain || chat?.latest_draft?.subdomain || activeIdea?.subdomain || '',
+      confidence_score: requestCurrentDraft?.confidence_score ?? chat?.latest_draft?.confidence_score ?? activeIdea?.confidence_score ?? 0,
+      keywords: requestCurrentDraft?.keywords || chat?.latest_draft?.keywords || activeIdea?.keywords || [],
     }, project);
 
     const assistantReply = await generateIdeaAssistantChat({
       project,
       messages: nextMessages,
       currentDraft,
+      ideaContext,
     });
 
     const savedUserMessage = await createProjectIdeaChatMessage(
@@ -1750,6 +1878,11 @@ export const createProjectIdea = async (req, res) => {
     }
 
     const project = await getProjectRow(req.params.id);
+    if (!isIdeaWorkspaceUnlocked(project)) {
+      return res.status(400).json({
+        message: 'Idea workspace is locked after approval. You can edit and resubmit only if the approved idea is later rejected during review.',
+      });
+    }
     const { data: latestIdea, error: latestIdeaError } = await supabase
       .from('project_ideas')
       .select('version_no')
@@ -1838,6 +1971,13 @@ export const updateProjectIdea = async (req, res) => {
       return res.status(400).json({ message: 'Only draft or revision ideas can be edited.' });
     }
 
+    const project = await getProjectRow(req.params.id);
+    if (!isIdeaWorkspaceUnlocked(project)) {
+      return res.status(400).json({
+        message: 'Idea workspace is locked after approval. You can edit and resubmit only if the approved idea is later rejected during review.',
+      });
+    }
+
     if (!title) {
       return res.status(400).json({ message: 'Idea title is required.' });
     }
@@ -1877,7 +2017,6 @@ export const updateProjectIdea = async (req, res) => {
 
     if (error) throw error;
 
-    const project = await getProjectRow(req.params.id);
     if (!project.approved_idea_id && project.current_idea_id === updated.id) {
       await syncProjectFromIdea(project, updated, project.approved_idea_id ? project.status : 'draft', {
         currentIdeaId: updated.id,
@@ -1894,6 +2033,13 @@ export const updateProjectIdea = async (req, res) => {
 
 export const submitProjectIdea = async (req, res) => {
   try {
+    const project = await getProjectRow(req.params.id);
+    if (!isIdeaWorkspaceUnlocked(project)) {
+      return res.status(400).json({
+        message: 'Idea workspace is locked after approval. You can resubmit only if the approved idea is later rejected during review.',
+      });
+    }
+
     const { data: idea, error: ideaError } = await supabase
       .from('project_ideas')
       .select('*')
@@ -1939,7 +2085,6 @@ export const submitProjectIdea = async (req, res) => {
 
     if (error) throw error;
 
-    const project = await getProjectRow(req.params.id);
     await syncProjectFromIdea(project, updated, 'submitted', {
       currentIdeaId: updated.id,
       approvedIdeaId: project.approved_idea_id || null,
@@ -1984,11 +2129,13 @@ export const generateProjectIdeaDraft = async (req, res) => {
     }
 
     const project = await getProjectRow(req.params.id);
+    const ideaContext = await getProjectIdeaContext(project);
     const assistantDraft = await generateIdeaAssistantDraft({
       project,
       prompt,
       imageDataUrl,
       currentDraft,
+      ideaContext,
     });
 
     res.json({

@@ -65,6 +65,7 @@ function scoreMentorRecommendation(project, mentor, workload) {
 
   let score = 20;
   const reasons = [];
+  let meaningfulSignalCount = 0;
 
   const hasDomainMatch = signals.domain && interests.some(
     (item) => item.toLowerCase().includes(signals.domain.toLowerCase())
@@ -73,6 +74,7 @@ function scoreMentorRecommendation(project, mentor, workload) {
   if (hasDomainMatch) {
     score += 32;
     reasons.push("domain interest aligned");
+    meaningfulSignalCount += 1;
   }
 
   const hasSubdomainMatch = signals.subdomain && mentorTerms.some(
@@ -81,25 +83,32 @@ function scoreMentorRecommendation(project, mentor, workload) {
   if (hasSubdomainMatch) {
     score += 18;
     reasons.push("subdomain aligned");
+    meaningfulSignalCount += 1;
   }
 
   const keywordMatches = signals.terms.filter((term) => mentorTerms.includes(term));
   if (keywordMatches.length > 0) {
     score += Math.min(18, keywordMatches.length * 6);
     reasons.push(`matched ${keywordMatches.slice(0, 3).join(", ")}`);
+    meaningfulSignalCount += 1;
   }
 
-  if (
+  const hasSpecializationMatch = (
     mentor?.specialization
     && signals.terms.some((term) => String(mentor.specialization).toLowerCase().includes(term))
+  );
+  if (
+    hasSpecializationMatch
   ) {
     score += 12;
     reasons.push("specialization matched");
+    meaningfulSignalCount += 1;
   }
 
   if (mentorDepartment && projectDepartment && mentorDepartment === projectDepartment) {
     score += 8;
     reasons.push("department aligned");
+    meaningfulSignalCount += 1;
   }
 
   if (remainingCapacity > 0) {
@@ -115,6 +124,8 @@ function scoreMentorRecommendation(project, mentor, workload) {
     mentor_name: mentor.full_name,
     score: Math.max(0, Math.min(99, Math.round(score))),
     reasons: reasons.slice(0, 3),
+    meaningfulSignalCount,
+    hasMeaningfulSignal: meaningfulSignalCount > 0,
     workload,
     capacity,
     remainingCapacity,
@@ -122,13 +133,20 @@ function scoreMentorRecommendation(project, mentor, workload) {
   };
 }
 
-function shuffleArray(items) {
-  const copy = [...items];
-  for (let index = copy.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
-  }
-  return copy;
+function buildProjectRecommendations(project, mentors, workloadLookup) {
+  return mentors
+    .map((mentor) => scoreMentorRecommendation(project, mentor, workloadLookup(mentor.id)))
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score;
+      if (left.workload !== right.workload) return left.workload - right.workload;
+      return String(left.mentor_name || "").localeCompare(String(right.mentor_name || ""));
+    });
+}
+
+function buildDisplayRecommendations(project, mentors, workloadLookup, limit = 3) {
+  return buildProjectRecommendations(project, mentors, workloadLookup)
+    .filter((recommendation) => recommendation.eligible && recommendation.hasMeaningfulSignal)
+    .slice(0, limit);
 }
 
 function isMentorProfile(row) {
@@ -157,10 +175,11 @@ export default function AdminGuideAllocation() {
   const recommendationsByProject = useMemo(() => {
     const nextMap = new Map();
     projects.forEach((project) => {
-      const suggestions = mentors
-        .map((mentor) => scoreMentorRecommendation(project, mentor, getGuideWorkload(mentor.id)))
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 3);
+      const suggestions = buildDisplayRecommendations(
+        project,
+        mentors,
+        (mentorId) => getGuideWorkload(mentorId),
+      )
       nextMap.set(project.id, suggestions);
     });
     return nextMap;
@@ -374,18 +393,39 @@ export default function AdminGuideAllocation() {
         throw new Error("No mentors available for allocation.");
       }
 
-      const shuffledMentors = shuffleArray(mentors);
-      const workloadMap = new Map(shuffledMentors.map((mentor) => [mentor.id, getGuideWorkload(mentor.id)]));
+      const workloadMap = new Map(mentors.map((mentor) => [mentor.id, getGuideWorkload(mentor.id)]));
       const assignments = [];
 
-      for (const project of unassignedProjects) {
-        const availableMentors = shuffledMentors.filter(
-          (mentor) => (workloadMap.get(mentor.id) || 0) < getMentorCapacity(mentor),
+      const prioritizedProjects = unassignedProjects
+        .map((project) => {
+          const ranked = buildProjectRecommendations(
+            project,
+            mentors,
+            (mentorId) => workloadMap.get(mentorId) || 0,
+          );
+          const eligible = ranked.filter((item) => item.eligible);
+          return {
+            project,
+            eligibleCount: eligible.length,
+            topScore: eligible[0]?.score ?? -1,
+          };
+        })
+        .sort((left, right) => {
+          if (left.eligibleCount !== right.eligibleCount) return left.eligibleCount - right.eligibleCount;
+          if (right.topScore !== left.topScore) return right.topScore - left.topScore;
+          return String(left.project.title || "").localeCompare(String(right.project.title || ""));
+        });
+
+      for (const { project } of prioritizedProjects) {
+        const rankedMentors = buildProjectRecommendations(
+          project,
+          mentors,
+          (mentorId) => workloadMap.get(mentorId) || 0,
         );
-        if (availableMentors.length === 0) break;
-        const selected = availableMentors[Math.floor(Math.random() * availableMentors.length)];
-        workloadMap.set(selected.id, (workloadMap.get(selected.id) || 0) + 1);
-        assignments.push({ projectId: project.id, mentorId: selected.id });
+        const selected = rankedMentors.find((mentor) => mentor.eligible);
+        if (!selected) continue;
+        workloadMap.set(selected.mentor_id, (workloadMap.get(selected.mentor_id) || 0) + 1);
+        assignments.push({ projectId: project.id, mentorId: selected.mentor_id });
       }
 
       if (assignments.length === 0) {
@@ -407,13 +447,13 @@ export default function AdminGuideAllocation() {
       const skipped = unassignedProjects.length - assignments.length;
       setNotice(
         skipped > 0
-          ? `Random allocation complete. ${skipped} project(s) left unassigned due to mentor capacity.`
-          : "Random allocation complete.",
+          ? `Best-fit allocation complete. ${skipped} project(s) left unassigned due to mentor capacity.`
+          : "Best-fit allocation complete.",
       );
       await fetchProjects();
     } catch (err) {
-      setError(err.message || "Random allocation failed.");
-      alert(err.message || "Random allocation failed.");
+      setError(err.message || "Best-fit allocation failed.");
+      alert(err.message || "Best-fit allocation failed.");
       await fetchProjects();
     } finally {
       setSaving(false);
@@ -567,7 +607,7 @@ export default function AdminGuideAllocation() {
               disabled={loading || saving}
               className="rounded-xl px-4 py-2.5 font-semibold shadow-sm btn-primary disabled:opacity-60"
             >
-              Run Random Allocation
+              Run Best-Fit Allocation
             </button>
             <button
               type="button"
@@ -633,6 +673,13 @@ export default function AdminGuideAllocation() {
               const allowed = candidate ? canAssignMentor(project, candidate) : false;
               const isAssigned = Boolean(currentGuideId);
               const recommendations = recommendationsByProject.get(project.id) || [];
+              const hasProjectSignals = Boolean(
+                project.detected_domain
+                || project.detected_subdomain
+                || (project.detected_keywords || []).length > 0
+                || (project.technologies || []).length > 0
+                || project.team_department,
+              );
 
               return (
                 <article key={project.id} className="rounded-2xl border border-slate-200/70 bg-white p-4 shadow-sm">
@@ -724,7 +771,13 @@ export default function AdminGuideAllocation() {
                               </div>
                             </button>
                           ))
-                        ) : null}
+                        ) : (
+                          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-3 py-3 text-xs text-slate-500">
+                            {hasProjectSignals
+                              ? "No strong mentor match yet. Add sharper domain, keywords, or specialization data for better recommendations."
+                              : "Awaiting idea signals. Save domain, subdomain, or keywords before showing mentor recommendations."}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ) : null}
@@ -794,6 +847,13 @@ export default function AdminGuideAllocation() {
                   const allowed = candidate ? canAssignMentor(project, candidate) : false;
                   const isAssigned = Boolean(currentGuideId);
                   const recommendations = recommendationsByProject.get(project.id) || [];
+                  const hasProjectSignals = Boolean(
+                    project.detected_domain
+                    || project.detected_subdomain
+                    || (project.detected_keywords || []).length > 0
+                    || (project.technologies || []).length > 0
+                    || project.team_department,
+                  );
 
                   return (
                     <tr key={project.id} className="transition-colors hover:bg-slate-50/70">
@@ -878,7 +938,11 @@ export default function AdminGuideAllocation() {
                                 </button>
                               ))
                             ) : (
-                              <p className="text-sm text-slate-400">-</p>
+                              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-3 py-2.5 text-xs text-slate-500">
+                                {hasProjectSignals
+                                  ? "No strong mentor match yet."
+                                  : "Awaiting idea signals."}
+                              </div>
                             )}
                           </div>
                         ) : (

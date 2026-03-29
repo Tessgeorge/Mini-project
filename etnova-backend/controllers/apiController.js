@@ -82,6 +82,78 @@ const getProjectAnchorProfile = (project) => {
   return null;
 };
 
+const mapProjectIdeaSnapshot = (idea) => {
+  if (!idea?.id) return null;
+  return {
+    id: idea.id,
+    title: idea.title || '',
+    domain: idea.domain || '',
+    subdomain: idea.subdomain || '',
+    description: idea.description || '',
+    technologies: Array.isArray(idea.technologies) ? idea.technologies : [],
+    confidence_score: typeof idea.confidence_score === 'number' ? idea.confidence_score : 0,
+    keywords: Array.isArray(idea.keywords) ? idea.keywords : [],
+    status: idea.status || '',
+    submitted_at: idea.submitted_at || null,
+    created_at: idea.created_at || null,
+    updated_at: idea.updated_at || null,
+  };
+};
+
+const enrichProjectsWithIdeaSnapshots = async (projects) => {
+  if (!projects?.length) return projects || [];
+
+  const ideaIds = [...new Set(
+    (projects || [])
+      .flatMap((project) => [project?.approved_idea_id, project?.current_idea_id])
+      .filter(isUuid)
+  )];
+
+  if (!ideaIds.length) {
+    return (projects || []).map((project) => ({
+      ...project,
+      approved_idea: null,
+      current_idea: null,
+      active_idea: null,
+    }));
+  }
+
+  const { data: ideas, error } = await supabase
+    .from('project_ideas')
+    .select(`
+      id,
+      title,
+      domain,
+      subdomain,
+      description,
+      technologies,
+      confidence_score,
+      keywords,
+      status,
+      submitted_at,
+      created_at,
+      updated_at
+    `)
+    .in('id', ideaIds);
+
+  if (error) throw error;
+
+  const ideaById = new Map((ideas || []).map((idea) => [idea.id, mapProjectIdeaSnapshot(idea)]));
+
+  return (projects || []).map((project) => {
+    const approvedIdea = ideaById.get(project?.approved_idea_id) || null;
+    const currentIdea = ideaById.get(project?.current_idea_id) || null;
+    const activeIdea = approvedIdea || currentIdea || null;
+
+    return {
+      ...project,
+      approved_idea: approvedIdea,
+      current_idea: currentIdea,
+      active_idea: activeIdea,
+    };
+  });
+};
+
 const enrichProjectsWithCoordinatorFallback = async (projects) => {
   if (!projects?.length) return projects || [];
 
@@ -163,7 +235,8 @@ const enrichProjectsWithCoordinatorFallback = async (projects) => {
 
 const enrichStudentProjects = async (projects) => {
   const withAllocations = await enrichProjectsWithAllocations(projects || []);
-  return enrichProjectsWithCoordinatorFallback(withAllocations);
+  const withIdeaSnapshots = await enrichProjectsWithIdeaSnapshots(withAllocations);
+  return enrichProjectsWithCoordinatorFallback(withIdeaSnapshots);
 };
 
 const STUDENT_PROJECT_SELECT = `
@@ -696,7 +769,7 @@ export const getProjects = async (req, res) => {
 
       // Coordinators additionally get projects from their batch scope.
       if (!req.isCoordinator || !req.userBatch) {
-        return res.json(await enrichProjectsWithAllocations(combinedAssignedProjects));
+        return res.json(await enrichProjectsWithIdeaSnapshots(await enrichProjectsWithAllocations(combinedAssignedProjects)));
       }
 
       const { data: teamRows, error: teamRowsError } = await supabase
@@ -729,7 +802,7 @@ export const getProjects = async (req, res) => {
       const assignedIds = new Set(combinedAssignedProjects.map((p) => p.id));
       const extraIds = [...batchProjectIds].filter((id) => !assignedIds.has(id));
       if (extraIds.length === 0) {
-        return res.json(await enrichProjectsWithAllocations(combinedAssignedProjects));
+        return res.json(await enrichProjectsWithIdeaSnapshots(await enrichProjectsWithAllocations(combinedAssignedProjects)));
       }
 
       const { data: extraProjects, error: extraError } = await supabase
@@ -740,7 +813,7 @@ export const getProjects = async (req, res) => {
       if (extraError) throw extraError;
 
       const combined = [...combinedAssignedProjects, ...(extraProjects || [])];
-      return res.json(await enrichProjectsWithAllocations(combined));
+        return res.json(await enrichProjectsWithIdeaSnapshots(await enrichProjectsWithAllocations(combined)));
     } else if (req.userRole === 'admin') {
       // Admins see all projects
       const { data, error } = await supabase
@@ -755,7 +828,7 @@ export const getProjects = async (req, res) => {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return res.json(await enrichProjectsWithAllocations(data || []));
+      return res.json(await enrichProjectsWithIdeaSnapshots(await enrichProjectsWithAllocations(data || [])));
     }
 
     return res.json([]);
