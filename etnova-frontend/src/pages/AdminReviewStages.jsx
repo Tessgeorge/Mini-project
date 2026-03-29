@@ -33,13 +33,13 @@ export default function AdminReviewStages() {
     try {
       const { data: classRows, error: classError } = await supabase
         .from("classes")
-        .select("id, class_name");
+        .select("id, class_section");
       if (classError) {
         console.error("Error fetching classes:", classError);
         throw classError;
       }
 
-      const classNameById = new Map((classRows || []).map((row) => [row.id, row.class_name]));
+      const classNameById = new Map((classRows || []).map((row) => [row.id, row.class_section]));
 
       const { data, error: fetchError } = await supabase
         .from("review_stages")
@@ -53,7 +53,7 @@ export default function AdminReviewStages() {
 
       const rows = (data || []).map((row) => ({
         ...row,
-        classes: { class_name: classNameById.get(row.class_id) || null },
+        classes: { class_section: classNameById.get(row.class_id) || null },
       }));
       setStages(rows);
     } catch (err) {
@@ -246,7 +246,7 @@ export default function AdminReviewStages() {
               ) : (
                 stages.map((row) => (
                   <tr key={stageKey(row)} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 text-slate-800">{row.classes?.class_name || "Unknown Class"}</td>
+                    <td className="px-4 py-3 text-slate-800">{row.classes?.class_section || "Unknown Class"}</td>
                     <td className="px-4 py-3 text-slate-700">{row.stage_name}</td>
                     <td className="px-4 py-3 text-slate-700">{formatDeadline(row.deadline)}</td>
                     <td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${row.is_active ? "bg-teal-100 text-teal-700" : "bg-slate-100 text-slate-600"}`}>{row.is_active ? "Active" : "Inactive"}</span></td>

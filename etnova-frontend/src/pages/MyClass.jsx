@@ -551,20 +551,16 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
         </div>
         <div className="px-5 py-2">
           {[
-            {
+            ...(pendingEvaluations > 0 ? [{
               num: 1,
-              urgent: pendingEvaluations > 0,
-              title: pendingEvaluations > 0
-                ? `${pendingEvaluations} submission${pendingEvaluations !== 1 ? "s" : ""} awaiting your verification`
-                : "No pending submissions",
-              sub: pendingEvaluations > 0
-                ? "Guide-approved documents waiting for your sign-off"
-                : "All submissions are verified",
+              urgent: true,
+              title: `${pendingEvaluations} submission${pendingEvaluations !== 1 ? "s" : ""} awaiting your verification`,
+              sub: "Guide-approved documents waiting for your sign-off",
               btn: "Go to Submissions",
               nav: "submissions",
-            },
+            }] : []),
             {
-              num: 2,
+              num: pendingEvaluations > 0 ? 2 : 1,
               urgent: false,
               title: "Manage reviewer access for evaluation stages",
               sub: "Open or close mark entry per stage for reviewers",
@@ -572,7 +568,7 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
               nav: "reviews",
             },
             {
-              num: 3,
+              num: pendingEvaluations > 0 ? 3 : 2,
               urgent: reviewStages.some(s => s.coordinator_deadline && !s.deadline),
               title: reviewStages.some(s => s.coordinator_deadline && !s.deadline)
                 ? "Set missing student submission deadlines"

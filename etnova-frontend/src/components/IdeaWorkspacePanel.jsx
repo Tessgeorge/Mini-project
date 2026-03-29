@@ -1655,21 +1655,11 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                   </p>
                 </div>
 
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4">
-                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Subdomain</p>
-                    <p className="mt-2 text-sm font-semibold text-slate-700">
-                      {selectedIdea.subdomain || "Not specified"}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4">
-                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">AI Confidence</p>
-                    <p className="mt-2 text-sm font-semibold text-slate-700">
-                      {typeof selectedIdea.confidence_score === "number"
-                        ? `${Math.round(selectedIdea.confidence_score * 100)}%`
-                        : "Not available"}
-                    </p>
-                  </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4">
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Subdomain</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-700">
+                    {selectedIdea.subdomain || "Not specified"}
+                  </p>
                 </div>
 
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4">

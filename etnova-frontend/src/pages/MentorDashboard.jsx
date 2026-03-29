@@ -1459,7 +1459,7 @@ export default function MentorDashboard() {
       const scores = evalByProject[project.id] || [];
       const avgScore = scores.length ? scores.reduce((sum, s) => sum + s, 0) / scores.length : null;
 
-      if (project.approved_idea_id || String(project.status || "").toLowerCase() === "approved") {
+      if (project.approved_idea_id) {
         stageProgress.idea += 1;
       }
 

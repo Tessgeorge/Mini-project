@@ -283,7 +283,7 @@ export default function Submissions() {
                     <div>
                         <h1 className="text-lg font-black text-slate-900 leading-none">Team Submissions</h1>
                         <p className="text-xs text-slate-500 mt-0.5">{project.team_name || project.title}</p>
-                        {project.approved_idea_id && project.team_name && project.team_name !== project.title ? (
+                        {Boolean(project.approved_idea_id) && project.team_name && project.team_name !== project.title ? (
                             <p className="text-[11px] text-slate-400 mt-0.5">Approved idea: {project.title}</p>
                         ) : null}
                     </div>

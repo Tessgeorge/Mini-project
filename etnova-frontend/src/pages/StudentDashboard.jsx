@@ -497,9 +497,28 @@ export default function StudentDashboard() {
     return deadlines.find(d => new Date(d.deadline || d.date) >= now) || null;
   }, [deadlines]);
 
+  const currentStageDeadline = useMemo(() => {
+    if (workflowSnapshot.isCompleted) return null;
+    const now = new Date();
+    const currentStageKey = normalizeWorkflowStage(workflowSnapshot.key);
+    return (
+      deadlines.find((deadline) => (
+        normalizeWorkflowStage(deadline.stageKey || deadline.stage) === currentStageKey
+        && new Date(deadline.deadline || deadline.date) >= now
+      )) || null
+    );
+  }, [deadlines, workflowSnapshot]);
+
   const daysLeft = nextDeadline ? daysUntil(nextDeadline.deadline || nextDeadline.date) : null;
-  const nextDeadlineActionTab = nextDeadline ? getWorkflowDestination(nextDeadline.stageKey, "student") : "submissions";
-  const nextDeadlineActionLabel = nextDeadline ? getWorkflowActionLabel(nextDeadline.stageKey, "student") : "Open";
+  const currentStageDaysLeft = currentStageDeadline
+    ? daysUntil(currentStageDeadline.deadline || currentStageDeadline.date)
+    : null;
+  const currentStageActionTab = currentStageDeadline
+    ? getWorkflowDestination(currentStageDeadline.stageKey, "student")
+    : getWorkflowDestination(workflowSnapshot.key, "student");
+  const currentStageActionLabel = currentStageDeadline
+    ? getWorkflowActionLabel(currentStageDeadline.stageKey, "student")
+    : getWorkflowActionLabel(workflowSnapshot.key, "student");
 
   const reviewScore = useMemo(() => {
     const scores = evaluations
@@ -622,18 +641,19 @@ export default function StudentDashboard() {
       text: "text-amber-900", color: "#f59e0b",
       msg: `Revision required on "${revision.document_type?.replace(/_/g, " ")}" - mentor has requested changes.`,
     };
-    if (daysLeft !== null && daysLeft === 0) return {
+    if (!currentStageDeadline) return null;
+    if (currentStageDaysLeft !== null && currentStageDaysLeft === 0) return {
       icon: "alarm", bg: "bg-rose-50", border: "border-rose-200",
       text: "text-rose-800", color: "#f43f5e",
-      msg: `${nextDeadline.stage} is due TODAY. Submit immediately.`,
+      msg: `${currentStageDeadline.stage} is due TODAY. Submit immediately.`,
     };
-    if (daysLeft !== null && daysLeft <= 5) return {
+    if (currentStageDaysLeft !== null && currentStageDaysLeft <= 5) return {
       icon: "schedule", bg: "bg-orange-50", border: "border-orange-200",
       text: "text-orange-800", color: "#f97316",
-      msg: `${nextDeadline.stage} submission due in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}.`,
+      msg: `${currentStageDeadline.stage} submission due in ${currentStageDaysLeft} day${currentStageDaysLeft !== 1 ? "s" : ""}.`,
     };
     return null;
-  }, [documents, daysLeft, nextDeadline, project]);
+  }, [currentStageDaysLeft, currentStageDeadline, documents, project]);
 
   // Activity feed
   const activityFeed = useMemo(() => {
@@ -920,10 +940,10 @@ export default function StudentDashboard() {
               <p className={`flex-1 text-sm font-semibold ${alert.text}`}>{alert.msg}</p>
 
               {/* CTA button */}
-              <button type="button" onClick={() => goToStudentTab(nextDeadlineActionTab)}
+              <button type="button" onClick={() => goToStudentTab(currentStageActionTab)}
                 className="flex-shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-xs font-black transition-all hover:opacity-90 hover:scale-[1.03] active:scale-95 whitespace-nowrap"
                 style={{ backgroundColor: alert.color, boxShadow: `0 3px 10px ${alert.color}40` }}>
-                {nextDeadlineActionLabel}
+                {currentStageActionLabel}
                 <span className="material-symbols-outlined text-sm">arrow_forward</span>
               </button>
             </div>
@@ -931,7 +951,13 @@ export default function StudentDashboard() {
 
 
           {/* Section 4: Project Tracker */}
-          <ProjectTracker project={project} documents={documents} />
+          <ProjectTracker
+            project={project}
+            documents={documents}
+            evaluations={evaluations}
+            deadlines={deadlines}
+            currentStageKey={workflowSnapshot.key}
+          />
 
           {/* Section 5: Activity Feed + Workflow Calendar */}
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">

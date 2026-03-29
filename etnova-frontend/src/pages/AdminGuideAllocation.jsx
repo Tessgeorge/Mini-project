@@ -4,7 +4,6 @@ import supabase from "../lib/supabase";
 import AppFrame from "../components/AppFrame";
 import Sidebar from "../components/admin/Sidebar";
 import TopNavbar from "../components/admin/TopNavbar";
-import SectionCard from "../components/admin/SectionCard";
 import AllocationSummary from "../components/admin/AllocationSummary";
 
 const ADMIN_NAME = "Meenakshi";
@@ -538,21 +537,6 @@ export default function AdminGuideAllocation() {
     return projects.filter((project) => String(project.class_name || "").trim().toLowerCase() === selected);
   }, [projects, selectedClassId]);
 
-  const mentorLoadOverview = useMemo(() => {
-    return mentors.map((mentor) => {
-      const assigned = getGuideWorkload(mentor.id);
-      const capacity = getMentorCapacity(mentor);
-      return {
-        id: mentor.id,
-        name: mentor.full_name,
-        specialization: mentor.specialization || "General mentoring",
-        assigned,
-        capacity,
-        percent: capacity > 0 ? Math.min(100, Math.round((assigned / capacity) * 100)) : 0,
-      };
-    });
-  }, [getGuideWorkload, mentors]);
-
   return (
     <AppFrame
       sidebar={(
@@ -574,10 +558,6 @@ export default function AdminGuideAllocation() {
         <section className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-3xl">
             <h1 className="text-2xl font-semibold tracking-tight text-slate-800">Guide Allocation</h1>
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              Match teams to mentors using detected idea domains, project keywords, specialization, and live
-              capacity signals. Suggestions stay advisory so admin keeps the final decision.
-            </p>
           </div>
 
           <div className="flex flex-wrap gap-3">
@@ -619,92 +599,27 @@ export default function AdminGuideAllocation() {
           }}
         />
 
-        <section className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
-          <SectionCard
-            title="Allocation Controls"
-            subtitle="Filter the team list, review suggestion readiness, and keep the allocation pass manageable."
-          >
-            <div className="grid gap-5 lg:grid-cols-[minmax(220px,280px)_1fr]">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-600" htmlFor="class-filter">Class Filter</label>
-                <select
-                  id="class-filter"
-                  value={selectedClassId}
-                  onChange={(event) => setSelectedClassId(event.target.value)}
-                  className="glass-input w-full rounded-xl px-3 py-2.5 text-sm text-slate-700"
-                >
-                  <option value="">All Classes</option>
-                  {classes.map((item) => (
-                    <option key={item.id} value={item.id}>{item.class_name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border border-slate-200/70 bg-slate-50/80 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Visible Teams</p>
-                  <p className="mt-2 text-2xl font-semibold text-slate-800">{filteredProjects.length}</p>
-                </div>
-                <div className="rounded-2xl border border-slate-200/70 bg-slate-50/80 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">AI Suggested</p>
-                  <p className="mt-2 text-2xl font-semibold text-slate-800">
-                    {filteredProjects.filter((project) => (recommendationsByProject.get(project.id) || []).length > 0).length}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-slate-200/70 bg-slate-50/80 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Needs Assignment</p>
-                  <p className="mt-2 text-2xl font-semibold text-rose-700">
-                    {filteredProjects.filter((project) => !(project.allocated_guide_id || project.guide_id)).length}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </SectionCard>
-
-          <SectionCard
-            title="Mentor Capacity Snapshot"
-            subtitle="Check current availability before confirming allocations."
-          >
-            <div className="space-y-4">
-              {mentorLoadOverview.map((mentor) => (
-                <div key={mentor.id} className="rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-800">{mentor.name}</p>
-                      <p className="mt-1 text-xs text-slate-500">{mentor.specialization}</p>
-                    </div>
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
-                      {mentor.assigned}/{mentor.capacity} teams
-                    </span>
-                  </div>
-                  <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-100">
-                    <div
-                      className={`h-full rounded-full transition-all ${
-                        mentor.percent >= 100 ? "bg-amber-500" : mentor.percent >= 75 ? "bg-teal-500" : "bg-emerald-500"
-                      }`}
-                      style={{ width: `${mentor.percent}%` }}
-                    />
-                  </div>
-                </div>
+        <section className="mb-6">
+          <div className="max-w-sm space-y-2">
+            <label className="text-sm font-medium text-slate-600" htmlFor="class-filter">Class Filter</label>
+            <select
+              id="class-filter"
+              value={selectedClassId}
+              onChange={(event) => setSelectedClassId(event.target.value)}
+              className="glass-input w-full rounded-xl px-3 py-2.5 text-sm text-slate-700"
+            >
+              <option value="">All Classes</option>
+              {classes.map((item) => (
+                <option key={item.id} value={item.id}>{item.class_name}</option>
               ))}
-              {mentorLoadOverview.length === 0 ? (
-                <p className="text-sm text-slate-500">No mentors available yet.</p>
-              ) : null}
-            </div>
-          </SectionCard>
+            </select>
+          </div>
         </section>
 
         <section className="overflow-hidden rounded-2xl border border-slate-200/70 bg-white/90 shadow-sm">
           <div className="flex flex-col gap-3 border-b border-slate-200/70 px-6 py-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-slate-800">Project Allocation Table</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Review AI match suggestions alongside detected idea signals, then confirm the final mentor manually.
-              </p>
-            </div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-teal-100 bg-teal-50/80 px-3 py-1.5 text-xs font-medium text-teal-700">
-              <span className="h-2 w-2 rounded-full bg-teal-500" />
-              AI suggestions are advisory only
             </div>
           </div>
 
@@ -750,7 +665,7 @@ export default function AdminGuideAllocation() {
 
                   <div className="mt-4 grid gap-4 sm:grid-cols-2">
                     <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Detected Domain</p>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Domain</p>
                       <p className="mt-2 text-sm font-semibold text-slate-800">{project.detected_domain || "General"}</p>
                       {project.detected_subdomain ? (
                         <p className="mt-1 text-xs text-slate-500">{project.detected_subdomain}</p>
@@ -763,31 +678,15 @@ export default function AdminGuideAllocation() {
                             </span>
                           ))}
                         </div>
-                      ) : (
-                        <p className="mt-3 text-xs text-slate-400">No keyword signals yet</p>
-                      )}
-                      {(project.technologies || []).length > 0 ? (
-                        <p className="mt-3 text-[11px] text-slate-400">
-                          Tech: {project.technologies.slice(0, 3).join(", ")}
-                        </p>
                       ) : null}
                     </div>
 
                     <div className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Assigned Guide</p>
-                      <p className="mt-2 text-sm font-semibold text-slate-800">{assignedGuide}</p>
-                      {fallbackGuide?.specialization ? (
-                        <p className="mt-1 text-xs text-slate-500">{fallbackGuide.specialization}</p>
-                      ) : null}
-                      {currentGuideId && fallbackGuide ? (
-                        <p className="mt-3 text-[11px] text-slate-400">
-                          Load: {getGuideWorkload(currentGuideId)}/{getMentorCapacity(fallbackGuide)} teams
-                        </p>
-                      ) : (
-                        <p className="mt-3 text-[11px] text-slate-400">No guide assigned yet</p>
-                      )}
+                      <p className="mt-2 text-sm font-semibold text-slate-800">{isAssigned ? assignedGuide : "Unassigned"}</p>
                     </div>
-                  </div>                  {!isAssigned ? (
+                  </div>
+                  {!isAssigned ? (
                     <div className="mt-4">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Recommended Mentors</p>
                       <div className="mt-3 space-y-2.5">
@@ -816,7 +715,7 @@ export default function AdminGuideAllocation() {
                                     </p>
                                   </div>
                                   <p className="mt-1 text-[11px] text-slate-500">
-                                    {recommendation.reasons.join(" • ") || "General fit"}
+                                    {recommendation.reasons.join(" | ") || "General fit"}
                                   </p>
                                 </div>
                                 <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-700">
@@ -825,19 +724,17 @@ export default function AdminGuideAllocation() {
                               </div>
                             </button>
                           ))
-                        ) : (
-                          <p className="text-xs text-slate-400">No suggestions yet</p>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                   ) : null}
 
                   <div className="mt-4 border-t border-slate-200/70 pt-4">
-                    <div className="flex flex-col gap-2.5 sm:flex-row">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                       <select
                         value={selection}
                         onChange={(event) => setSelectedGuides((prev) => ({ ...prev, [project.id]: event.target.value }))}
-                        className="glass-input min-w-0 flex-1 rounded-xl px-3 py-2.5 text-sm text-slate-700"
+                        className="glass-input min-w-0 flex-1 rounded-lg px-3 py-2 text-sm text-slate-700"
                       >
                         <option value="">Select guide</option>
                         <option value={NONE_GUIDE_VALUE}>None (Unassign)</option>
@@ -855,7 +752,7 @@ export default function AdminGuideAllocation() {
                         type="button"
                         onClick={() => assignGuide(project.id, selection)}
                         disabled={loading || saving || !selection || !allowed}
-                        className="rounded-xl px-4 py-2.5 text-sm font-semibold btn-primary disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-lg px-3 py-2 text-xs font-semibold btn-primary disabled:cursor-not-allowed disabled:opacity-50 sm:min-w-[92px]"
                       >
                         {selection === NONE_GUIDE_VALUE ? "Unassign" : isAssigned ? "Reassign" : "Assign"}
                       </button>
@@ -880,7 +777,7 @@ export default function AdminGuideAllocation() {
               <thead className="bg-slate-100/70 text-slate-600">
                 <tr>
                   <th className="px-6 py-3 text-left font-semibold">Project Name</th>
-                  <th className="px-6 py-3 text-left font-semibold">Detected Domain</th>
+                  <th className="px-6 py-3 text-left font-semibold">Domain</th>
                   <th className="px-6 py-3 text-left font-semibold">Recommended Mentors</th>
                   <th className="px-6 py-3 text-left font-semibold">Assigned Guide</th>
                   <th className="px-6 py-3 text-left font-semibold">Status</th>
@@ -939,13 +836,6 @@ export default function AdminGuideAllocation() {
                                 </span>
                               ))}
                             </div>
-                          ) : (
-                            <p className="text-xs text-slate-400">No keyword signals yet</p>
-                          )}
-                          {(project.technologies || []).length > 0 ? (
-                            <p className="text-[11px] text-slate-400">
-                              Tech: {project.technologies.slice(0, 3).join(", ")}
-                            </p>
                           ) : null}
                         </div>
                       </td>
@@ -978,12 +868,7 @@ export default function AdminGuideAllocation() {
                                         </p>
                                       </div>
                                       <p className="mt-1 text-[11px] text-slate-500">
-                                        {recommendation.reasons.join(" • ") || "General fit"}
-                                      </p>
-                                      <p className="mt-1 text-[11px] text-slate-400">
-                                        {recommendation.remainingCapacity > 0
-                                          ? `${recommendation.remainingCapacity} slots available`
-                                          : "Currently at capacity"}
+                                        {recommendation.reasons.join(" | ") || "General fit"}
                                       </p>
                                     </div>
                                     <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-700">
@@ -993,57 +878,38 @@ export default function AdminGuideAllocation() {
                                 </button>
                               ))
                             ) : (
-                              <p className="text-xs text-slate-400">No suggestions yet</p>
+                              <p className="text-sm text-slate-400">-</p>
                             )}
-                            <p className="text-[11px] text-slate-400">
-                              Suggestions are advisory. Admin still decides the final assignment.
-                            </p>
                           </div>
                         ) : (
-                          <p className="text-sm text-slate-400">Mentor already assigned.</p>
+                          <p className="text-sm text-slate-400">-</p>
                         )}
                       </td>
 
                       <td className="px-6 py-4 align-top">
                         <div className="space-y-1.5">
-                          <p className="font-medium text-slate-700">{assignedGuide}</p>
-                          {fallbackGuide?.specialization ? (
-                            <p className="text-xs text-slate-500">{fallbackGuide.specialization}</p>
-                          ) : null}
-                          {currentGuideId && fallbackGuide ? (
-                            <p className="text-[11px] text-slate-400">
-                              Load: {getGuideWorkload(currentGuideId)}/{getMentorCapacity(fallbackGuide)} teams
-                            </p>
-                          ) : (
-                            <p className="text-[11px] text-slate-400">No guide assigned yet</p>
-                          )}
+                          <p className="font-medium text-slate-700">{isAssigned ? assignedGuide : "Unassigned"}</p>
                         </div>
                       </td>
 
                       <td className="px-6 py-4 align-top">
                         {isAssigned ? (
-                          <div className="space-y-1.5">
-                            <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-                              Assigned
-                            </span>
-                            <p className="text-[11px] text-slate-400">Team already has a confirmed guide.</p>
-                          </div>
+                          <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                            Assigned
+                          </span>
                         ) : (
-                          <div className="space-y-1.5">
-                            <span className="inline-flex rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">
-                              Unassigned
-                            </span>
-                            <p className="text-[11px] text-slate-400">Needs admin approval and assignment.</p>
-                          </div>
+                          <span className="inline-flex rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">
+                            Unassigned
+                          </span>
                         )}
                       </td>
 
                       <td className="px-6 py-4 align-top">
-                        <div className="flex min-w-[220px] flex-col gap-2.5">
+                        <div className="flex min-w-[180px] flex-col gap-2">
                           <select
                             value={selection}
                             onChange={(event) => setSelectedGuides((prev) => ({ ...prev, [project.id]: event.target.value }))}
-                            className="glass-input rounded-xl px-3 py-2.5 text-sm text-slate-700"
+                            className="glass-input rounded-lg px-3 py-2 text-sm text-slate-700"
                           >
                             <option value="">Select guide</option>
                             <option value={NONE_GUIDE_VALUE}>None (Unassign)</option>
@@ -1061,7 +927,7 @@ export default function AdminGuideAllocation() {
                             type="button"
                             onClick={() => assignGuide(project.id, selection)}
                             disabled={loading || saving || !selection || !allowed}
-                            className="rounded-xl px-3 py-2.5 text-sm font-semibold btn-primary disabled:cursor-not-allowed disabled:opacity-50"
+                            className="self-start rounded-lg px-3 py-2 text-xs font-semibold btn-primary disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {selection === NONE_GUIDE_VALUE ? "Unassign" : isAssigned ? "Reassign" : "Assign"}
                           </button>

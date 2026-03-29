@@ -92,6 +92,26 @@ function hasDeadlinePassed(deadline) {
   return date.getTime() <= Date.now();
 }
 
+function deriveTimelineStageState(stage) {
+  const deadlinePassed = hasDeadlinePassed(stage?.deadline);
+  if (stage?.rawStatus === "Completed" || deadlinePassed) {
+    return "Completed";
+  }
+  if (stage?.rawStatus === "Locked") {
+    return "Locked";
+  }
+  return "Pending";
+}
+
+function buildStageProgressLabel(stage) {
+  const state = deriveTimelineStageState(stage);
+  if (state === "Completed") return "Deadline reached";
+  if (state === "Pending") {
+    return stage?.deadline ? "Evaluation open" : "Unlocked, deadline not set";
+  }
+  return "Waiting for unlock";
+}
+
 export default function AdminDashboard() {
   const navigate = useNavigate();
   const today = new Date().toLocaleDateString("en-IN", {
@@ -140,8 +160,6 @@ export default function AdminDashboard() {
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [selectedClassName, setSelectedClassName] = useState("S6 CSE A");
   const [selectedClassId, setSelectedClassId] = useState("");
-  const [dashboardClasses, setDashboardClasses] = useState([]);
-  const [classActiveStageMap, setClassActiveStageMap] = useState({});
   const [adminProfile, setAdminProfile] = useState({
     full_name: "",
     email: "",
@@ -194,10 +212,6 @@ export default function AdminDashboard() {
 
       setProjects(projectsRes.data || []);
       setMentors(mentorsRes.data || []);
-      setDashboardClasses((classesRes.data || []).map((item) => ({
-        ...item,
-        label: getClassLabel(item),
-      })));
     } finally {
       setLoading(false);
     }
@@ -225,7 +239,6 @@ export default function AdminDashboard() {
       setSelectedClassId("");
       setSelectedClassName("");
       setReviewStages([]);
-      setClassActiveStageMap({});
       return;
     }
 
@@ -255,22 +268,6 @@ export default function AdminDashboard() {
       }));
 
     setReviewStages(mapped);
-
-    const { data: allStageRows, error: allStageError } = await supabase
-      .from("review_stages")
-      .select("class_id, stage_name, is_active");
-
-    if (allStageError) throw allStageError;
-
-    const classNameById = new Map(normalizedClasses.map((item) => [item.id, item.label]));
-    const activeMap = {};
-    (allStageRows || []).forEach((row) => {
-      if (!row?.is_active) return;
-      const className = classNameById.get(row.class_id);
-      if (!className) return;
-      activeMap[className] = normalizeStageName(row.stage_name);
-    });
-    setClassActiveStageMap(activeMap);
   }, [selectedClassId, selectedClassName]);
 
   useEffect(() => {
@@ -303,33 +300,6 @@ export default function AdminDashboard() {
     };
   }, [fetchAdminProfile, fetchDashboardData, fetchReviewStages, selectedClassId]);
 
-  const teams = useMemo(() => {
-    const classNameById = new Map(dashboardClasses.map((item) => [item.id, item.label || getClassLabel(item)]));
-    return projects.map((project) => {
-      const guide = mentors.find((mentor) => mentor.id === project.guide_id);
-      const status = String(project.status || "").toLowerCase();
-      const submissionStatus = status.includes("submit") || status.includes("approve")
-        ? "Submitted"
-        : status.includes("late")
-          ? "Late"
-          : "Pending";
-      const fallbackClass = project.team_members
-        ?.map((member) => member?.profiles?.class_section)
-        ?.find(Boolean);
-      const resolvedClass = classNameById.get(project.class_id) || fallbackClass || "Unassigned Class";
-      const activeReviewStage = classActiveStageMap[resolvedClass] || "-";
-      return {
-        id: project.id,
-        name: project.title || "Untitled Project",
-        class: resolvedClass,
-        stage: activeReviewStage,
-        submissionStatus,
-        status: submissionStatus || "Pending",
-        guide: guide?.full_name || null,
-      };
-    });
-  }, [classActiveStageMap, dashboardClasses, mentors, projects]);
-
   const assignedProjects = useMemo(
     () => projects.filter((project) => Boolean(project.guide_id)).length,
     [projects]
@@ -355,8 +325,6 @@ export default function AdminDashboard() {
 
   const orderedReviewStages = useMemo(() => {
     const byName = new Map(reviewStages.map((stage) => [normalizeStageName(stage.name), stage]));
-    let activeStageFound = false;
-    let fallbackActiveAssigned = false;
 
     return STAGE_ORDER.map((name, index) => {
       const liveStage = byName.get(name);
@@ -364,37 +332,20 @@ export default function AdminDashboard() {
         id: `dashboard-stage-${index}`,
         name,
         deadline: null,
-        status: "Inactive",
-        rawStatus: "Inactive",
+        status: "Locked",
+        rawStatus: "Locked",
       };
-
-      const rawStatus = baseStage.rawStatus || baseStage.status || "Inactive";
-      const deadlinePassed = hasDeadlinePassed(baseStage.deadline);
-      const isOpened = rawStatus !== "Locked";
-      let status = "Locked";
-
-      if (rawStatus === "Completed" || deadlinePassed) {
-        status = "Completed";
-      } else if (rawStatus === "Active") {
-        status = "Active";
-        activeStageFound = true;
-      } else if (isOpened && !activeStageFound && !fallbackActiveAssigned) {
-        status = "Active";
-        fallbackActiveAssigned = true;
-      } else if (isOpened) {
-        status = "Pending";
-      }
 
       return {
         ...baseStage,
-        status,
-        rawStatus,
+        status: deriveTimelineStageState(baseStage),
+        progressLabel: buildStageProgressLabel(baseStage),
       };
     });
   }, [reviewStages]);
 
   const activeReviewStage = useMemo(
-    () => orderedReviewStages.find((stage) => stage.status === "Active")?.name || "-",
+    () => orderedReviewStages.find((stage) => stage.status === "Pending")?.name || "-",
     [orderedReviewStages]
   );
 
@@ -404,7 +355,7 @@ export default function AdminDashboard() {
   );
 
   const currentTimelineIndex = useMemo(() => {
-    const activeIndex = orderedReviewStages.findIndex((stage) => stage.status === "Active");
+    const activeIndex = orderedReviewStages.findIndex((stage) => stage.status === "Pending");
     if (activeIndex !== -1) return activeIndex;
     const pendingIndex = orderedReviewStages.findIndex((stage) => stage.status === "Pending");
     if (pendingIndex !== -1) return Math.max(pendingIndex - 1, 0);
@@ -566,8 +517,8 @@ export default function AdminDashboard() {
                 </span>
                 <span>
                   {activeReviewStage === "-"
-                    ? "No review stage is currently open."
-                    : `${formatTimelineStageLabel(activeReviewStage)} is currently active.`}
+                    ? "No evaluation stage is currently unlocked for this class."
+                    : `${formatTimelineStageLabel(activeReviewStage)} is currently in progress for this class.`}
                 </span>
               </div>
 
@@ -585,19 +536,19 @@ export default function AdminDashboard() {
                   <div className="relative grid grid-cols-3 gap-y-8 md:grid-cols-6">
                     {orderedReviewStages.map((stage, index) => {
                       const isCompleted = stage.status === "Completed";
-                      const isActive = stage.status === "Active";
-                      const isDimmed = !isCompleted && !isActive;
+                      const isPending = stage.status === "Pending";
+                      const isDimmed = !isCompleted && !isPending;
                       const nodeClass = isCompleted
                         ? "border-emerald-500 bg-emerald-500 text-white"
-                        : isActive
+                        : isPending
                           ? "border-[#00D2C4] bg-white text-[#00D2C4] shadow-[0_0_0_6px_rgba(0,210,196,0.12)]"
                           : "border-slate-200 bg-slate-50 text-slate-400";
                       const pillClass = isCompleted
                         ? "bg-emerald-50 text-emerald-700"
-                        : isActive
+                        : isPending
                           ? "bg-[#E8FFFB] text-[#008E86]"
                           : "bg-slate-100 text-slate-500";
-                      const pillLabel = isCompleted ? "Completed" : isActive ? "Active" : "Locked";
+                      const pillLabel = isCompleted ? "Completed" : isPending ? "Pending" : "Locked";
 
                       return (
                         <button
@@ -607,7 +558,7 @@ export default function AdminDashboard() {
                           className="flex flex-col items-center text-center"
                         >
                           <span className={`relative z-10 inline-flex h-14 w-14 items-center justify-center rounded-full border-2 text-lg font-bold transition-all ${nodeClass}`}>
-                            {isCompleted ? "OK" : isActive ? <span className="h-4 w-4 rounded-full bg-[#00D2C4]" /> : (
+                            {isCompleted ? "OK" : isPending ? <span className="h-4 w-4 rounded-full bg-[#00D2C4]" /> : (
                               <span className="material-symbols-outlined text-[20px]">lock</span>
                             )}
                           </span>
@@ -619,6 +570,9 @@ export default function AdminDashboard() {
                           </span>
                           <p className={`mt-2 text-xs ${isDimmed ? "text-slate-300" : "text-slate-400"}`}>
                             {formatStageSubline(stage)}
+                          </p>
+                          <p className={`mt-1 text-xs font-medium ${isDimmed ? "text-slate-300" : "text-slate-500"}`}>
+                            {stage.progressLabel}
                           </p>
                         </button>
                       );
