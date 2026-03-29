@@ -13,6 +13,7 @@ import {
   getDepartmentMentors,
   listInternalMarks,
   saveInternalMarks,
+  publishCoordinatorResults,
 } from '../controllers/coordinatorController.js';
 import { getCoordinatorResultsBreakdown } from '../controllers/rubricController.js';
 
@@ -32,5 +33,6 @@ router.get('/department-mentors', getDepartmentMentors);
 router.get('/internal-marks', listInternalMarks);
 router.put('/internal-marks', saveInternalMarks);
 router.get('/final-results/breakdown', getCoordinatorResultsBreakdown);
+router.post('/results/publish', publishCoordinatorResults);
 
 export default router;

@@ -86,6 +86,43 @@ const getProjectTeamMemberIds = async (projectId) => {
   return [...new Set((data || []).map((row) => row.student_id).filter(Boolean))];
 };
 
+export const publishCoordinatorMarks = async ({ classId, publishType }) => {
+  const studentIds = await getClassStudentIds(classId);
+  if (studentIds.length === 0) return { updatedCount: 0 };
+
+  const { data: finalRows, error: fetchError } = await supabase
+    .from('final_results')
+    .select('student_id, status')
+    .in('student_id', studentIds);
+
+  if (fetchError) throw fetchError;
+
+  let count = 0;
+  for (const row of (finalRows || [])) {
+    let newStatus = row.status;
+    if (publishType === 'internal') {
+      if (newStatus === 'sent_to_admin' || newStatus === 'internal_and_sent') newStatus = 'internal_and_sent';
+      else newStatus = 'internal_published';
+    } else if (publishType === 'admin') {
+      if (newStatus === 'internal_published' || newStatus === 'internal_and_sent') newStatus = 'internal_and_sent';
+      else newStatus = 'sent_to_admin';
+    } else if (publishType === 'unpublish_internal') {
+      if (newStatus === 'internal_and_sent') newStatus = 'sent_to_admin';
+      else if (newStatus === 'internal_published') newStatus = 'frozen';
+    } else if (publishType === 'unpublish_admin') {
+      if (newStatus === 'internal_and_sent') newStatus = 'internal_published';
+      else if (newStatus === 'sent_to_admin') newStatus = 'frozen';
+    }
+
+    if (newStatus !== row.status) {
+      await supabase.from('final_results').update({ status: newStatus }).eq('student_id', row.student_id);
+      count++;
+    }
+  }
+
+  return { updatedCount: count };
+};
+
 const getClassStudentIds = async (classId) => {
   const { data: projects, error: projectError } = await supabase
     .from('projects')
@@ -277,8 +314,11 @@ const getDeadlineStateForStudent = async (studentId) => {
   }, {});
 };
 
-const computeResultStatus = ({ attendanceMarks, reportMarks, reviewTotal, guideTotal, eseTotal, lockedAt, isPublished }) => {
+const computeResultStatus = ({ attendanceMarks, reportMarks, reviewTotal, guideTotal, eseTotal, lockedAt, isPublished, existingStatus }) => {
   if (isPublished) return 'published';
+  if (existingStatus === 'internal_published') return 'internal_published';
+  if (existingStatus === 'sent_to_admin') return 'sent_to_admin';
+  if (existingStatus === 'internal_and_sent') return 'internal_and_sent';
   if (lockedAt) return 'frozen';
   if (Number(attendanceMarks) || Number(reportMarks) || Number(reviewTotal) || Number(guideTotal) || Number(eseTotal)) {
     return 'calculated';
@@ -289,7 +329,7 @@ const computeResultStatus = ({ attendanceMarks, reportMarks, reviewTotal, guideT
 const getFinalResultRow = async (studentId) => {
   const { data, error } = await supabase
     .from('final_results')
-    .select('student_id, attendance_marks, report_marks, is_published')
+    .select('student_id, attendance_marks, report_marks, is_published, status')
     .eq('student_id', studentId)
     .maybeSingle();
 
@@ -617,6 +657,7 @@ export const autoCalculateStudent = async (studentId) => {
     eseTotal,
     lockedAt,
     isPublished: Boolean(existing?.is_published),
+    existingStatus: existing?.status,
   });
 
   const payload = {
@@ -645,11 +686,7 @@ export const autoCalculateStudent = async (studentId) => {
 
 export const autoCalculateProject = async (projectId) => {
   const studentIds = await getProjectTeamMemberIds(projectId);
-  const results = [];
-  for (const studentId of studentIds) {
-    results.push(await autoCalculateStudent(studentId));
-  }
-  return results;
+  return Promise.all(studentIds.map((studentId) => autoCalculateStudent(studentId)));
 };
 
 export const upsertStageMarks = async ({ stage, projectId, evaluatorId, entries, reviewStage = null, feedbackEntries = [], senderName = '' }) => {
@@ -835,18 +872,14 @@ export const getProjectStageBreakdown = async ({ projectId, stage, reviewStage =
 
 export const recalculateClassFinalResults = async (classId) => {
   const studentIds = await getClassStudentIds(classId);
-  const results = [];
-  for (const studentId of studentIds) {
-    results.push(await autoCalculateStudent(studentId));
-  }
-  return results;
+  return Promise.all(studentIds.map((studentId) => autoCalculateStudent(studentId)));
 };
 
 export const getAdminFinalResults = async () => {
   const { data, error } = await supabase
     .from('final_results')
     .select('student_id, final_marks, status, is_published')
-    .eq('is_published', true)
+    .in('status', ['sent_to_admin', 'internal_and_sent', 'published'])
     .order('updated_at', { ascending: false });
 
   if (error) throw error;
@@ -1095,7 +1128,6 @@ export const getCoordinatorFinalResults = async (classId) => {
 };
 
 export const getCoordinatorInternalComponents = async (classId) => {
-  await recalculateClassFinalResults(classId);
   const studentIds = await getClassStudentIds(classId);
   if (studentIds.length === 0) return [];
 
@@ -1186,13 +1218,32 @@ export const publishFinalResults = async ({ studentIds = null, adminId }) => {
 export const getStudentPublishedResult = async (studentId) => {
   const { data, error } = await supabase
     .from('final_results')
-    .select('student_id, final_marks, status, is_published, published_at')
+    .select('student_id, cie_total, ese_total, final_marks, status, is_published, published_at')
     .eq('student_id', studentId)
-    .eq('is_published', true)
     .single();
 
   if (error || !data) {
     throw createHttpError('Final result is not published yet.', 404);
+  }
+
+  const isFinalPublished = data.is_published;
+  const isInternalPublished = data.status === 'internal_published' || data.status === 'internal_and_sent' || isFinalPublished;
+
+  if (!isInternalPublished && !isFinalPublished) {
+    throw createHttpError('Final result is not published yet.', 404);
+  }
+
+  if (!isFinalPublished) {
+    return {
+      student_id: data.student_id,
+      cie_total: data.cie_total,
+      ese_total: null,
+      final_marks: null,
+      status: data.status,
+      is_published: false,
+      published_at: data.published_at,
+      internal_only: true,
+    };
   }
 
   return data;

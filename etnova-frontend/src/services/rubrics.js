@@ -70,11 +70,11 @@ export async function saveProjectRubricMarks(projectId, stage, entries, reviewSt
 }
 
 export async function fetchCoordinatorResultsBreakdown() {
-  return apiRequest("/coordinator/final-results/breakdown", { skipCache: true });
+  return apiRequest("/coordinator/final-results/breakdown");
 }
 
 export async function fetchCoordinatorInternalMarks() {
-  return apiRequest("/coordinator/internal-marks", { skipCache: true });
+  return apiRequest("/coordinator/internal-marks");
 }
 
 export async function saveCoordinatorInternalMarks(entries) {
@@ -86,4 +86,11 @@ export async function saveCoordinatorInternalMarks(entries) {
 
 export async function fetchPublishedStudentResult() {
   return apiRequest("/results/me", { skipCache: true });
+}
+
+export async function publishCoordinatorResults(type) {
+  return apiRequest("/coordinator/results/publish", {
+    method: "POST",
+    body: { type },
+  });
 }

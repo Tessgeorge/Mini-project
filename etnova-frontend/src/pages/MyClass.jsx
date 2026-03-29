@@ -187,6 +187,7 @@ const INNER_TABS = [
   { key: "submissions", label: "Submissions", icon: "upload_file" },
   { key: "teams", label: "Teams", icon: "groups" },
   { key: "reviews", label: "Reviews", icon: "verified" },
+  { key: "marks", label: "Marks", icon: "military_tech" },
 ];
 
 // ─── TAB 1: Overview ─────────────────────────────────────────────────────────
@@ -226,7 +227,20 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
     </Card>
   );
 
-  const { classTitle, totalProjects, evaluatedProjects, pendingEvaluations, classAverageScore, projects = [], reviewStages = [], deadlineLoadError = "", stageProgress = {} } = classData;
+  const {
+    classTitle,
+    totalProjects,
+    totalStudents = Array.isArray(classData?.projects)
+      ? classData.projects.reduce((sum, project) => sum + Number(project?.teamSize || 0), 0)
+      : 0,
+    evaluatedProjects,
+    pendingEvaluations,
+    classAverageScore,
+    projects = [],
+    reviewStages = [],
+    deadlineLoadError = "",
+    stageProgress = {}
+  } = classData;
 
   const handleDraftChange = (id, key, val) => {
     setDeadlineDrafts(p => ({ ...p, [id]: { date: p[id]?.date || "", time: p[id]?.time || "", [key]: val } }));
@@ -303,7 +317,7 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
           </span>
           <span className="text-slate-300 text-sm">·</span>
           <span className="text-sm text-slate-500">
-            {totalProjects * 3} students
+            {totalStudents} students
           </span>
           {coordinators.length > 0 && (
             <>
@@ -1849,6 +1863,12 @@ export default function MyClass({ classData, loading, onSaveStudentDeadline, act
   const classId = classData?.classId || null;
   const classTitle = classData?.classTitle || "My Class";
   const totalTeams = Number(classData?.totalProjects || 0);
+  const totalStudents = Number(
+    classData?.totalStudents ??
+    (Array.isArray(classData?.projects)
+      ? classData.projects.reduce((sum, project) => sum + Number(project?.teamSize || 0), 0)
+      : 0)
+  );
   const evaluatedTeams = Number(classData?.evaluatedProjects || 0);
 
   return (
@@ -1888,7 +1908,7 @@ export default function MyClass({ classData, loading, onSaveStudentDeadline, act
                 {evaluatedTeams} / {totalTeams} Evaluated
               </span>
               <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full">
-                {totalTeams * 3} Students
+                {totalStudents} Students
               </span>
             </div>
           </div>
@@ -1900,6 +1920,7 @@ export default function MyClass({ classData, loading, onSaveStudentDeadline, act
       {activeSubPage === "teams" && classId && <TabTeams classId={classId} />}
       {activeSubPage === "submissions" && classId && <TabSubmissions classId={classId} />}
       {activeSubPage === "reviews" && classId && <TabReviews classId={classId} />}
+      {activeSubPage === "marks" && classId && <CoordinatorResultsPanel classId={classId} />}
 
       {!classId && activeSubPage !== "overview" && (
         <Card>

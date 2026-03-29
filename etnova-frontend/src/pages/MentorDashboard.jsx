@@ -608,7 +608,7 @@ function MentorProfileModal({ profile, onClose, onSave, onSignOut, startEditing 
 
 // ─── Sidebar ────────────────────────────────────────────────────────────────
 function Sidebar({ active, setActive, onSignOut, showMyClass, showEvaluation, isOpen }) {
-  const myClassSubs = ["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews"];
+  const myClassSubs = ["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews", "my-class-marks"];
   const isMyClassActive = myClassSubs.includes(active);
   const [myClassManuallyOpen, setMyClassManuallyOpen] = useState(isMyClassActive);
   const myClassOpen = isMyClassActive || myClassManuallyOpen;
@@ -624,6 +624,7 @@ function Sidebar({ active, setActive, onSignOut, showMyClass, showEvaluation, is
     { key: "my-class-teams", label: "Team" },
     { key: "my-class-submissions", label: "Submissions" },
     { key: "my-class-reviews", label: "Reviews" },
+    { key: "my-class-marks", label: "Marks" },
   ];
 
   return (
@@ -708,6 +709,7 @@ function Topbar({ active, mentorName, onProfileClick, onToggleSidebar }) {
     "my-class-teams":        "My Class — Team",
     "my-class-submissions":  "My Class — Submissions",
     "my-class-reviews":      "My Class — Reviews",
+    "my-class-marks":        "My Class — Marks",
   };
   return (
     <header className="bg-white border-b border-gray-100 px-4 md:px-8 py-4 flex items-center justify-between sticky top-0 z-30">
@@ -1399,6 +1401,7 @@ export default function MentorDashboard() {
     const documents = docsRes.data || [];
     const guideMap = new Map(guides.map(g => [g.id, g.full_name || "Unassigned"]));
     const memberCountByProject = members.reduce((acc, item) => { acc[item.project_id] = (acc[item.project_id] || 0) + 1; return acc; }, {});
+    const totalStudents = new Set(members.map((item) => item.student_id).filter(Boolean)).size;
     const studentsByProject = members.reduce((acc, item) => {
       if (!item?.project_id || !item?.student_id) return acc;
       if (!acc[item.project_id]) acc[item.project_id] = new Set();
@@ -1475,6 +1478,7 @@ export default function MentorDashboard() {
     return {
       classId, classTitle: classRow?.class_section || "Untitled Class",
       totalProjects: projectRows.length, evaluatedProjects: evaluatedCount,
+      totalStudents,
       pendingEvaluations: projectRows.length - evaluatedCount,
       classAverageScore, stageProgress, projects: projectRows,
       reviewStages: sortReviewStages(reviewStageRows || []),
@@ -1677,7 +1681,7 @@ export default function MentorDashboard() {
   const canOpenEvaluationPanel = hasReviewAccess;
 
   useEffect(() => {
-    if (!isCoordinatorWithClass && ["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews"].includes(active)) {
+    if (!isCoordinatorWithClass && ["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews", "my-class-marks"].includes(active)) {
       setActive("overview");
     }
   }, [active, isCoordinatorWithClass]);
@@ -1817,7 +1821,7 @@ export default function MentorDashboard() {
               writableReviewStages={writableReviewStages}
             />
           )}
-          {["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews"].includes(active) && isCoordinatorWithClass && (
+          {["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews", "my-class-marks"].includes(active) && isCoordinatorWithClass && (
             <MyClass
               classData={myClassData}
               loading={myClassLoading}
