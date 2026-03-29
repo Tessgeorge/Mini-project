@@ -1507,7 +1507,6 @@ export default function MentorDashboard() {
           : Promise.resolve({ data: [] }),
       ]);
 
-<<<<<<< HEAD
       const members = membersRes.data || [];
       const classEvals = evalRes.data || [];
       const guides = guidesRes.data || [];
@@ -1532,33 +1531,6 @@ export default function MentorDashboard() {
         if (!acc[key]) acc[key] = item;
         return acc;
       }, {});
-=======
-    const members = membersRes.data || [];
-    const classEvals = evalRes.data || [];
-    const guides = guidesRes.data || [];
-    const documents = docsRes.data || [];
-    const guideMap = new Map(guides.map(g => [g.id, g.full_name || "Unassigned"]));
-    const memberCountByProject = members.reduce((acc, item) => { acc[item.project_id] = (acc[item.project_id] || 0) + 1; return acc; }, {});
-    const totalStudents = new Set(members.map((item) => item.student_id).filter(Boolean)).size;
-    const studentsByProject = members.reduce((acc, item) => {
-      if (!item?.project_id || !item?.student_id) return acc;
-      if (!acc[item.project_id]) acc[item.project_id] = new Set();
-      acc[item.project_id].add(item.student_id);
-      return acc;
-    }, {});
-    const evalByProject = classEvals.reduce((acc, item) => {
-      if (!acc[item.project_id]) acc[item.project_id] = [];
-      const normalizedScore = Number(item.score ?? item.obtained_marks);
-      acc[item.project_id].push(Number.isNaN(normalizedScore) ? 0 : normalizedScore);
-      return acc;
-    }, {});
-    const latestDocumentByProjectType = documents.reduce((acc, item) => {
-      if (!item?.project_id || !item?.document_type) return acc;
-      const key = `${item.project_id}:${String(item.document_type).trim().toLowerCase()}`;
-      if (!acc[key]) acc[key] = item;
-      return acc;
-    }, {});
->>>>>>> 39396fd (marks)
 
       let reviewMarks = [];
       if (projectIds.length) {
@@ -1614,7 +1586,6 @@ export default function MentorDashboard() {
       const allScores = classEvals.map(item => Number(item.score ?? item.obtained_marks)).filter(s => !Number.isNaN(s));
       const classAverageScore = allScores.length ? allScores.reduce((sum, s) => sum + s, 0) / allScores.length : null;
 
-<<<<<<< HEAD
       return {
         classId, classTitle: classRow?.class_section || "Untitled Class",
         totalProjects: projectRows.length, evaluatedProjects: evaluatedCount,
@@ -1628,21 +1599,6 @@ export default function MentorDashboard() {
           : "",
       };
     });
-=======
-    return {
-      classId, classTitle: classRow?.class_section || "Untitled Class",
-      totalProjects: projectRows.length, evaluatedProjects: evaluatedCount,
-      totalStudents,
-      pendingEvaluations: projectRows.length - evaluatedCount,
-      classAverageScore, stageProgress, projects: projectRows,
-      reviewStages: sortReviewStages(reviewStageRows || []),
-      deadlineLoadError: reviewStageError
-        ? (/coordinator_deadline/i.test(String(reviewStageError.message || ""))
-          ? 'The "coordinator_deadline" column is missing in "review_stages". Run the Supabase ALTER TABLE migration first.'
-          : (reviewStageError.message || "Failed to load review deadlines."))
-        : "",
-    };
->>>>>>> 39396fd (marks)
   }, []);
 
   useEffect(() => {
@@ -1816,11 +1772,7 @@ export default function MentorDashboard() {
   const isMyClassActive = MY_CLASS_TABS.includes(active);
 
   useEffect(() => {
-<<<<<<< HEAD
     if (!isCoordinatorWithClass && MY_CLASS_TABS.includes(active)) {
-=======
-    if (!isCoordinatorWithClass && ["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews", "my-class-marks"].includes(active)) {
->>>>>>> 39396fd (marks)
       setActive("overview");
     }
   }, [active, isCoordinatorWithClass]);
@@ -1960,8 +1912,7 @@ export default function MentorDashboard() {
               writableReviewStages={writableReviewStages}
             />
           )}
-<<<<<<< HEAD
-          {["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews"].includes(active) && isCoordinatorWithClass && (
+          {["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews", "my-class-marks"].includes(active) && isCoordinatorWithClass && (
             <Suspense fallback={<TabPanelLoader label="Loading class workspace..." />}>
               <MyClass
                 classData={myClassData}
@@ -1971,16 +1922,6 @@ export default function MentorDashboard() {
                 onNavigate={(sub) => setActive("my-class-" + sub)}
               />
             </Suspense>
-=======
-          {["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews", "my-class-marks"].includes(active) && isCoordinatorWithClass && (
-            <MyClass
-              classData={myClassData}
-              loading={myClassLoading}
-              onSaveStudentDeadline={handleSaveStudentDeadline}
-              activeSubPage={active.replace("my-class-", "")}
-              onNavigate={(sub) => setActive("my-class-" + sub)}
-            />
->>>>>>> 39396fd (marks)
           )}
         </main>
       </div>
