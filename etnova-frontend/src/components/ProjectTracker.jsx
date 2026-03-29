@@ -1,4 +1,20 @@
 export default function ProjectTracker({ project, documents }) {
+    const activeIdea = project?.approved_idea || project?.current_idea || project?.active_idea || null;
+    const normalizedIdeaStatus = String(activeIdea?.status || "").toLowerCase();
+    const ideaSubmitted = Boolean(
+        project?.approved_idea_id
+        || project?.approved_idea?.submitted_at
+        || project?.current_idea?.submitted_at
+        || ["submitted", "revision_required", "approved", "rejected"].includes(normalizedIdeaStatus)
+    );
+    const ideaSubmittedAt =
+        project?.approved_idea?.submitted_at
+        || project?.current_idea?.submitted_at
+        || activeIdea?.submitted_at
+        || project?.approved_idea?.updated_at
+        || project?.current_idea?.updated_at
+        || null;
+
     // Calculate project milestones and their status
     const milestones = [
         {
@@ -6,8 +22,8 @@ export default function ProjectTracker({ project, documents }) {
             label: 'Idea Submission',
             shortLabel: 'Idea',
             icon: 'lightbulb',
-            completed: !!project?.id,
-            date: project?.created_at,
+            completed: ideaSubmitted,
+            date: ideaSubmittedAt,
         },
         {
             id: 2,
