@@ -243,10 +243,8 @@ function resolveReviewerStageVisibility(accessRows = []) {
       writableStages: openStages,
     };
   }
-
-  const latestAssignedStage = assignedStages.length ? assignedStages[assignedStages.length - 1] : null;
   return {
-    allowedStages: latestAssignedStage ? [latestAssignedStage] : [],
+    allowedStages: [],
     writableStages: [],
   };
 }
@@ -1565,7 +1563,7 @@ export default function MentorDashboard() {
             }
           }
 
-          setHasReviewAccess(reviewerAccessRows.length > 0);
+          setHasReviewAccess((reviewerAccessRows || []).some((row) => Boolean(row?.is_open)));
           const reviewerClassIds = [...new Set((reviewerAccessRows || []).map((row) => row.class_id).filter(Boolean))];
           const reviewerBatchMap = (reviewerAccessRows || []).reduce((acc, row) => {
             if (!row?.class_id) return acc;
@@ -1696,7 +1694,7 @@ export default function MentorDashboard() {
 
   const coordinatorClassId = resolveCoordinatorClassId(mentorProfile, projects).classId;
   const isCoordinatorWithClass = Boolean(mentorProfile?.is_coordinator && coordinatorClassId);
-  const canOpenEvaluationPanel = hasReviewAccess;
+  const canOpenEvaluationPanel = hasReviewAccess && allowedReviewStages.length > 0 && reviewProjects.length > 0;
 
   useEffect(() => {
     if (!isCoordinatorWithClass && ["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews"].includes(active)) {

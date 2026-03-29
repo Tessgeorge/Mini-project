@@ -4,11 +4,13 @@ import {
   getActiveRubricsByStage,
   getAdminFinalResults,
   getCoordinatorFinalResults,
+  getEvaluatorEntryLock,
   getProjectStageBreakdown,
   getRubricsForAdmin,
   getStudentPublishedResult,
   publishFinalResults,
   saveRubricsForStage,
+  setEvaluatorEntryLock,
   upsertStageMarks,
 } from '../services/rubricEvaluationService.js';
 
@@ -29,6 +31,12 @@ const translateSchemaError = (error) => {
 
   if (rawMessage.includes("column rubrics.review_round does not exist") || rawMessage.includes("Could not find the 'review_round' column of 'rubrics'")) {
     const translated = new Error('The "rubrics.review_round" column is missing in Supabase. Run the SQL in etnova-backend/sql/rubrics_evaluation_schema.sql and refresh the schema cache.');
+    translated.status = 500;
+    return translated;
+  }
+
+  if (rawMessage.includes("rubric_entry_locks")) {
+    const translated = new Error('The "rubric_entry_locks" table is missing in Supabase. Run the SQL in etnova-backend/sql/rubrics_evaluation_schema.sql and refresh the schema cache.');
     translated.status = 500;
     return translated;
   }
@@ -133,6 +141,37 @@ export const getStageMarksBreakdown = async (req, res) => {
         marks: student.marks,
       })),
     });
+  } catch (error) {
+    return handleControllerError(res, error);
+  }
+};
+
+export const getStageEntryLock = async (req, res) => {
+  try {
+    const { stage, id: projectId } = req.params;
+    const result = await getEvaluatorEntryLock({
+      projectId,
+      stage,
+      reviewStage: req.query.review_stage || null,
+      evaluatorId: req.user.id,
+    });
+    return res.json(result);
+  } catch (error) {
+    return handleControllerError(res, error);
+  }
+};
+
+export const updateStageEntryLock = async (req, res) => {
+  try {
+    const { stage, id: projectId } = req.params;
+    const result = await setEvaluatorEntryLock({
+      projectId,
+      stage,
+      reviewStage: req.body?.review_stage || null,
+      evaluatorId: req.user.id,
+      locked: Boolean(req.body?.locked),
+    });
+    return res.json(result);
   } catch (error) {
     return handleControllerError(res, error);
   }

@@ -73,6 +73,20 @@ export async function saveProjectRubricMarks(projectId, stage, entries, reviewSt
   });
 }
 
+export async function fetchProjectRubricEntryLock(projectId, stage, reviewStage = null) {
+  const params = new URLSearchParams();
+  if (reviewStage) params.set("review_stage", reviewStage);
+  const query = params.toString();
+  return apiRequest(`/projects/${projectId}/rubric-marks/${encodeURIComponent(stage)}/lock${query ? `?${query}` : ""}`, { skipCache: true });
+}
+
+export async function updateProjectRubricEntryLock(projectId, stage, locked, reviewStage = null) {
+  return apiRequest(`/projects/${projectId}/rubric-marks/${encodeURIComponent(stage)}/lock`, {
+    method: "PUT",
+    body: { locked, review_stage: reviewStage },
+  });
+}
+
 export async function fetchCoordinatorResultsBreakdown() {
   return apiRequest("/coordinator/final-results/breakdown", { skipCache: true });
 }

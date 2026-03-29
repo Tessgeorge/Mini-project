@@ -129,3 +129,36 @@ alter table if exists public.final_results
 alter table if exists public.final_results
   alter column attendance_marks set default 0,
   alter column report_marks set default 0;
+
+create table if not exists public.rubric_entry_locks (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references public.projects(id) on delete cascade,
+  evaluator_id uuid not null references public.profiles(id) on delete cascade,
+  stage varchar(32) not null,
+  review_stage varchar(32) null,
+  locked_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table if exists public.rubric_entry_locks
+  add column if not exists project_id uuid references public.projects(id) on delete cascade,
+  add column if not exists evaluator_id uuid references public.profiles(id) on delete cascade,
+  add column if not exists stage varchar(32),
+  add column if not exists review_stage varchar(32) null,
+  add column if not exists locked_at timestamptz not null default now(),
+  add column if not exists updated_at timestamptz not null default now();
+
+do $$
+begin
+  if not exists (
+    select 1
+    from information_schema.table_constraints
+    where table_schema = 'public'
+      and table_name = 'rubric_entry_locks'
+      and constraint_name = 'rubric_entry_locks_unique_scope'
+  ) then
+    alter table public.rubric_entry_locks
+      add constraint rubric_entry_locks_unique_scope
+      unique nulls not distinct (project_id, evaluator_id, stage, review_stage);
+  end if;
+end $$;
