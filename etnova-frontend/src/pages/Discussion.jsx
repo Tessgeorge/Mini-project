@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+﻿import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import supabase from "../config/supabaseClient";
 import { apiRequest } from "../config/apiClient";
 
-/* ── Topics ───────────────────────────────────────────────────────────── */
+/* â”€â”€ Topics â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const TOPICS = [
   { id: "General", icon: "chat_bubble", color: "#00C4B4" },
   { id: "Architecture", icon: "architecture", color: "#6366F1" },
@@ -19,7 +19,7 @@ const MESSAGE_SELECT_STRATEGIES = [
   "id, project_id, sender_id, topic, message, reply_to, created_at",
 ];
 
-/* ── Helpers ───────────────────────────────────────────────────────────── */
+/* â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function fmtDay(iso) {
   const d = new Date(iso);
   const now = new Date();
@@ -56,12 +56,12 @@ function Avatar({ name, size = 32 }) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 export default function Discussion({
   projectId: externalProjectId = null,
   userId: externalUserId = null,
   userRole: externalUserRole = "student",
-  userName: externalUserName = "Participant",
+  userName: externalUserName = "Student",
   initialMembers = null,
   initialTitle = "",
 }) {
@@ -79,6 +79,7 @@ export default function Discussion({
   const [readByTopic, setReadByTopic] = useState({});
   const [readStateByTopicUser, setReadStateByTopicUser] = useState({});
   const [onlineUserIds, setOnlineUserIds] = useState({});
+  const [senderDirectory, setSenderDirectory] = useState({});
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -197,7 +198,7 @@ export default function Discussion({
     }
   }, [persistLocalReads, profile?.id, project?.id]);
 
-  /* ── Derived ── */
+  /* â”€â”€ Derived â”€â”€ */
   const participants = useMemo(() => {
     if (!project) return [];
     const team = (project.team_members || []).map(m => ({
@@ -221,13 +222,65 @@ export default function Discussion({
   const participantMap = useMemo(() => {
     const m = {};
     participants.forEach(p => { m[p.id] = p; });
+    Object.entries(senderDirectory).forEach(([id, entry]) => {
+      if (!m[id] && entry?.name) {
+        m[id] = entry;
+      }
+    });
     return m;
-  }, [participants]);
+  }, [participants, senderDirectory]);
 
   const recipientIds = useMemo(
     () => participants.map((p) => p.id).filter((id) => id && id !== profile?.id),
     [participants, profile?.id]
   );
+
+  const getDisplayName = useCallback((senderId, fallbackRole = "member") => {
+    if (senderId && participantMap[senderId]?.name) return participantMap[senderId].name;
+    if (senderId && senderId === profile?.id) return profile?.full_name || externalUserName || "You";
+    return fallbackRole === "mentor" ? "Mentor" : "Team Member";
+  }, [externalUserName, participantMap, profile?.full_name, profile?.id]);
+
+  useEffect(() => {
+    const missingSenderIds = [...new Set(
+      (messages || [])
+        .map((msg) => msg?.sender_id)
+        .filter((id) => id && !participantMap[id] && !senderDirectory[id])
+    )];
+
+    if (!missingSenderIds.length) return undefined;
+
+    let active = true;
+    (async () => {
+      try {
+        const { data, error: profileErr } = await supabase
+          .from("profiles")
+          .select("id, full_name, email, role")
+          .in("id", missingSenderIds);
+        if (profileErr || !active) return;
+
+        const nextEntries = {};
+        (data || []).forEach((row) => {
+          if (!row?.id) return;
+          nextEntries[row.id] = {
+            id: row.id,
+            name: row.full_name || row.email || "Team Member",
+            role: row.role === "mentor" ? "Mentor" : "Member",
+          };
+        });
+
+        if (Object.keys(nextEntries).length) {
+          setSenderDirectory((prev) => ({ ...prev, ...nextEntries }));
+        }
+      } catch {
+        // best-effort only
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [messages, participantMap, senderDirectory]);
 
   const visibleMessages = useMemo(() =>
     messages.filter(m => m.topic === topic), [messages, topic]);
@@ -360,7 +413,7 @@ export default function Discussion({
     throw new Error("Failed to load messages.");
   }, [normalizeMessage]);
 
-  /* ── Load messages ── */
+  /* â”€â”€ Load messages â”€â”€ */
   const loadMessages = useCallback(async (projectId, { reset = false } = {}) => {
     const currentPage = reset ? 0 : page;
     const rows = await fetchMessagesPage(projectId, currentPage);
@@ -378,7 +431,7 @@ export default function Discussion({
     return rows;
   }, [fetchMessagesPage, page]);
 
-  /* ── Init ── */
+  /* â”€â”€ Init â”€â”€ */
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -390,7 +443,7 @@ export default function Discussion({
         if (externalUserId) {
           p = {
             id: externalUserId,
-            full_name: externalUserName || "Participant",
+            full_name: externalUserName || "Student",
             role: externalUserRole || "student",
           };
         }
@@ -484,7 +537,7 @@ export default function Discussion({
           setError("");
           await channel.track({
             userId: p.id,
-            userName: p.full_name || p.email || "Participant",
+            userName: p.full_name || p.email || "Student",
             activePage: "discussion",
             onlineAt: new Date().toISOString(),
           });
@@ -583,7 +636,7 @@ export default function Discussion({
     setPendingLatestCount(0);
   }, []);
 
-  /* ── Auto-scroll ── */
+  /* â”€â”€ Auto-scroll â”€â”€ */
   useEffect(() => {
     if (suppressAutoScrollRef.current) return;
     if (!visibleMessages.length) return;
@@ -607,7 +660,7 @@ export default function Discussion({
     }
   }, [isAtBottom, visibleMessages]);
 
-  /* ── Mark active topic as seen ── */
+  /* â”€â”€ Mark active topic as seen â”€â”€ */
   useEffect(() => {
     if (!project?.id || !profile?.id) return;
     if (!isAtBottom) return;
@@ -625,11 +678,11 @@ export default function Discussion({
     latestVisibleMessageIdRef.current = null;
   }, [topic]);
 
-  /* ── Typing ── */
+  /* â”€â”€ Typing â”€â”€ */
   const sendTyping = (isTyping) => {
     channelRef.current?.send({
       type: "broadcast", event: "typing",
-      payload: { userId: profile?.id, userName: profile?.full_name || "Participant", topic, isTyping }
+      payload: { userId: profile?.id, userName: profile?.full_name || "Student", topic, isTyping }
     });
   };
   const handleTextChange = (val) => {
@@ -723,7 +776,7 @@ export default function Discussion({
     }
   };
 
-  /* ── Send ── */
+  /* â”€â”€ Send â”€â”€ */
   const postMessage = useCallback(async () => {
     if (!text.trim() || !profile || !project?.id || sending) return;
     const content = text.trim();
@@ -777,7 +830,7 @@ export default function Discussion({
     }
   };
 
-  /* ── States ── */
+  /* â”€â”€ States â”€â”€ */
   const currentTopic = TOPICS.find(t => t.id === topic) || TOPICS[0];
   const typingList = Object.values(typingUsers);
 
@@ -793,12 +846,12 @@ export default function Discussion({
     <div className="etnova-bg min-h-screen flex items-center justify-center text-slate-500 text-sm">No project found.</div>
   );
 
-  /* ══════════════════════════════════════════════════════════════════ */
+  /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
   return (
     <div className="h-full etnova-bg p-3 md:p-4">
       <div className="h-full flex overflow-hidden rounded-3xl border border-white/75 shadow-[0_20px_60px_rgba(15,23,42,0.10)] bg-white/35 backdrop-blur-[6px]">
 
-      {/* ─────────────── LEFT SIDEBAR ─────────────── */}
+      {/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ LEFT SIDEBAR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div className="w-[300px] flex-shrink-0 flex flex-col glass-sidebar border-r border-white/70 overflow-hidden">
 
         {/* Project name */}
@@ -806,7 +859,7 @@ export default function Discussion({
           style={{ background: "linear-gradient(135deg,rgba(0,196,180,0.13) 0%,rgba(99,102,241,0.08) 100%)" }}>
           <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Team Discussion</p>
           <h2 className="text-sm font-black text-slate-900 mt-1 truncate">{project.title}</h2>
-          <p className="text-[11px] text-slate-500 mt-1">{participants.length} participants</p>
+          <p className="text-[11px] text-slate-500 mt-1">{participants.length} members</p>
         </div>
 
         {/* Topics */}
@@ -862,7 +915,7 @@ export default function Discussion({
         </div>
       </div>
 
-      {/* ─────────────── CHAT PANEL ─────────────── */}
+      {/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ CHAT PANEL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div className="flex-1 flex flex-col overflow-hidden bg-white/35 relative">
 
         {/* Chat header */}
@@ -874,7 +927,7 @@ export default function Discussion({
           </div>
           <div className="min-w-0">
             <h1 className="text-sm font-black text-slate-900 leading-none">{topic}</h1>
-            <p className="text-[11px] text-slate-400 mt-0.5">{participants.length} participants · {visibleMessages.length} messages</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">{participants.length} members · {visibleMessages.length} messages</p>
           </div>
         </div>
 
@@ -886,7 +939,7 @@ export default function Discussion({
           </div>
         )}
 
-        {/* ── Messages area ── */}
+        {/* â”€â”€ Messages area â”€â”€ */}
         <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto"
           style={{
             backgroundImage: `
@@ -962,7 +1015,7 @@ export default function Discussion({
                           {!mine && isFirst && (
                             <p className="text-[11px] font-black ml-3 select-none"
                               style={{ color: avatarColor(sender?.name || "U") }}>
-                              {sender?.name || "Participant"}
+                              {getDisplayName(msg.sender_id, sender?.role === "Mentor" ? "mentor" : "member")}
                               <span className="ml-1 font-medium" style={{ color: "#94a3b8" }}>· {sender?.role}</span>
                             </p>
                           )}
@@ -1005,7 +1058,7 @@ export default function Discussion({
                                   }}>
                                   <p className="font-bold mb-0.5 truncate"
                                     style={{ color: mine ? "rgba(255,255,255,0.85)" : currentTopic.color }}>
-                                    {quotedSender?.name || "Participant"}
+                                    {getDisplayName(quotedMsg?.sender_id, quotedSender?.role === "Mentor" ? "mentor" : "member")}
                                   </p>
                                   <p className="truncate" style={{ color: mine ? "rgba(255,255,255,0.75)" : "#64748b" }}>
                                     {quotedMsg.message}
@@ -1118,7 +1171,7 @@ export default function Discussion({
           </div>{/* end min-h-full inner wrapper */}
         </div>{/* end messages scroll area */}
 
-        {/* ── Input area ── */}
+        {/* â”€â”€ Input area â”€â”€ */}
         <div className="flex-shrink-0 border-t border-white/70 px-4 py-2.5"
           style={{ background: "rgba(255,255,255,0.94)", backdropFilter: "blur(20px)" }}>
 
@@ -1132,7 +1185,7 @@ export default function Discussion({
                 ))}
               </div>
               <p className="text-xs text-slate-400">
-                {typingList.slice(0, 2).join(", ")}{typingList.length > 2 ? ` +${typingList.length - 2}` : ""} {typingList.length > 1 ? "are" : "is"} typing…
+                {typingList.slice(0, 2).join(", ")}{typingList.length > 2 ? ` +${typingList.length - 2}` : ""} {typingList.length > 1 ? "are" : "is"} typing...
               </p>
             </div>
           )}
@@ -1144,7 +1197,7 @@ export default function Discussion({
               <span className="material-symbols-outlined text-sm flex-shrink-0 mt-0.5" style={{ color: currentTopic.color }}>reply</span>
               <div className="flex-1 min-w-0">
                 <p className="text-[11px] font-black truncate" style={{ color: currentTopic.color }}>
-                  {participantMap[replyTo.sender_id]?.name || "Participant"}
+                  {getDisplayName(replyTo.sender_id, participantMap[replyTo.sender_id]?.role === "Mentor" ? "mentor" : "member")}
                 </p>
                 <p className="text-xs text-slate-500 truncate">{replyTo.message}</p>
               </div>
@@ -1256,3 +1309,7 @@ export default function Discussion({
     </div>
   );
 }
+
+
+
+

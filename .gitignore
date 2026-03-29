@@ -39,3 +39,6 @@ dist-ssr/
 
 # Local database migration scratch files
 database-migrations/
+sql/
+docs/idea-assistant-chat-schema.sql
+SQLQUERIES
