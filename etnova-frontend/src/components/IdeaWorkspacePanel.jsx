@@ -416,7 +416,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     setLoading(true);
     setError("");
     try {
-      const data = await apiRequest(`/projects/${project.id}/ideas`, { skipCache: true });
+      const data = await apiRequest(`/projects/${project.id}/ideas`);
       const nextIdeas = Array.isArray(data) ? data : [];
       setIdeas(nextIdeas);
       setSelectedIdeaId((current) => {
@@ -670,7 +670,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     setAssistantChatsLoading(true);
     setAssistantError("");
     try {
-      const response = await apiRequest(`/projects/${project.id}/idea-chats`, { skipCache: true });
+      const response = await apiRequest(`/projects/${project.id}/idea-chats`);
       const nextChats = Array.isArray(response) ? response : [];
       setChats(nextChats);
       setActiveChatId((current) => {
@@ -694,7 +694,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     setAssistantMessagesLoading(true);
     setAssistantError("");
     try {
-      const response = await apiRequest(`/idea-chats/${activeChatId}/messages`, { skipCache: true });
+      const response = await apiRequest(`/idea-chats/${activeChatId}/messages`);
       setMessages(Array.isArray(response?.messages) ? response.messages : []);
       setAssistantDraft(response?.latest_draft || null);
       setAssistantMeta({
@@ -952,47 +952,46 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     return [...messages].reverse().find((entry) => entry?.role === "assistant")?.id || "";
   }, [assistantDraft, messages]);
 
-  const assistantPortal = typeof document !== "undefined"
+  const floatingAssistantButton = typeof document !== "undefined" && assistantWidgetState === COPILOT_STATES.CLOSED
+    ? createPortal(
+      <button
+        type="button"
+        onClick={openAssistant}
+        className="fixed bottom-6 right-6 z-[70] flex size-14 items-center justify-center rounded-full text-black shadow-[0_18px_40px_rgba(0,210,196,0.24)] transition-all duration-300 ease-out hover:-translate-y-0.5 hover:scale-[1.02] hover:opacity-95"
+        style={{ backgroundColor: "#00D2C4" }}
+        aria-label="Open Idea Copilot"
+      >
+        <span className="material-symbols-outlined text-[24px]">psychology</span>
+      </button>,
+      document.body
+    )
+    : null;
+
+  const assistantPortal = typeof document !== "undefined" && assistantWidgetState !== COPILOT_STATES.CLOSED
     ? createPortal(
       <>
-        <button
-          type="button"
-          onClick={openAssistant}
-          className={`fixed bottom-6 right-6 z-[70] flex size-14 items-center justify-center rounded-full text-black shadow-[0_18px_40px_rgba(0,210,196,0.24)] transition-all duration-300 ease-out hover:-translate-y-0.5 hover:scale-[1.02] hover:opacity-95 ${
-            assistantWidgetState === COPILOT_STATES.CLOSED
-              ? "pointer-events-auto translate-y-0 opacity-100 scale-100"
-              : "pointer-events-none translate-y-3 opacity-0 scale-95"
-          }`}
-          style={{ backgroundColor: "#00D2C4" }}
-          aria-label="Open Idea Copilot"
-        >
-          <span className="material-symbols-outlined text-[24px]">psychology</span>
-        </button>
+        {assistantIsMinimized ? (
+          <button
+            type="button"
+            onClick={openAssistant}
+            className="fixed bottom-6 right-6 z-[80] inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/95 px-4 py-3 text-sm font-black text-slate-800 shadow-[0_18px_40px_rgba(15,23,42,0.18)] backdrop-blur transition-all duration-300 ease-out hover:-translate-y-0.5"
+          >
+            <span className="relative inline-flex">
+              <span className="inline-flex size-2 rounded-full bg-teal-400" aria-hidden="true" />
+              <span className="absolute inset-0 animate-ping rounded-full bg-teal-300/70" aria-hidden="true" />
+            </span>
+            Idea Copilot
+            <span className="material-symbols-outlined text-[18px] text-slate-500">expand_less</span>
+          </button>
+        ) : null}
 
-        <button
-          type="button"
-          onClick={openAssistant}
-          className={`fixed bottom-6 right-6 z-[80] inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/95 px-4 py-3 text-sm font-black text-slate-800 shadow-[0_18px_40px_rgba(15,23,42,0.18)] backdrop-blur transition-all duration-300 ease-out hover:-translate-y-0.5 ${
-            assistantIsMinimized
-              ? "pointer-events-auto translate-y-0 opacity-100 scale-100"
-              : "pointer-events-none translate-y-3 opacity-0 scale-95"
-          }`}
-        >
-          <span className="relative inline-flex">
-            <span className="inline-flex size-2 rounded-full bg-teal-400" aria-hidden="true" />
-            <span className="absolute inset-0 animate-ping rounded-full bg-teal-300/70" aria-hidden="true" />
-          </span>
-          Idea Copilot
-          <span className="material-symbols-outlined text-[18px] text-slate-500">expand_less</span>
-        </button>
-
-        <div
-          className={`fixed inset-0 z-[75] bg-black/30 backdrop-blur-sm transition-opacity duration-300 ease-out ${
-            assistantIsOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
-          }`}
-          onClick={closeAssistant}
-          aria-hidden="true"
-        />
+        {assistantIsOpen ? (
+          <div
+            className="fixed inset-0 z-[75] bg-black/30 opacity-100 backdrop-blur-sm transition-opacity duration-300 ease-out"
+            onClick={closeAssistant}
+            aria-hidden="true"
+          />
+        ) : null}
 
         <div
           className={`fixed bottom-6 right-4 z-[80] flex ${assistantExpanded ? "h-[84vh] max-h-[860px] max-w-[920px]" : "h-[76vh] max-h-[760px] max-w-[520px]"} w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-[32px] border border-white/30 bg-gradient-to-b from-white via-slate-50/95 to-slate-100/90 shadow-[0_25px_80px_rgba(15,23,42,0.18)] transition-all duration-300 ease-out sm:right-6 ${
@@ -1762,6 +1761,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
       </div>
 
       </div>
+      {floatingAssistantButton}
       {assistantPortal}
     </>
   );

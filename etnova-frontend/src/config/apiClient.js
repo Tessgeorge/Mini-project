@@ -8,10 +8,29 @@ const GET_CACHE_TTL_MS = 20_000
 const responseCache = new Map()
 const inflightRequests = new Map()
 
+async function clearLocalSupabaseSession() {
+  try {
+    await supabase.auth.signOut({ scope: 'local' })
+  } catch {
+    // best-effort cleanup only
+  }
+}
+
 async function getAccessToken({ forceRefresh = false } = {}) {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
+  let session = null
+  try {
+    const {
+      data: sessionData,
+      error: sessionError,
+    } = await supabase.auth.getSession()
+    if (sessionError) throw sessionError
+    session = sessionData?.session ?? null
+  } catch {
+    clearApiCache()
+    await clearLocalSupabaseSession()
+    throw new Error('Session expired. Please sign in again.')
+  }
+
   if (!session?.access_token) throw new Error('Not authenticated')
 
   if (!forceRefresh) {
@@ -20,6 +39,8 @@ async function getAccessToken({ forceRefresh = false } = {}) {
 
   const { data: refreshedData, error: refreshError } = await supabase.auth.refreshSession()
   if (refreshError || !refreshedData?.session?.access_token) {
+    clearApiCache()
+    await clearLocalSupabaseSession()
     throw new Error('Session expired. Please sign in again.')
   }
   return refreshedData.session.access_token
@@ -137,7 +158,7 @@ export async function apiRequest(path, options = {}) {
           return retryData
         } catch {
           clearApiCache()
-          await supabase.auth.signOut()
+          await clearLocalSupabaseSession()
           throw new Error('Session expired. Please sign in again.')
         }
       }

@@ -1,16 +1,17 @@
-import { useState, useEffect, useCallback } from "react";
-import TeamWorkspace from "./Teamworkspace";
+import { lazy, Suspense, useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../config/supabaseClient";
 import ProfileMenu from "../components/ProfileMenu";
 import Modal from "../components/Modal";
-import MyClass from "./MyClass";
-import DynamicRubricEvaluation from "../components/DynamicRubricEvaluation";
 import { getStatusMeta } from "../constants/statusConfig";
 import { EVALUATION_STAGE_OPTIONS, getWorkflowStageMeta } from "../constants/workflowConfig";
 import { ADMIN_DATA_SYNC_KEY, emitAdminDataUpdated } from "../utils/adminLiveSync";
 import { apiRequest } from "../config/apiClient";
 import { REVIEW_ROUND_OPTIONS } from "../services/rubrics";
+
+const TeamWorkspace = lazy(() => import("./Teamworkspace"));
+const MyClass = lazy(() => import("./MyClass"));
+const DynamicRubricEvaluation = lazy(() => import("../components/DynamicRubricEvaluation"));
 
 // ─── Icons ─────────────────────────────────────────────────────────────────
 const Icon = {
@@ -44,6 +45,32 @@ const scoreClr = s => s >= 90 ? "text-emerald-600" : s >= 70 ? "text-amber-500" 
 
 let mentorEvalFilterStrategy = null;
 let mentorEvalInsertStrategy = null;
+const mentorEvaluationInflight = new Map();
+let systemSettingsInflight = null;
+const coordinatorClassDataInflight = new Map();
+
+function withInflight(mapOrKey, keyOrFactory, maybeFactory) {
+  if (mapOrKey instanceof Map) {
+    const map = mapOrKey;
+    const key = keyOrFactory;
+    const factory = maybeFactory;
+    const existing = map.get(key);
+    if (existing) return existing;
+    const promise = Promise.resolve().then(factory).finally(() => {
+      map.delete(key);
+    });
+    map.set(key, promise);
+    return promise;
+  }
+
+  const factory = keyOrFactory;
+  if (mapOrKey) return mapOrKey;
+  const promise = Promise.resolve().then(factory).finally(() => {
+    systemSettingsInflight = null;
+  });
+  systemSettingsInflight = promise;
+  return promise;
+}
 
 function normalizeMentorEvaluationRow(row) {
   if (!row) return row;
@@ -59,41 +86,45 @@ function getProjectDisplayName(project) {
 }
 
 async function fetchEvaluationsForMentor(mentorId) {
-  const preferredFilters = mentorEvalFilterStrategy
-    ? [mentorEvalFilterStrategy, "guide_id", "evaluator_id"]
-    : ["guide_id", "evaluator_id"];
-  const filters = Array.from(new Set(preferredFilters));
-  let fallbackRows = [];
+  return withInflight(mentorEvaluationInflight, mentorId, async () => {
+    const preferredFilters = mentorEvalFilterStrategy
+      ? [mentorEvalFilterStrategy, "guide_id", "evaluator_id"]
+      : ["guide_id", "evaluator_id"];
+    const filters = Array.from(new Set(preferredFilters));
+    let fallbackRows = [];
 
-  for (const filterColumn of filters) {
-    const { data, error } = await supabase
-      .from("evaluations")
-      .select("*")
-      .eq(filterColumn, mentorId)
-      .order("created_at", { ascending: false });
+    for (const filterColumn of filters) {
+      const { data, error } = await supabase
+        .from("evaluations")
+        .select("*")
+        .eq(filterColumn, mentorId)
+        .order("created_at", { ascending: false });
 
-    if (error) continue;
-    const normalizedRows = (data || []).map(normalizeMentorEvaluationRow);
-    if (normalizedRows.length > 0) {
-      mentorEvalFilterStrategy = filterColumn;
-      return normalizedRows;
+      if (error) continue;
+      const normalizedRows = (data || []).map(normalizeMentorEvaluationRow);
+      if (normalizedRows.length > 0) {
+        mentorEvalFilterStrategy = filterColumn;
+        return normalizedRows;
+      }
+      if (fallbackRows.length === 0) {
+        fallbackRows = normalizedRows;
+      }
     }
-    if (fallbackRows.length === 0) {
-      fallbackRows = normalizedRows;
-    }
-  }
-  return fallbackRows;
+    return fallbackRows;
+  });
 }
 
 async function fetchSystemSettingsRows() {
-  const { data } = await supabase
-    .from("system_settings")
-    .select("*");
+  return withInflight(systemSettingsInflight, async () => {
+    const { data } = await supabase
+      .from("system_settings")
+      .select("*");
 
-  return (data || []).sort((a, b) => {
-    const aTs = new Date(a?.created_at || a?.updated_at || 0).getTime();
-    const bTs = new Date(b?.created_at || b?.updated_at || 0).getTime();
-    return aTs - bTs;
+    return (data || []).sort((a, b) => {
+      const aTs = new Date(a?.created_at || a?.updated_at || 0).getTime();
+      const bTs = new Date(b?.created_at || b?.updated_at || 0).getTime();
+      return aTs - bTs;
+    });
   });
 }
 
@@ -199,8 +230,20 @@ function Spinner() {
   return <div className="flex justify-center py-20"><div className="w-8 h-8 border-4 border-teal-400 border-t-transparent rounded-full animate-spin" /></div>;
 }
 
+function TabPanelLoader({ label = "Loading section..." }) {
+  return (
+    <div className="flex items-center justify-center rounded-2xl border border-slate-200 bg-white py-16 shadow-sm">
+      <div className="flex flex-col items-center gap-3 text-slate-500">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-teal-400 border-t-transparent" />
+        <p className="text-sm font-semibold">{label}</p>
+      </div>
+    </div>
+  );
+}
+
 const REVIEW_STAGE_ORDER = ["Idea", "Abstract", "Zeroth Review", "First Review", "Second Review", "Final Review"];
 const REVIEW_STAGE_VALUE_ORDER = REVIEW_ROUND_OPTIONS.map((option) => option.value);
+const MY_CLASS_TABS = ["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews"];
 
 function normalizeReviewStageName(stageName) {
   const value = String(stageName || "").trim().toLowerCase();
@@ -256,6 +299,50 @@ function normalizeReviewStageValue(value) {
   if (normalized === "2nd review" || normalized === "second review" || normalized === "second_review") return "second_review";
   if (normalized === "final review" || normalized === "final_review") return "final_review";
   return normalized;
+}
+
+async function fetchReviewerAccessRowsForMentor(mentorId, { skipCache = false } = {}) {
+  let hasBatchScope = true;
+
+  try {
+    const rows = await apiRequest("/reviewer-access/me", { skipCache });
+    return {
+      rows: Array.isArray(rows) ? rows : [],
+      hasBatchScope,
+    };
+  } catch (reviewerAccessApiError) {
+    const { data: batchAccessRows, error: batchAccessError } = await supabase
+      .from("reviewer_access")
+      .select("class_id, stage, batch, is_open")
+      .eq("mentor_id", mentorId);
+
+    if (batchAccessError) {
+      const missingBatchColumn =
+        batchAccessError.code === "PGRST204" ||
+        /batch/i.test(batchAccessError.message || "") ||
+        /batch/i.test(batchAccessError.details || "");
+
+      if (!missingBatchColumn) {
+        throw reviewerAccessApiError;
+      }
+
+      hasBatchScope = false;
+      const { data: legacyAccessRows, error: legacyAccessError } = await supabase
+        .from("reviewer_access")
+        .select("class_id, stage, is_open")
+        .eq("mentor_id", mentorId);
+      if (legacyAccessError) throw legacyAccessError;
+      return {
+        rows: legacyAccessRows || [],
+        hasBatchScope,
+      };
+    }
+
+    return {
+      rows: batchAccessRows || [],
+      hasBatchScope,
+    };
+  }
 }
 
 function sortReviewStages(rows) {
@@ -917,13 +1004,15 @@ function TeamsTab({ projects, evaluations, loading, mentorId, mentorName }) {
   if (sel) {
     const proj = projects.find(p => p.id === sel);
     return (
-      <TeamWorkspace
-        key={proj?.id || sel}
-        proj={proj}
-        mentorId={mentorId}
-        mentorName={mentorName}
-        onBack={() => setSel(null)}
-      />
+      <Suspense fallback={<TabPanelLoader label="Loading team workspace..." />}>
+        <TeamWorkspace
+          key={proj?.id || sel}
+          proj={proj}
+          mentorId={mentorId}
+          mentorName={mentorName}
+          onBack={() => setSel(null)}
+        />
+      </Suspense>
     );
   }
 
@@ -1162,13 +1251,15 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
         </div>
 
         {/* Rubric evaluation */}
-        <DynamicRubricEvaluation
-          projectId={selectedProject.id}
-          members={selectedProject.team_members || []}
-          mode="review"
-          allowedReviewStages={allowedReviewStages}
-          writableReviewStages={writableReviewStages}
-        />
+        <Suspense fallback={<TabPanelLoader label="Loading rubric evaluation..." />}>
+          <DynamicRubricEvaluation
+            projectId={selectedProject.id}
+            members={selectedProject.team_members || []}
+            mode="review"
+            allowedReviewStages={allowedReviewStages}
+            writableReviewStages={writableReviewStages}
+          />
+        </Suspense>
       </div>
     );
   }
@@ -1392,72 +1483,73 @@ export default function MentorDashboard() {
   const navigate = useNavigate();
 
   const loadCoordinatorClassData = useCallback(async (classId) => {
-    const [{ data: classRow }, { data: classProjects }, { data: reviewStageRows, error: reviewStageError }] = await Promise.all([
-      supabase.from("classes").select("id, class_section").eq("id", classId).single(),
-      supabase.from("projects").select("id, title, guide_id, status, approved_idea_id").eq("class_id", classId),
-      supabase.from("review_stages")
-        .select("id, stage_name, deadline, coordinator_deadline, stage_order, is_active, is_completed, is_locked, student_deadline_set_by_coordinator")
-        .eq("class_id", classId).order("stage_order", { ascending: true }),
-    ]);
+    return withInflight(coordinatorClassDataInflight, classId, async () => {
+      const [{ data: classRow }, { data: classProjects }, { data: reviewStageRows, error: reviewStageError }] = await Promise.all([
+        supabase.from("classes").select("id, class_section").eq("id", classId).single(),
+        supabase.from("projects").select("id, title, guide_id, status, approved_idea_id").eq("class_id", classId),
+        supabase.from("review_stages")
+          .select("id, stage_name, deadline, coordinator_deadline, stage_order, is_active, is_completed, is_locked, student_deadline_set_by_coordinator")
+          .eq("class_id", classId).order("stage_order", { ascending: true }),
+      ]);
 
-    const projectsInClass = classProjects || [];
-    const projectIds = projectsInClass.map(p => p.id);
-    const guideIds = Array.from(new Set(projectsInClass.map(p => p.guide_id).filter(Boolean)));
+      const projectsInClass = classProjects || [];
+      const projectIds = projectsInClass.map(p => p.id);
+      const guideIds = Array.from(new Set(projectsInClass.map(p => p.guide_id).filter(Boolean)));
 
-    const [membersRes, evalRes, guidesRes, docsRes] = await Promise.all([
-      projectIds.length ? supabase.from("team_members").select("id, project_id, student_id").in("project_id", projectIds) : Promise.resolve({ data: [] }),
-      projectIds.length ? supabase.from("evaluations").select("id, project_id, score, obtained_marks").in("project_id", projectIds) : Promise.resolve({ data: [] }),
-      guideIds.length ? supabase.from("profiles").select("id, full_name").in("id", guideIds) : Promise.resolve({ data: [] }),
-      projectIds.length
-        ? supabase.from("documents").select("id, project_id, document_type, status, coordinator_verified, uploaded_at").in("project_id", projectIds).order("uploaded_at", { ascending: false })
-        : Promise.resolve({ data: [] }),
-    ]);
+      const [membersRes, evalRes, guidesRes, docsRes] = await Promise.all([
+        projectIds.length ? supabase.from("team_members").select("id, project_id, student_id").in("project_id", projectIds) : Promise.resolve({ data: [] }),
+        projectIds.length ? supabase.from("evaluations").select("id, project_id, score, obtained_marks").in("project_id", projectIds) : Promise.resolve({ data: [] }),
+        guideIds.length ? supabase.from("profiles").select("id, full_name").in("id", guideIds) : Promise.resolve({ data: [] }),
+        projectIds.length
+          ? supabase.from("documents").select("id, project_id, document_type, status, coordinator_verified, uploaded_at").in("project_id", projectIds).order("uploaded_at", { ascending: false })
+          : Promise.resolve({ data: [] }),
+      ]);
 
-    const members = membersRes.data || [];
-    const classEvals = evalRes.data || [];
-    const guides = guidesRes.data || [];
-    const documents = docsRes.data || [];
-    const guideMap = new Map(guides.map(g => [g.id, g.full_name || "Unassigned"]));
-    const memberCountByProject = members.reduce((acc, item) => { acc[item.project_id] = (acc[item.project_id] || 0) + 1; return acc; }, {});
-    const studentsByProject = members.reduce((acc, item) => {
-      if (!item?.project_id || !item?.student_id) return acc;
-      if (!acc[item.project_id]) acc[item.project_id] = new Set();
-      acc[item.project_id].add(item.student_id);
-      return acc;
-    }, {});
-    const evalByProject = classEvals.reduce((acc, item) => {
-      if (!acc[item.project_id]) acc[item.project_id] = [];
-      const normalizedScore = Number(item.score ?? item.obtained_marks);
-      acc[item.project_id].push(Number.isNaN(normalizedScore) ? 0 : normalizedScore);
-      return acc;
-    }, {});
-    const latestDocumentByProjectType = documents.reduce((acc, item) => {
-      if (!item?.project_id || !item?.document_type) return acc;
-      const key = `${item.project_id}:${String(item.document_type).trim().toLowerCase()}`;
-      if (!acc[key]) acc[key] = item;
-      return acc;
-    }, {});
+      const members = membersRes.data || [];
+      const classEvals = evalRes.data || [];
+      const guides = guidesRes.data || [];
+      const documents = docsRes.data || [];
+      const guideMap = new Map(guides.map(g => [g.id, g.full_name || "Unassigned"]));
+      const memberCountByProject = members.reduce((acc, item) => { acc[item.project_id] = (acc[item.project_id] || 0) + 1; return acc; }, {});
+      const studentsByProject = members.reduce((acc, item) => {
+        if (!item?.project_id || !item?.student_id) return acc;
+        if (!acc[item.project_id]) acc[item.project_id] = new Set();
+        acc[item.project_id].add(item.student_id);
+        return acc;
+      }, {});
+      const evalByProject = classEvals.reduce((acc, item) => {
+        if (!acc[item.project_id]) acc[item.project_id] = [];
+        const normalizedScore = Number(item.score ?? item.obtained_marks);
+        acc[item.project_id].push(Number.isNaN(normalizedScore) ? 0 : normalizedScore);
+        return acc;
+      }, {});
+      const latestDocumentByProjectType = documents.reduce((acc, item) => {
+        if (!item?.project_id || !item?.document_type) return acc;
+        const key = `${item.project_id}:${String(item.document_type).trim().toLowerCase()}`;
+        if (!acc[key]) acc[key] = item;
+        return acc;
+      }, {});
 
-    let reviewMarks = [];
-    if (projectIds.length) {
-      const studentIds = [...new Set(members.map((item) => item.student_id).filter(Boolean))];
-      if (studentIds.length) {
-        const { data: reviewMarksRows } = await supabase
-          .from("review_marks")
-          .select("student_id, review_stage")
-          .in("student_id", studentIds);
-        reviewMarks = reviewMarksRows || [];
+      let reviewMarks = [];
+      if (projectIds.length) {
+        const studentIds = [...new Set(members.map((item) => item.student_id).filter(Boolean))];
+        if (studentIds.length) {
+          const { data: reviewMarksRows } = await supabase
+            .from("review_marks")
+            .select("student_id, review_stage")
+            .in("student_id", studentIds);
+          reviewMarks = reviewMarksRows || [];
+        }
       }
-    }
 
-    const stageProgress = {
-      idea: 0, abstract: 0, zeroth_review: 0,
-      first_review: 0, second_review: 0, final_review: 0,
-    };
+      const stageProgress = {
+        idea: 0, abstract: 0, zeroth_review: 0,
+        first_review: 0, second_review: 0, final_review: 0,
+      };
 
-    const projectRows = projectsInClass.map(project => {
-      const scores = evalByProject[project.id] || [];
-      const avgScore = scores.length ? scores.reduce((sum, s) => sum + s, 0) / scores.length : null;
+      const projectRows = projectsInClass.map(project => {
+        const scores = evalByProject[project.id] || [];
+        const avgScore = scores.length ? scores.reduce((sum, s) => sum + s, 0) / scores.length : null;
 
       if (project.approved_idea_id) {
         stageProgress.idea += 1;
@@ -1488,27 +1580,28 @@ export default function MentorDashboard() {
       return { ...project, teamSize: memberCountByProject[project.id] || 0, evaluationCount: scores.length, avgScore, guideName: guideMap.get(project.guide_id) || "Unassigned" };
     });
 
-    const evaluatedCount = projectRows.filter(item => item.evaluationCount > 0).length;
-    const allScores = classEvals.map(item => Number(item.score ?? item.obtained_marks)).filter(s => !Number.isNaN(s));
-    const classAverageScore = allScores.length ? allScores.reduce((sum, s) => sum + s, 0) / allScores.length : null;
+      const evaluatedCount = projectRows.filter(item => item.evaluationCount > 0).length;
+      const allScores = classEvals.map(item => Number(item.score ?? item.obtained_marks)).filter(s => !Number.isNaN(s));
+      const classAverageScore = allScores.length ? allScores.reduce((sum, s) => sum + s, 0) / allScores.length : null;
 
-    return {
-      classId, classTitle: classRow?.class_section || "Untitled Class",
-      totalProjects: projectRows.length, evaluatedProjects: evaluatedCount,
-      pendingEvaluations: projectRows.length - evaluatedCount,
-      classAverageScore, stageProgress, projects: projectRows,
-      reviewStages: sortReviewStages(reviewStageRows || []),
-      deadlineLoadError: reviewStageError
-        ? (/coordinator_deadline/i.test(String(reviewStageError.message || ""))
-          ? 'The "coordinator_deadline" column is missing in "review_stages". Run the Supabase ALTER TABLE migration first.'
-          : (reviewStageError.message || "Failed to load review deadlines."))
-        : "",
-    };
+      return {
+        classId, classTitle: classRow?.class_section || "Untitled Class",
+        totalProjects: projectRows.length, evaluatedProjects: evaluatedCount,
+        pendingEvaluations: projectRows.length - evaluatedCount,
+        classAverageScore, stageProgress, projects: projectRows,
+        reviewStages: sortReviewStages(reviewStageRows || []),
+        deadlineLoadError: reviewStageError
+          ? (/coordinator_deadline/i.test(String(reviewStageError.message || ""))
+            ? 'The "coordinator_deadline" column is missing in "review_stages". Run the Supabase ALTER TABLE migration first.'
+            : (reviewStageError.message || "Failed to load review deadlines."))
+          : "",
+      };
+    });
   }, []);
 
   useEffect(() => {
     const init = async () => {
-      setLoading(prev => !mentorProfile?.id ? true : false);
+      setLoading(true);
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) { navigate("/"); return; }
@@ -1530,38 +1623,20 @@ export default function MentorDashboard() {
             return null;
           };
 
-          let reviewerAccessRows = [];
-          let hasBatchScope = true;
+          const [
+            reviewerAccessResult,
+            backendProjects,
+            evalData,
+            msData,
+          ] = await Promise.all([
+            fetchReviewerAccessRowsForMentor(profile.id, { skipCache: reviewAccessVersion > 0 }),
+            apiRequest("/projects", { skipCache: reviewAccessVersion > 0 }),
+            fetchEvaluationsForMentor(profile.id),
+            fetchSystemSettingsRows(),
+          ]);
 
-          try {
-            reviewerAccessRows = await apiRequest("/reviewer-access/me", { skipCache: true });
-          } catch (reviewerAccessApiError) {
-            const { data: batchAccessRows, error: batchAccessError } = await supabase
-              .from("reviewer_access")
-              .select("class_id, stage, batch, is_open")
-              .eq("mentor_id", profile.id);
-
-            if (batchAccessError) {
-              const missingBatchColumn =
-                batchAccessError.code === "PGRST204" ||
-                /batch/i.test(batchAccessError.message || "") ||
-                /batch/i.test(batchAccessError.details || "");
-
-              if (missingBatchColumn) {
-                hasBatchScope = false;
-                const { data: legacyAccessRows, error: legacyAccessError } = await supabase
-                  .from("reviewer_access")
-                  .select("class_id, stage, is_open")
-                  .eq("mentor_id", profile.id);
-                if (legacyAccessError) throw legacyAccessError;
-                reviewerAccessRows = legacyAccessRows || [];
-              } else {
-                throw reviewerAccessApiError;
-              }
-            } else {
-              reviewerAccessRows = batchAccessRows || [];
-            }
-          }
+          const reviewerAccessRows = reviewerAccessResult.rows;
+          const hasBatchScope = reviewerAccessResult.hasBatchScope;
 
           setHasReviewAccess((reviewerAccessRows || []).some((row) => Boolean(row?.is_open)));
           const reviewerClassIds = [...new Set((reviewerAccessRows || []).map((row) => row.class_id).filter(Boolean))];
@@ -1597,7 +1672,6 @@ export default function MentorDashboard() {
             return classIdBySection.get(normalizeSectionKey(classSection)) || null;
           };
 
-          const backendProjects = await apiRequest("/projects", { skipCache: true });
           const guideProjectRows = (backendProjects || []).filter(
             (project) => project.guide_id === profile.id || project.mentor_id === profile.id
           );
@@ -1650,10 +1724,8 @@ export default function MentorDashboard() {
           setWritableReviewStages(writableStages);
           setProjects(projData || []);
 
-          const evalData = await fetchEvaluationsForMentor(profile.id);
           setEvaluations(evalData || []);
 
-          const msData = await fetchSystemSettingsRows();
           setMilestones((msData || []).map(m => ({
             title: m.setting_key || m.key || m.title || m.name,
             due_date: normalizeMilestoneDueDate(m.setting_value || m.value || m.due_date),
@@ -1695,9 +1767,10 @@ export default function MentorDashboard() {
   const coordinatorClassId = resolveCoordinatorClassId(mentorProfile, projects).classId;
   const isCoordinatorWithClass = Boolean(mentorProfile?.is_coordinator && coordinatorClassId);
   const canOpenEvaluationPanel = hasReviewAccess && allowedReviewStages.length > 0 && reviewProjects.length > 0;
+  const isMyClassActive = MY_CLASS_TABS.includes(active);
 
   useEffect(() => {
-    if (!isCoordinatorWithClass && ["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews"].includes(active)) {
+    if (!isCoordinatorWithClass && MY_CLASS_TABS.includes(active)) {
       setActive("overview");
     }
   }, [active, isCoordinatorWithClass]);
@@ -1709,14 +1782,14 @@ export default function MentorDashboard() {
   }, [active, canOpenEvaluationPanel]);
 
   useEffect(() => {
-    if (!mentorProfile?.is_coordinator || !coordinatorClassId) return undefined;
+    if (!mentorProfile?.is_coordinator || !coordinatorClassId || !isMyClassActive) return undefined;
     let refreshTimer = null;
     const refreshMyClassData = async () => {
       try { setMyClassData(await loadCoordinatorClassData(coordinatorClassId)); } catch (error) { console.error(error); }
     };
     const queueRefresh = () => {
       if (refreshTimer) clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(async () => { await refreshMyClassData(); }, 250);
+      refreshTimer = setTimeout(async () => { await refreshMyClassData(); }, 700);
     };
     const channel = supabase.channel(`mentor-my-class-review-stages-${coordinatorClassId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "review_stages", filter: `class_id=eq.${coordinatorClassId}` }, async () => { queueRefresh(); })
@@ -1737,7 +1810,7 @@ export default function MentorDashboard() {
       window.removeEventListener("storage", onStorage);
       supabase.removeChannel(channel);
     };
-  }, [coordinatorClassId, loadCoordinatorClassData, mentorProfile?.is_coordinator]);
+  }, [coordinatorClassId, isMyClassActive, loadCoordinatorClassData, mentorProfile?.is_coordinator]);
 
   function getTimeAgo(ts) {
     if (!ts) return "—";
@@ -1838,13 +1911,15 @@ export default function MentorDashboard() {
             />
           )}
           {["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews"].includes(active) && isCoordinatorWithClass && (
-            <MyClass
-              classData={myClassData}
-              loading={myClassLoading}
-              onSaveStudentDeadline={handleSaveStudentDeadline}
-              activeSubPage={active.replace("my-class-", "")}
-              onNavigate={(sub) => setActive("my-class-" + sub)}
-            />
+            <Suspense fallback={<TabPanelLoader label="Loading class workspace..." />}>
+              <MyClass
+                classData={myClassData}
+                loading={myClassLoading}
+                onSaveStudentDeadline={handleSaveStudentDeadline}
+                activeSubPage={active.replace("my-class-", "")}
+                onNavigate={(sub) => setActive("my-class-" + sub)}
+              />
+            </Suspense>
           )}
         </main>
       </div>

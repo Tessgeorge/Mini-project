@@ -24,8 +24,8 @@ export default function AdminClasses() {
     try {
       const { data, error: fetchError } = await supabase
         .from("classes")
-        .select("id, class_name, department")
-        .order("class_name", { ascending: true });
+        .select("id, class_name:class_section, department")
+        .order("class_section", { ascending: true });
       if (fetchError) throw fetchError;
       setClasses(data || []);
     } catch (err) {
@@ -45,7 +45,7 @@ export default function AdminClasses() {
     setError("");
     try {
       const { error: createError } = await supabase.from("classes").insert({
-        class_name: newClass.class_name.trim(),
+        class_section: newClass.class_name.trim(),
         department: newClass.department.trim(),
       });
       if (createError) throw createError;
@@ -67,7 +67,7 @@ export default function AdminClasses() {
       const { error: updateError } = await supabase
         .from("classes")
         .update({
-          class_name: editForm.class_name.trim(),
+          class_section: editForm.class_name.trim(),
           department: editForm.department.trim(),
         })
         .eq("id", editingId);

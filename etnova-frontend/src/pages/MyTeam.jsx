@@ -455,7 +455,7 @@ async function fetchCoordinatorBySection(classSection) {
     // e.g. student has "B" → match "S6 CSE B"
     const { data: classes, error: classErr } = await supabase
       .from("classes")
-      .select("id, class_name");
+      .select("id, class_name:class_section");
 
     if (classErr || !classes?.length) return null;
 

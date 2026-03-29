@@ -10,9 +10,52 @@ const AuthContext = createContext({
   loading: true,
 })
 
+const ROLE_CACHE_KEY = 'etnova_role_cache'
+
 async function fetchUserRole() {
   const data = await apiRequest('/profile')
   return data?.role?.toLowerCase() ?? null
+}
+
+function readCachedRole(userId) {
+  if (!userId) return null
+  try {
+    const raw = sessionStorage.getItem(ROLE_CACHE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (parsed?.userId !== userId || !parsed?.role) return null
+    return String(parsed.role).toLowerCase()
+  } catch {
+    return null
+  }
+}
+
+function writeCachedRole(userId, role) {
+  if (!userId || !role) return
+  try {
+    sessionStorage.setItem(
+      ROLE_CACHE_KEY,
+      JSON.stringify({ userId, role: String(role).toLowerCase() }),
+    )
+  } catch {
+    // best-effort only
+  }
+}
+
+function clearCachedRole() {
+  try {
+    sessionStorage.removeItem(ROLE_CACHE_KEY)
+  } catch {
+    // best-effort only
+  }
+}
+
+async function clearLocalSupabaseSession() {
+  try {
+    await supabase.auth.signOut({ scope: 'local' })
+  } catch {
+    // best-effort cleanup only
+  }
 }
 
 export function AuthProvider({ children }) {
@@ -51,18 +94,24 @@ export function AuthProvider({ children }) {
       if (!nextSession?.user) {
         if (isMounted && requestId === activeRequestId) {
           setRole(null)
+          clearCachedRole()
           setLoading(false)
           isInitialized = true
         }
         return
       }
 
+      const cachedRole = readCachedRole(nextSession.user.id)
+      if (cachedRole) {
+        setRole(cachedRole)
+      }
+
       // Only show loading spinner on first load, not on token refresh
-      if (!isInitialized) {
+      if (!isInitialized && !cachedRole) {
         setLoading(true)
       }
 
-      if (event === 'TOKEN_REFRESHED' && roleRef.current) {
+      if ((event === 'TOKEN_REFRESHED' && roleRef.current) || (cachedRole && !force)) {
         if (isMounted && requestId === activeRequestId) {
           setLoading(false)
           isInitialized = true
@@ -74,6 +123,7 @@ export function AuthProvider({ children }) {
         const nextRole = await fetchUserRole()
         if (isMounted && requestId === activeRequestId) {
           setRole(nextRole)
+          writeCachedRole(nextSession.user.id, nextRole)
         }
       } catch (error) {
         if (error?.message !== 'Not authenticated' && error?.message !== 'Session expired. Please sign in again.') {
@@ -81,6 +131,7 @@ export function AuthProvider({ children }) {
         }
         if (isMounted && requestId === activeRequestId) {
           setRole(null)
+          clearCachedRole()
         }
       } finally {
         if (isMounted && requestId === activeRequestId) {
@@ -91,11 +142,26 @@ export function AuthProvider({ children }) {
     }
 
     const init = async () => {
-      const {
-        data: { session: initialSession },
-      } = await supabase.auth.getSession()
-      if (isMounted) {
-        handleSession(initialSession, { force: true, event: 'INITIAL_SESSION' })
+      try {
+        const {
+          data: sessionData,
+          error: sessionError,
+        } = await supabase.auth.getSession()
+
+        if (sessionError) throw sessionError
+
+        if (isMounted) {
+          handleSession(sessionData?.session ?? null, { force: true, event: 'INITIAL_SESSION' })
+        }
+      } catch (error) {
+        await clearLocalSupabaseSession()
+        if (isMounted) {
+          setSession(null)
+          setUser(null)
+          setRole(null)
+          clearCachedRole()
+          setLoading(false)
+        }
       }
     }
 

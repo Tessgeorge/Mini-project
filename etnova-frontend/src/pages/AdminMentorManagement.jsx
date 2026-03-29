@@ -34,7 +34,7 @@ async function fetchMentorEvaluationsByMentorId(mentorId) {
           title,
           class_id,
           classes:class_id (
-            class_name
+            class_name:class_section
           )
         )
       `)
@@ -246,7 +246,7 @@ export default function AdminMentorManagement() {
             status,
             class_id,
             classes:class_id (
-              class_name
+              class_name:class_section
             )
           `)
           .eq("guide_id", selectedMentorId);
