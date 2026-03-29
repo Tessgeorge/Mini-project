@@ -72,12 +72,14 @@ import {
   getAdminClassList,
   getAdminFinalMarks,
   getMyPublishedResult,
+  getStageEntryLock,
   getStageMarksBreakdown,
   listRubrics,
   publishResults,
   removeRubric,
   saveStageRubrics,
   submitStageMarks,
+  updateStageEntryLock,
 } from '../controllers/rubricController.js';
 import { authenticateUser, requireRole, requireCoordinator, canAccessProject } from '../middleware/supabaseAuth.js';
 
@@ -149,6 +151,8 @@ router.put('/evaluations/:id', authenticateUser, requireRole(['mentor']), update
 router.get('/evaluation-rubrics', authenticateUser, requireRole(['admin', 'mentor']), listRubrics);
 router.get('/projects/:id/rubric-marks/:stage', authenticateUser, requireRole(['mentor']), canAccessProject(), getStageMarksBreakdown);
 router.put('/projects/:id/rubric-marks/:stage', authenticateUser, requireRole(['mentor']), canAccessProject(), submitStageMarks);
+router.get('/projects/:id/rubric-marks/:stage/lock', authenticateUser, requireRole(['mentor']), canAccessProject(), getStageEntryLock);
+router.put('/projects/:id/rubric-marks/:stage/lock', authenticateUser, requireRole(['mentor']), canAccessProject(), updateStageEntryLock);
 
 // Individual student marks (Coordinator only)
 router.get('/projects/:id/individual-marks', authenticateUser, requireRole(['mentor']), requireCoordinator, canAccessProject(), getIndividualMarks);

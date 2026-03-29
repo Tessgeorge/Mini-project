@@ -4,7 +4,7 @@ export async function fetchReviewStageDetails() {
   try {
     const { data: classRows, error: classError } = await supabase
       .from("classes")
-      .select("id, class_name, department");
+      .select("id, class_section, department");
     if (classError) throw classError;
 
     const classById = new Map((classRows || []).map((row) => [row.id, row]));

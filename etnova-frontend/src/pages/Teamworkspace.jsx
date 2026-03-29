@@ -1049,6 +1049,11 @@ function UpcomingDeadlines({ phaseIdx, milestoneDates, reviewDeadlines = [], onN
 function TabOverview({ proj, evaluations, members, documents, onAddReview, onNavigateTab, mentorId, mentorName, milestoneDates, reviewDeadlines, workflowSnapshot }) {
   const avg = evaluations.length ? Math.round(evaluations.reduce((s, e) => s + Number(e.score || 0), 0) / evaluations.length) : null;
   const phaseIdx = workflowSnapshot.index;
+  const diaryProject = {
+    ...proj,
+    team_members: members,
+    guide: proj?.guide || proj?.mentor || (mentorId ? { id: mentorId, full_name: mentorName || "Guide" } : null),
+  };
 
   return (
     <div className="space-y-5">
@@ -1073,7 +1078,7 @@ function TabOverview({ proj, evaluations, members, documents, onAddReview, onNav
           {/* 6-phase milestone timeline */}
           <MilestoneTimeline phaseIdx={phaseIdx} onTabSwitch={onNavigateTab} milestoneDates={milestoneDates} />
           <ProjectDiaryPanel
-            project={{ ...proj, team_members: members }}
+            project={diaryProject}
             currentUserId={mentorId}
             currentUserName={mentorName}
             mentorId={mentorId}
@@ -1117,6 +1122,8 @@ function TabOverview({ proj, evaluations, members, documents, onAddReview, onNav
 // ══════════════════════════════════════════════════════════════════
 function TabSubmissions({ projId, members, mentorName }) {
   const [docs, setDocs] = useState([]);
+  const [ideas, setIdeas] = useState([]);
+  const [ideaReviews, setIdeaReviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const [viewing, setViewing] = useState(null);
@@ -1141,10 +1148,35 @@ function TabSubmissions({ projId, members, mentorName }) {
 
   useEffect(() => {
     setLoading(true);
-    supabase.from("documents")
-      .select("id,project_id,uploaded_by,document_type,file_name,file_url,file_size,version,status,uploaded_at,feedback,profiles:uploaded_by(full_name,email,roll_number)")
-      .eq("project_id", projId).order("uploaded_at", { ascending: false })
-      .then(({ data }) => { setDocs(data || []); setLoading(false); });
+    (async () => {
+      const [docsRes, ideasRes] = await Promise.all([
+        supabase.from("documents")
+          .select("id,project_id,uploaded_by,document_type,file_name,file_url,file_size,version,status,uploaded_at,feedback,profiles:uploaded_by(full_name,email,roll_number)")
+          .eq("project_id", projId).order("uploaded_at", { ascending: false }),
+        supabase.from("project_ideas")
+          .select("id,project_id,version_no,title,status,submitted_at,created_at,updated_at")
+          .eq("project_id", projId)
+          .order("version_no", { ascending: false }),
+      ]);
+
+      const fetchedIdeas = ideasRes.data || [];
+      let fetchedIdeaReviews = [];
+      const ideaIds = fetchedIdeas.map((idea) => idea.id).filter(Boolean);
+
+      if (ideaIds.length > 0) {
+        const reviewsRes = await supabase
+          .from("idea_reviews")
+          .select("id,idea_id,action,comment,created_at")
+          .in("idea_id", ideaIds)
+          .order("created_at", { ascending: false });
+        fetchedIdeaReviews = reviewsRes.data || [];
+      }
+
+      setDocs(docsRes.data || []);
+      setIdeas(fetchedIdeas);
+      setIdeaReviews(fetchedIdeaReviews);
+      setLoading(false);
+    })();
   }, [projId]);
 
   const openDoc = (doc) => {
@@ -1213,6 +1245,12 @@ function TabSubmissions({ projId, members, mentorName }) {
 
   const statuses = ["all", ...new Set(docs.map(d => d.status?.toLowerCase()).filter(Boolean))];
   const filtered = filter === "all" ? docs : docs.filter(d => d.status?.toLowerCase() === filter);
+  const latestIdea = ideas[0] || null;
+  const latestIdeaReview = latestIdea
+    ? ideaReviews.find((entry) => entry.idea_id === latestIdea.id) || null
+    : null;
+  const latestIdeaStatus = latestIdeaReview?.action || latestIdea?.status;
+  const latestIdeaStyle = sStyle(latestIdeaStatus);
 
   if (loading) return <Spin />;
 
@@ -1844,7 +1882,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
               </div>
               <div>
                 <h1 className={`${isDiscussionTab ? "text-xl" : "text-2xl"} font-extrabold text-white leading-tight`}>{teamDisplayName}</h1>
-                {!isDiscussionTab && ideaTitle && (
+                {!isDiscussionTab && proj.approved_idea_id && ideaTitle && (
                   <p className="text-slate-300 text-sm mt-1 max-w-xl line-clamp-1 leading-relaxed">Approved idea: {ideaTitle}</p>
                 )}
                 {!isDiscussionTab && proj.description && (

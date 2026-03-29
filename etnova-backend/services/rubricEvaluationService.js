@@ -30,6 +30,12 @@ const DEFAULT_REVIEW_RUBRICS = [
   { title: 'Technology Stack', max_marks: 5, order_no: 5, is_active: true },
   { title: 'Presentation', max_marks: 5, order_no: 6, is_active: true },
 ];
+const DEFAULT_ZEROTH_REVIEW_RUBRICS = [
+  { title: 'Problem Statement', max_marks: 10, order_no: 1, is_active: true },
+  { title: 'Requirement Analysis', max_marks: 15, order_no: 2, is_active: true },
+  { title: 'Technology Stack', max_marks: 10, order_no: 3, is_active: true },
+  { title: 'Presentation', max_marks: 5, order_no: 4, is_active: true },
+];
 const DEFAULT_EXTERNAL_RUBRICS = [
   { title: 'Presentation', max_marks: 30, order_no: 1, is_active: true },
   { title: 'Demo', max_marks: 20, order_no: 2, is_active: true },
@@ -42,7 +48,70 @@ const createHttpError = (message, status = 400) => {
   return error;
 };
 
+const normalizeLockReviewStage = (stage, reviewStage = null) => {
+  if (stage === 'ese') return 'final_review';
+  if (stage === 'review') return normalizeReviewStage(reviewStage);
+  return null;
+};
+
+const applyOptionalReviewStageFilter = (query, reviewStage) => (
+  reviewStage == null ? query.is('review_stage', null) : query.eq('review_stage', reviewStage)
+);
+
 const roundMarks = (value) => Number(Number(value || 0).toFixed(2));
+
+const getReviewRubricCounts = async () => {
+  const [zerothRubrics, sharedRubrics] = await Promise.all([
+    getActiveRubricsByStage('review', 'zeroth_review'),
+    getActiveRubricsByStage('review', 'first_review'),
+  ]);
+
+  return {
+    zeroth_review: zerothRubrics.length,
+    first_review: sharedRubrics.length,
+    second_review: sharedRubrics.length,
+    final_review: 0,
+  };
+};
+
+const buildReviewRoundAverages = async (rows = []) => {
+  const rubricCounts = await getReviewRubricCounts();
+  const roundAverages = {};
+
+  REVIEW_ROUNDS.forEach((reviewStage) => {
+    const expectedRubricCount = Number(rubricCounts?.[reviewStage] || 0);
+    if (expectedRubricCount <= 0) return;
+
+    const roundRows = (rows || []).filter((row) => row.review_stage === reviewStage);
+    if (!roundRows.length) return;
+
+    const reviewerBuckets = new Map();
+    roundRows.forEach((row) => {
+      const reviewerKey = row.evaluator_id || `anonymous:${reviewStage}`;
+      if (!reviewerBuckets.has(reviewerKey)) {
+        reviewerBuckets.set(reviewerKey, {
+          total: 0,
+          rubricIds: new Set(),
+        });
+      }
+      const bucket = reviewerBuckets.get(reviewerKey);
+      bucket.total += Number(row.marks || 0);
+      if (row.rubric_id) bucket.rubricIds.add(row.rubric_id);
+    });
+
+    const completedTotals = [...reviewerBuckets.values()]
+      .filter((bucket) => bucket.rubricIds.size === expectedRubricCount)
+      .map((bucket) => bucket.total);
+
+    if (completedTotals.length > 0) {
+      roundAverages[reviewStage] = roundMarks(
+        completedTotals.reduce((sum, value) => sum + value, 0) / completedTotals.length
+      );
+    }
+  });
+
+  return roundAverages;
+};
 
 const createNotifications = async (rows) => {
   const validRows = (rows || []).filter((row) => row?.user_id && row?.title && row?.message && row?.type);
@@ -74,6 +143,13 @@ const formatReviewStageLabel = (value) => {
   if (value === 'second_review') return 'Second Review';
   if (value === 'final_review') return 'Final Review';
   return value;
+};
+
+const getRubricReviewRound = (stage, reviewStage = null) => {
+  if (stage !== 'review') return null;
+  if (!reviewStage) return null;
+  const normalizedReviewStage = normalizeReviewStage(reviewStage);
+  return normalizedReviewStage === 'zeroth_review' ? 'zeroth_review' : null;
 };
 
 const getProjectTeamMemberIds = async (projectId) => {
@@ -317,22 +393,7 @@ const calculateReviewTotal = async (studentId) => {
 
   if (error) throw error;
 
-  const roundAverages = {};
-  REVIEW_ROUNDS.forEach((reviewStage) => {
-    const roundRows = (data || []).filter((row) => row.review_stage === reviewStage);
-    if (!roundRows.length) return;
-
-    const reviewerTotals = new Map();
-    roundRows.forEach((row) => {
-      const key = row.evaluator_id || `anonymous:${reviewStage}`;
-      reviewerTotals.set(key, Number(reviewerTotals.get(key) || 0) + Number(row.marks || 0));
-    });
-
-    const totals = [...reviewerTotals.values()];
-    if (totals.length > 0) {
-      roundAverages[reviewStage] = roundMarks(totals.reduce((sum, value) => sum + value, 0) / totals.length);
-    }
-  });
+  const roundAverages = await buildReviewRoundAverages(data || []);
 
   const completedRoundValues = REVIEW_ROUNDS
     .map((reviewStage) => roundAverages[reviewStage])
@@ -348,11 +409,18 @@ const calculateReviewTotal = async (studentId) => {
   };
 };
 
-const fetchRubricsByStage = async (normalizedStage, { activeOnly = false } = {}) => {
+const fetchRubricsByStage = async (normalizedStage, { activeOnly = false, reviewStage = null } = {}) => {
+  const rubricReviewRound = getRubricReviewRound(normalizedStage, reviewStage);
   let query = supabase
     .from('rubrics')
-    .select('id, stage, title, max_marks, order_no, is_active, created_by, created_at')
+    .select('id, stage, review_round, title, max_marks, order_no, is_active, created_by, created_at')
     .eq('stage', normalizedStage);
+
+  if (normalizedStage === 'review') {
+    query = rubricReviewRound
+      ? query.eq('review_round', rubricReviewRound)
+      : query.is('review_round', null);
+  }
 
   if (activeOnly) {
     query = query.eq('is_active', true);
@@ -366,22 +434,26 @@ const fetchRubricsByStage = async (normalizedStage, { activeOnly = false } = {})
   return data || [];
 };
 
-const ensureDefaultRubricsForStage = async (normalizedStage) => {
+const ensureDefaultRubricsForStage = async (normalizedStage, reviewStage = null) => {
   if (normalizedStage !== 'review' && normalizedStage !== 'ese') {
     return fetchRubricsByStage(normalizedStage);
   }
 
-  const existingRows = await fetchRubricsByStage(normalizedStage);
+  const rubricReviewRound = getRubricReviewRound(normalizedStage, reviewStage);
+  const existingRows = await fetchRubricsByStage(normalizedStage, { reviewStage });
   if (existingRows.length > 0) {
     return existingRows;
   }
 
-  const defaultRows = normalizedStage === 'review' ? DEFAULT_REVIEW_RUBRICS : DEFAULT_EXTERNAL_RUBRICS;
+  const defaultRows = normalizedStage === 'review'
+    ? (rubricReviewRound === 'zeroth_review' ? DEFAULT_ZEROTH_REVIEW_RUBRICS : DEFAULT_REVIEW_RUBRICS)
+    : DEFAULT_EXTERNAL_RUBRICS;
 
   const { error } = await supabase
     .from('rubrics')
     .insert(defaultRows.map((row) => ({
       stage: normalizedStage,
+      review_round: normalizedStage === 'review' ? rubricReviewRound : null,
       title: row.title,
       max_marks: row.max_marks,
       order_no: row.order_no,
@@ -389,18 +461,18 @@ const ensureDefaultRubricsForStage = async (normalizedStage) => {
     })));
 
   if (error) throw error;
-  return fetchRubricsByStage(normalizedStage);
+  return fetchRubricsByStage(normalizedStage, { reviewStage });
 };
 
-export const getActiveRubricsByStage = async (stage) => {
+export const getActiveRubricsByStage = async (stage, reviewStage = null) => {
   const { stage: normalizedStage } = getStageConfig(stage);
-  const rows = await ensureDefaultRubricsForStage(normalizedStage);
+  const rows = await ensureDefaultRubricsForStage(normalizedStage, reviewStage);
   return rows.filter((row) => row.is_active !== false);
 };
 
-export const getRubricsForAdmin = async (stage) => {
+export const getRubricsForAdmin = async (stage, reviewStage = null) => {
   const { stage: normalizedStage } = getStageConfig(stage);
-  return ensureDefaultRubricsForStage(normalizedStage);
+  return ensureDefaultRubricsForStage(normalizedStage, reviewStage);
 };
 
 const validateRubricDefinitions = (stage, rubrics) => {
@@ -429,11 +501,12 @@ const validateRubricDefinitions = (stage, rubrics) => {
   });
 };
 
-export const saveRubricsForStage = async ({ stage, rubrics, adminId }) => {
+export const saveRubricsForStage = async ({ stage, rubrics, adminId, reviewStage = null }) => {
   const { stage: normalizedStage } = getStageConfig(stage);
   validateRubricDefinitions(normalizedStage, rubrics);
+  const rubricReviewRound = getRubricReviewRound(normalizedStage, reviewStage);
 
-  const existingRubrics = await getRubricsForAdmin(normalizedStage);
+  const existingRubrics = await getRubricsForAdmin(normalizedStage, reviewStage);
   const existingIds = new Set(existingRubrics.map((rubric) => rubric.id));
   const payloadIds = new Set(rubrics.map((rubric) => rubric.id).filter(Boolean));
 
@@ -468,6 +541,7 @@ export const saveRubricsForStage = async ({ stage, rubrics, adminId }) => {
     return {
       id: rubric.id || undefined,
       stage: normalizedStage,
+      review_round: normalizedStage === 'review' ? rubricReviewRound : null,
       title: String(rubric.title).trim(),
       max_marks: Number(rubric.max_marks),
       order_no: Number(rubric.order_no),
@@ -482,13 +556,13 @@ export const saveRubricsForStage = async ({ stage, rubrics, adminId }) => {
 
   if (error) throw error;
 
-  return getRubricsForAdmin(normalizedStage);
+  return getRubricsForAdmin(normalizedStage, reviewStage);
 };
 
 export const deleteRubric = async (rubricId) => {
   const { data: rubric, error: rubricError } = await supabase
     .from('rubrics')
-    .select('id, stage')
+    .select('id, stage, review_round')
     .eq('id', rubricId)
     .single();
 
@@ -507,7 +581,7 @@ export const deleteRubric = async (rubricId) => {
     throw createHttpError('Rubrics with marks cannot be deleted.', 409);
   }
 
-  const remainingRubrics = (await getRubricsForAdmin(rubric.stage)).filter((row) => row.id !== rubricId);
+  const remainingRubrics = (await getRubricsForAdmin(rubric.stage, rubric.review_round)).filter((row) => row.id !== rubricId);
   validateRubricDefinitions(rubric.stage, remainingRubrics);
 
   const { error } = await supabase
@@ -550,7 +624,7 @@ const validateMarksPayload = async ({ stage, projectId, entries, reviewStage = n
     });
   }
 
-  const rubrics = await getActiveRubricsByStage(stage);
+  const rubrics = await getActiveRubricsByStage(stage, normalizedReviewStage);
   if (rubrics.length === 0) {
     throw createHttpError(`No active rubrics configured for ${stage}.`, 400);
   }
@@ -657,17 +731,34 @@ export const upsertStageMarks = async ({ stage, projectId, evaluatorId, entries,
   const project = await getProjectRow(projectId);
   await assertStageWritable({ stage: normalizedStage, projectId });
 
-  if (normalizedStage === 'review') {
-    const normalizedReviewStage = normalizeReviewStage(reviewStage);
+  if (normalizedStage === 'review' || normalizedStage === 'ese') {
+    const accessReviewStage = normalizedStage === 'ese'
+      ? 'final_review'
+      : normalizeReviewStage(reviewStage);
     const canWriteReview = await hasActiveReviewerStageAccess({
       project,
       evaluatorId,
-      reviewStage: normalizedReviewStage,
+      reviewStage: accessReviewStage,
     });
 
     if (!canWriteReview) {
-      throw createHttpError('Review mark entry is read-only because coordinator access for this review round is closed.', 423);
+      throw createHttpError(
+        normalizedStage === 'ese'
+          ? 'External mark entry is read-only because coordinator access for final review is closed.'
+          : 'Review mark entry is read-only because coordinator access for this review round is closed.',
+        423
+      );
     }
+  }
+
+  const entryLock = await getEvaluatorEntryLock({
+    projectId,
+    evaluatorId,
+    stage: normalizedStage,
+    reviewStage,
+  });
+  if (entryLock?.is_locked) {
+    throw createHttpError('Marks are locked for this review entry. Unlock to make changes.', 423);
   }
 
   const normalizedEntries = await validateMarksPayload({
@@ -749,7 +840,7 @@ export const getProjectStageBreakdown = async ({ projectId, stage, reviewStage =
   const { stage: normalizedStage, table } = getStageConfig(stage);
   const rubrics = normalizedStage === 'guide'
     ? [GUIDE_TOTAL_RUBRIC]
-    : await getActiveRubricsByStage(normalizedStage);
+    : await getActiveRubricsByStage(normalizedStage, reviewStage);
   const studentIds = await getProjectTeamMemberIds(projectId);
   const normalizedReviewStage = normalizedStage === 'review' ? normalizeReviewStage(reviewStage) : null;
 
@@ -760,11 +851,13 @@ export const getProjectStageBreakdown = async ({ projectId, stage, reviewStage =
 
   if (studentError) throw studentError;
 
+  const marksSelect = normalizedStage === 'review'
+    ? 'id, student_id, rubric_id, marks, evaluator_id, review_stage'
+    : 'id, student_id, rubric_id, marks, evaluator_id';
+
   let marksQuery = supabase
     .from(table)
-    .select(normalizedStage === 'guide'
-      ? 'id, student_id, rubric_id, marks, evaluator_id'
-      : 'id, student_id, rubric_id, marks, evaluator_id, review_stage')
+    .select(marksSelect)
     .in('student_id', studentIds);
 
   if (normalizedStage === 'review') {
@@ -785,9 +878,19 @@ export const getProjectStageBreakdown = async ({ projectId, stage, reviewStage =
     marksByStudent.get(row.student_id).push(row);
   });
 
+  const entryLock = evaluatorId
+    ? await getEvaluatorEntryLock({
+        projectId,
+        evaluatorId,
+        stage: normalizedStage,
+        reviewStage,
+      })
+    : { is_locked: false, locked_at: null };
+
   return {
     stage: normalizedStage,
     review_stage: normalizedReviewStage,
+    entry_lock: entryLock,
     rubrics,
     students: (students || []).map((student) => {
       const studentMarks = marksByStudent.get(student.id) || [];
@@ -831,6 +934,91 @@ export const getProjectStageBreakdown = async ({ projectId, stage, reviewStage =
       };
     }),
   };
+};
+
+export const getEvaluatorEntryLock = async ({ projectId, evaluatorId, stage, reviewStage = null }) => {
+  const { stage: normalizedStage } = getStageConfig(stage);
+  const normalizedReviewStage = normalizeLockReviewStage(normalizedStage, reviewStage);
+
+  let lockQuery = supabase
+    .from('rubric_entry_locks')
+    .select('id, locked_at')
+    .eq('project_id', projectId)
+    .eq('evaluator_id', evaluatorId)
+    .eq('stage', normalizedStage);
+  lockQuery = applyOptionalReviewStageFilter(lockQuery, normalizedReviewStage);
+  const { data, error } = await lockQuery.maybeSingle();
+
+  if (error) {
+    const missingTable =
+      error.code === 'PGRST205' ||
+      /rubric_entry_locks/i.test(error.message || '') ||
+      /rubric_entry_locks/i.test(error.details || '');
+    if (missingTable) {
+      return { is_locked: false, locked_at: null };
+    }
+    throw error;
+  }
+
+  return {
+    is_locked: Boolean(data?.locked_at),
+    locked_at: data?.locked_at || null,
+  };
+};
+
+export const setEvaluatorEntryLock = async ({ projectId, evaluatorId, stage, reviewStage = null, locked }) => {
+  const { stage: normalizedStage } = getStageConfig(stage);
+  const project = await getProjectRow(projectId);
+  await assertStageWritable({ stage: normalizedStage, projectId });
+
+  if (normalizedStage === 'review' || normalizedStage === 'ese') {
+    const accessReviewStage = normalizedStage === 'ese'
+      ? 'final_review'
+      : normalizeReviewStage(reviewStage);
+    const canWriteReview = await hasActiveReviewerStageAccess({
+      project,
+      evaluatorId,
+      reviewStage: accessReviewStage,
+    });
+
+    if (!canWriteReview) {
+      throw createHttpError('Review entry lock cannot be changed because coordinator access for this stage is closed.', 423);
+    }
+  }
+
+  const normalizedReviewStage = normalizeLockReviewStage(normalizedStage, reviewStage);
+  const now = new Date().toISOString();
+
+  if (locked) {
+    const { error } = await supabase
+      .from('rubric_entry_locks')
+      .upsert({
+        project_id: projectId,
+        evaluator_id: evaluatorId,
+        stage: normalizedStage,
+        review_stage: normalizedReviewStage,
+        locked_at: now,
+        updated_at: now,
+      }, {
+        onConflict: 'project_id,evaluator_id,stage,review_stage',
+      });
+
+    if (error) throw error;
+    return { is_locked: true, locked_at: now };
+  }
+
+  let deleteQuery = supabase
+    .from('rubric_entry_locks')
+    .delete()
+    .eq('project_id', projectId)
+    .eq('evaluator_id', evaluatorId)
+    .eq('stage', normalizedStage);
+  deleteQuery = applyOptionalReviewStageFilter(deleteQuery, normalizedReviewStage);
+
+  const { error } = await deleteQuery;
+  if (error) throw error;
+
+  return { is_locked: false, locked_at: null };
 };
 
 export const recalculateClassFinalResults = async (classId) => {
@@ -928,7 +1116,7 @@ const getReviewRoundBreakdownForClassProjects = async ({ projectIds }) => {
 
   const { data: reviewRows, error: reviewError } = await supabase
     .from('review_marks')
-    .select('student_id, evaluator_id, review_stage, marks')
+    .select('student_id, evaluator_id, review_stage, rubric_id, marks')
     .in('student_id', studentIds)
     .in('review_stage', REVIEW_ROUNDS);
 
@@ -937,18 +1125,12 @@ const getReviewRoundBreakdownForClassProjects = async ({ projectIds }) => {
   const map = {};
   for (const studentId of studentIds) {
     const studentRows = (reviewRows || []).filter((row) => row.student_id === studentId);
+    const roundAverages = await buildReviewRoundAverages(studentRows);
     const roundItems = REVIEW_ROUNDS.map((reviewStage) => {
-      const roundRows = studentRows.filter((row) => row.review_stage === reviewStage);
-      const reviewerTotals = new Map();
-      roundRows.forEach((row) => {
-        const key = row.evaluator_id || `anonymous:${reviewStage}`;
-        reviewerTotals.set(key, Number(reviewerTotals.get(key) || 0) + Number(row.marks || 0));
-      });
-      const totals = [...reviewerTotals.values()];
       return {
         review_stage: reviewStage,
         label: formatReviewStageLabel(reviewStage),
-        marks: totals.length ? roundMarks(totals.reduce((sum, value) => sum + value, 0) / totals.length) : null,
+        marks: roundAverages[reviewStage] ?? null,
       };
     });
     map[studentId] = roundItems;

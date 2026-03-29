@@ -70,27 +70,40 @@ function wrapPdfText(text, maxChars = 95) {
   return lines;
 }
 
+function pdfSafeLabel(value, fallback = "Entry") {
+  return String(value || fallback)
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (ch) => ch.toUpperCase())
+    .trim();
+}
+
 function buildDiaryPdfBlob({ projectTitle, entries }) {
   const pageWidth = 595;
   const pageHeight = 842;
-  const marginLeft = 72;
-  const marginRight = 72;
-  const topY = 752;
-  const bottomY = 84;
+  const marginLeft = 54;
+  const marginRight = 54;
+  const topY = 746;
+  const bottomY = 74;
+  const accentRgb = "0.00 0.77 0.71";
 
   const headerLines = [
-    { text: `${projectTitle} - Project Diary`, size: 17, gap: 22, bold: true },
-    { text: "Official journal of submissions and guide feedback", size: 10.5, gap: 24, bold: false },
+    { text: "PROJECT DIARY", size: 9.5, gap: 16, bold: true, tracking: true },
+    { text: String(projectTitle || "Untitled Project"), size: 20, gap: 26, bold: true },
+    { text: "Official record of submissions, reviews, meetings, and guide observations", size: 10.5, gap: 18, bold: false },
+    { text: `Generated on ${formatDateTime(new Date().toISOString())}`, size: 9.5, gap: 24, bold: false, muted: true },
   ];
 
   const entryBlocks = (entries || []).map((entry) => {
+    const entryType = pdfSafeLabel(entry?.type, "Entry");
+    const entryStatus = entry?.status ? pdfSafeLabel(entry.status, "") : "";
     const blockLines = [
-      { text: String(entry.title || "").trim(), size: 12.5, gap: 17, bold: true },
-      { text: formatDateTime(entry.time), size: 9.5, gap: 14 },
-      ...wrapPdfText(entry.body || "", 86).map((line) => ({ text: line, size: 11, gap: 14 })),
-      { text: "", size: 10, gap: 10 },
+      { text: entryType, size: 8.5, gap: 12, bold: true, tracking: true, muted: true },
+      { text: String(entry.title || "").trim(), size: 13, gap: 16, bold: true },
+      { text: entryStatus ? `${formatDateTime(entry.time)}  |  ${entryStatus}` : formatDateTime(entry.time), size: 9.5, gap: 14, muted: true },
+      ...wrapPdfText(entry.body || "", 82).map((line) => ({ text: line, size: 10.5, gap: 13.5 })),
+      { text: "", size: 8, gap: 12 },
     ];
-    const height = blockLines.reduce((sum, line) => sum + (line.gap || 14), 0) + 8;
+    const height = blockLines.reduce((sum, line) => sum + (line.gap || 14), 0) + 18;
     return { lines: blockLines, height };
   });
 
@@ -137,27 +150,50 @@ function buildDiaryPdfBlob({ projectTitle, entries }) {
     const rightX = pageWidth - marginRight;
     let y = topY;
 
-    commands.push("0.6 w");
-    commands.push(`${leftX} ${pageHeight - 72} m ${rightX} ${pageHeight - 72} l S`);
-    commands.push(`${leftX} ${bottomY - 12} m ${rightX} ${bottomY - 12} l S`);
+    commands.push("0.8 w");
+    commands.push(`${accentRgb} RG`);
+    commands.push(`${leftX} ${pageHeight - 50} m ${rightX} ${pageHeight - 50} l S`);
+    commands.push("0.45 w");
+    commands.push("0.82 0.86 0.91 RG");
+    commands.push(`${leftX} ${bottomY - 8} m ${rightX} ${bottomY - 8} l S`);
 
     headerLines.forEach((line) => {
       const text = escapePdfText(line.text || "");
+      if (line.muted) commands.push("0.40 0.47 0.58 rg");
+      else commands.push("0.08 0.12 0.22 rg");
       commands.push(`BT /${line.bold ? "F2" : "F1"} ${line.size} Tf ${leftX} ${y} Td (${text}) Tj ET`);
       y -= line.gap;
     });
 
+    commands.push(`${accentRgb} rg`);
+    commands.push(`${leftX} ${y + 10} ${rightX - leftX} 1.2 re f`);
+    y -= 18;
+
     pageBlocks.forEach((block) => {
+      commands.push("0.93 0.96 0.99 rg");
+      commands.push(`${leftX} ${y - block.height + 12} ${rightX - leftX} ${block.height - 6} re f`);
+      commands.push("0.86 0.90 0.95 RG");
+      commands.push("0.5 w");
+      commands.push(`${leftX} ${y - block.height + 12} ${rightX - leftX} ${block.height - 6} re S`);
+      commands.push(`${accentRgb} rg`);
+      commands.push(`${leftX} ${y - 4} 72 2 re f`);
+
       block.lines.forEach((line) => {
         const text = escapePdfText(line.text || "");
+        if (line.muted) commands.push("0.40 0.47 0.58 rg");
+        else if (line.tracking) commands.push(`${accentRgb} rg`);
+        else commands.push("0.08 0.12 0.22 rg");
         commands.push(`BT /${line.bold ? "F2" : "F1"} ${line.size || 11} Tf ${leftX} ${y} Td (${text}) Tj ET`);
         y -= line.gap || 14;
       });
-      y -= 6;
+      y -= 10;
     });
 
-    const footerText = escapePdfText(`Page ${pageIndex + 1} of ${totalPages}`);
-    commands.push(`BT /F1 9 Tf ${rightX - 70} ${bottomY - 28} Td (${footerText}) Tj ET`);
+    const footerLeft = escapePdfText(String(projectTitle || "Project Diary"));
+    const footerRight = escapePdfText(`Page ${pageIndex + 1} of ${totalPages}`);
+    commands.push("0.40 0.47 0.58 rg");
+    commands.push(`BT /F1 8.5 Tf ${leftX} ${bottomY - 24} Td (${footerLeft}) Tj ET`);
+    commands.push(`BT /F1 8.5 Tf ${rightX - 54} ${bottomY - 24} Td (${footerRight}) Tj ET`);
 
     const stream = commands.join("\n");
     const contentObj = addObject(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
@@ -263,6 +299,7 @@ function buildDiaryEntries({
   meetings,
   nameByUserId,
   guideUserIds,
+  currentTimeMs = Date.now(),
 }) {
   const entries = [];
   const mentor = project?.guide || project?.mentor;
@@ -299,30 +336,27 @@ function buildDiaryEntries({
     const latestReview = (reviewsByIdeaId[idea.id] || [])
       .slice()
       .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())[0];
-    const shouldShowIdeaSubmission = Boolean(
-      idea.submitted_at ||
-      latestReview ||
-      ["submitted", "approved", "rejected", "revision_required"].includes(String(idea.status || "").toLowerCase())
-    );
+    const submitterName = nameByUserId[idea.created_by] || "Team member";
+    const latestReviewerName = latestReview ? (nameByUserId[latestReview.reviewer_id] || "Guide") : "Guide";
+    const normalizedIdeaStatus = String(idea.status || "").toLowerCase();
+    const ideaActionLine = normalizedIdeaStatus === "draft"
+      ? `Version v${idea.version_no || 1} of the idea "${idea.title || "Untitled idea"}" was saved by ${submitterName} and added to the project record.`
+      : `Version v${idea.version_no || 1} of the idea "${idea.title || "Untitled idea"}" was formally submitted by ${submitterName} for guide review and academic consideration.`;
 
-    if (shouldShowIdeaSubmission) {
-      const submitterName = nameByUserId[idea.created_by] || "Team member";
-      const latestReviewerName = latestReview ? (nameByUserId[latestReview.reviewer_id] || "Guide") : "Guide";
-      entries.push({
-        id: `idea-submitted-${idea.id}`,
-        time: idea.submitted_at || latestReview?.created_at || idea.updated_at || idea.created_at || new Date().toISOString(),
-        type: "submission",
-        title: `Idea Submission (v${idea.version_no || 1})`,
-        body: [
-          `Version v${idea.version_no || 1} of the idea "${idea.title || "Untitled idea"}" was formally submitted by ${submitterName} for guide review and academic consideration.`,
-          professionalStatusLine(idea.status),
-          latestReview?.comment ? `Latest guide observation from ${latestReviewerName}: ${latestReview.comment}` : "No guide remarks have been recorded yet for this idea submission.",
-        ]
-          .filter(Boolean)
-          .join(" "),
-        status: idea.status,
-      });
-    }
+    entries.push({
+      id: `idea-submitted-${idea.id}`,
+      time: idea.submitted_at || latestReview?.created_at || idea.updated_at || idea.created_at || new Date().toISOString(),
+      type: "submission",
+      title: `Idea Submission (v${idea.version_no || 1})`,
+      body: [
+        ideaActionLine,
+        professionalStatusLine(idea.status),
+        latestReview?.comment ? `Latest guide observation from ${latestReviewerName}: ${latestReview.comment}` : "No guide remarks have been recorded yet for this idea submission.",
+      ]
+        .filter(Boolean)
+        .join(" "),
+      status: idea.status,
+    });
   });
 
   const hasIdeaSubmissionEntry = entries.some((entry) => String(entry.id || "").startsWith("idea-submitted-"));
@@ -406,6 +440,25 @@ function buildDiaryEntries({
         .join(" "),
       status: doc.status,
     });
+
+    const normalizedDocStatus = String(doc.status || "").toLowerCase();
+    const hasGuideDecision = ["approved", "rejected", "revision_required"].includes(normalizedDocStatus) || Boolean(String(doc.feedback || "").trim());
+    if (hasGuideDecision) {
+      entries.push({
+        id: `doc-review-${doc.id}`,
+        time: doc.updated_at || doc.uploaded_at || new Date().toISOString(),
+        type: "review",
+        title: `Guide Decision on ${docTypeLabel}`,
+        body: [
+          `The guide reviewed the ${docTypeLabel.toLowerCase()} submission "${doc.file_name || "Untitled file"}" (${versionLabel}).`,
+          professionalStatusLine(doc.status),
+          doc.feedback ? `Recorded guide feedback: ${doc.feedback}` : "The guide decision was recorded without additional written remarks.",
+        ]
+          .filter(Boolean)
+          .join(" "),
+        status: doc.status,
+      });
+    }
   });
 
   (evaluations || []).forEach((evaluation) => {
@@ -430,8 +483,25 @@ function buildDiaryEntries({
   (meetings || []).forEach((meeting) => {
     const approver = nameByUserId[meeting.responded_by] || nameByUserId[meeting.requested_to] || "Guide";
     const meetingTime = new Date(meeting.requested_for || 0).getTime();
-    const hasReachedMeetingTime = Number.isFinite(meetingTime) && meetingTime <= Date.now();
-    if (String(meeting.status || "").toLowerCase() === "approved" && meeting.requested_for && hasReachedMeetingTime) {
+    const hasReachedMeetingTime = Number.isFinite(meetingTime) && meetingTime <= currentTimeMs;
+    const meetingStatus = String(meeting.status || "").toLowerCase();
+
+    if (meetingStatus === "approved" && meeting.requested_for && !hasReachedMeetingTime) {
+      entries.push({
+        id: `meeting-scheduled-${meeting.id}`,
+        time: meeting.responded_at || meeting.requested_at || meeting.requested_for,
+        type: "meeting",
+        title: "Meeting Scheduled",
+        body: [
+          `A project meeting was scheduled with ${approver} for ${formatDateTime(meeting.requested_for)}.`,
+          meeting.agenda ? `Recorded agenda: ${meeting.agenda}.` : "",
+          meeting.response_note ? `Guide note: ${meeting.response_note}` : "The meeting is confirmed and waiting for the scheduled time.",
+        ].filter(Boolean).join(" "),
+        status: "approved",
+      });
+    }
+
+    if (meetingStatus === "approved" && meeting.requested_for && hasReachedMeetingTime) {
       entries.push({
         id: `meeting-approved-${meeting.id}`,
         time: meeting.requested_for,
@@ -461,12 +531,16 @@ export default function ProjectDiaryPanel({
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [entries, setEntries] = useState(EMPTY_ARRAY);
+  const [ideas, setIdeas] = useState(EMPTY_ARRAY);
+  const [ideaReviews, setIdeaReviews] = useState(EMPTY_ARRAY);
+  const [documents, setDocuments] = useState(EMPTY_ARRAY);
+  const [evaluations, setEvaluations] = useState(EMPTY_ARRAY);
   const [meetingRequests, setMeetingRequests] = useState(EMPTY_ARRAY);
   const [meetingDateTime, setMeetingDateTime] = useState("");
   const [meetingAgenda, setMeetingAgenda] = useState("");
   const [requestingMeeting, setRequestingMeeting] = useState(false);
   const [actingMeetingId, setActingMeetingId] = useState("");
+  const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now());
 
   const mentor = project?.guide || project?.mentor || (mentorId ? { id: mentorId, full_name: mentorName || "Guide" } : null);
   const canRequestMeeting = role === "student" && Boolean(currentUserId && mentor?.id);
@@ -485,6 +559,13 @@ export default function ProjectDiaryPanel({
     }
     return map;
   }, [currentUserId, currentUserName, mentor?.full_name, mentor?.id, project]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTimeMs(Date.now());
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const loadDiary = useCallback(async () => {
     if (!project?.id) return;
@@ -542,17 +623,10 @@ export default function ProjectDiaryPanel({
       if (meetingsError && !meetingsMissing) throw meetingsError;
       setMeetingRequests(meetings);
 
-      const diaryEntries = buildDiaryEntries({
-        project,
-        ideas,
-        ideaReviews,
-        documents: documentsRes.data || [],
-        evaluations: evaluationsRes.data || [],
-        meetings,
-        nameByUserId,
-        guideUserIds,
-      });
-      setEntries(diaryEntries);
+      setIdeas(ideas);
+      setIdeaReviews(ideaReviews);
+      setDocuments(documentsRes.data || []);
+      setEvaluations(evaluationsRes.data || []);
     } catch (err) {
       setError(err.message || "Failed to load project diary.");
     } finally {
@@ -579,6 +653,18 @@ export default function ProjectDiaryPanel({
       supabase.removeChannel(channel);
     };
   }, [loadDiary, project?.id]);
+
+  const entries = useMemo(() => buildDiaryEntries({
+    project,
+    ideas,
+    ideaReviews,
+    documents,
+    evaluations,
+    meetings: meetingRequests,
+    nameByUserId,
+    guideUserIds,
+    currentTimeMs,
+  }), [project, ideas, ideaReviews, documents, evaluations, meetingRequests, nameByUserId, guideUserIds, currentTimeMs]);
 
   const groupedEntries = useMemo(() => {
     const recentEntries = (entries || []).slice(0, RECENT_ENTRY_LIMIT);
