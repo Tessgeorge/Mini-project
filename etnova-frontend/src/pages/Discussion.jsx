@@ -62,6 +62,7 @@ export default function Discussion({
   userId: externalUserId = null,
   userRole: externalUserRole = "student",
   userName: externalUserName = "Student",
+  initialProject = null,
   initialMembers = null,
   initialTitle = "",
 }) {
@@ -464,11 +465,23 @@ export default function Discussion({
           return;
         }
 
-        let detail = null;
-        try {
-          detail = await apiRequest(`/projects/${resolvedProjectId}`);
-        } catch {
-          detail = null;
+        const canUseInitialProject =
+          initialProject
+          && initialProject.id === resolvedProjectId
+          && (
+            Array.isArray(initialProject.team_members)
+            || initialProject.guide
+            || initialProject.mentor
+            || initialProject.coordinator
+          );
+
+        let detail = canUseInitialProject ? initialProject : null;
+        if (!detail) {
+          try {
+            detail = await apiRequest(`/projects/${resolvedProjectId}`);
+          } catch {
+            detail = null;
+          }
         }
 
         if (!mounted) return;
@@ -480,9 +493,11 @@ export default function Discussion({
           mentor: detail?.mentor || null,
           coordinator: detail?.coordinator || null,
         });
-        await loadMessages(resolvedProjectId, { reset: true });
-        await loadReadState(resolvedProjectId, p.id);
-        await fetchReadStateForParticipants(resolvedProjectId);
+        await Promise.all([
+          loadMessages(resolvedProjectId, { reset: true }),
+          loadReadState(resolvedProjectId, p.id),
+          fetchReadStateForParticipants(resolvedProjectId),
+        ]);
 
         const channel = supabase
           .channel(`discussion-${resolvedProjectId}`, {
@@ -560,7 +575,7 @@ export default function Discussion({
       if (typingTimeout.current) clearTimeout(typingTimeout.current);
       setOnlineUserIds({});
     };
-  }, [externalProjectId, externalUserId, externalUserName, externalUserRole, fetchReadStateForParticipants, initialMembers, initialTitle, loadMessages, loadReadState, removeRealtimeMessage, syncOnlinePresence, upsertRealtimeMessage]);
+  }, [externalProjectId, externalUserId, externalUserName, externalUserRole, fetchReadStateForParticipants, initialMembers, initialProject, initialTitle, loadMessages, loadReadState, removeRealtimeMessage, syncOnlinePresence, upsertRealtimeMessage]);
 
   // Fallback sync when realtime channel is unavailable.
   useEffect(() => {

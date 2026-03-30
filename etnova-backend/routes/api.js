@@ -1,6 +1,9 @@
 import express from 'express';
 import { 
   getDashboardData,
+  getAdminDashboardData,
+  getAdminGuideAllocationData,
+  getAdminMentorManagementData,
   getUserProfile, 
   updateUserProfile,
 
@@ -87,6 +90,9 @@ const router = express.Router();
 
 // ====== USER PROFILE ROUTES ======
 router.get('/dashboard-data', authenticateUser, getDashboardData);
+router.get('/admin/dashboard-data', authenticateUser, requireRole(['admin']), getAdminDashboardData);
+router.get('/admin/guide-allocation-data', authenticateUser, requireRole(['admin']), getAdminGuideAllocationData);
+router.get('/admin/mentor-management-data', authenticateUser, requireRole(['admin']), getAdminMentorManagementData);
 router.get('/profile', authenticateUser, getUserProfile);
 router.put('/profile', authenticateUser, updateUserProfile);
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import supabase from "../lib/supabase";
+import { apiRequest } from "../config/apiClient";
 import useAdminAuth from "../hooks/useAdminAuth";
 import AppFrame from "../components/AppFrame";
 import Sidebar from "../components/admin/Sidebar";
@@ -79,47 +80,21 @@ export default function AdminMentorManagement() {
     },
   });
 
-  const fetchMentors = useCallback(async () => {
+  const fetchData = useCallback(async (force = false) => {
     setLoading(true);
     setError("");
     try {
-      const { data, error: mentorsError } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("role", "mentor")
-        .order("full_name", { ascending: true });
-
-      if (mentorsError) throw mentorsError;
-      setMentors(data || []);
+      const data = await apiRequest("/admin/mentor-management-data", force ? { skipCache: true } : {});
+      setMentors(data?.mentors || []);
+      setClasses(data?.classes || []);
+      setProjects(data?.projects || []);
     } catch (err) {
+      setMentors([]);
+      setClasses([]);
+      setProjects([]);
       setError(err.message || "Failed to load mentors.");
     } finally {
       setLoading(false);
-    }
-  }, []);
-
-  const fetchClasses = useCallback(async () => {
-    try {
-      const { data, error: classesError } = await supabase
-        .from("classes")
-        .select("id, class_section")
-        .order("class_section", { ascending: true });
-      if (classesError) throw classesError;
-      setClasses(data || []);
-    } catch {
-      setClasses([]);
-    }
-  }, []);
-
-  const fetchProjects = useCallback(async () => {
-    try {
-      const { data, error: projectsError } = await supabase
-        .from("projects")
-        .select("id, guide_id");
-      if (projectsError) throw projectsError;
-      setProjects(data || []);
-    } catch {
-      setProjects([]);
     }
   }, []);
 
@@ -151,22 +126,16 @@ export default function AdminMentorManagement() {
   }, [classes, mentors, projects]);
 
   useEffect(() => {
-    fetchMentors();
-    fetchClasses();
-    fetchProjects();
-  }, [fetchClasses, fetchMentors, fetchProjects]);
+    fetchData();
+  }, [fetchData]);
 
   useEffect(() => {
     const onFocus = () => {
-      fetchMentors();
-      fetchClasses();
-      fetchProjects();
+      fetchData(true);
     };
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
-        fetchMentors();
-        fetchClasses();
-        fetchProjects();
+        fetchData(true);
       }
     };
 
@@ -175,9 +144,9 @@ export default function AdminMentorManagement() {
 
     const channel = supabase
       .channel("mentor-live")
-      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, fetchMentors)
-      .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, fetchProjects)
-      .on("postgres_changes", { event: "*", schema: "public", table: "classes" }, fetchClasses)
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => fetchData(true))
+      .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, () => fetchData(true))
+      .on("postgres_changes", { event: "*", schema: "public", table: "classes" }, () => fetchData(true))
       .subscribe();
 
     return () => {
@@ -185,7 +154,7 @@ export default function AdminMentorManagement() {
       document.removeEventListener("visibilitychange", onVisibility);
       supabase.removeChannel(channel);
     };
-  }, [fetchClasses, fetchMentors, fetchProjects]);
+  }, [fetchData]);
 
   const filteredMentors = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
@@ -352,7 +321,7 @@ export default function AdminMentorManagement() {
         .eq("id", mentorId);
 
       if (deleteError) throw deleteError;
-      await fetchMentors();
+      await fetchData(true);
     } catch (err) {
       setError(err.message || "Failed to delete mentor.");
     }
@@ -383,9 +352,9 @@ export default function AdminMentorManagement() {
       return false;
     }
 
-    if (shouldRefresh) await fetchMentors();
+    if (shouldRefresh) await fetchData(true);
     return true;
-  }, [fetchMentors]);
+  }, [fetchData]);
 
   const toggleCoordinatorRole = useCallback(async (mentorId, isCoordinator, shouldRefresh = true) => {
     const { error: updateError } = await supabase
@@ -401,9 +370,9 @@ export default function AdminMentorManagement() {
       return false;
     }
 
-    if (shouldRefresh) await fetchMentors();
+    if (shouldRefresh) await fetchData(true);
     return true;
-  }, [fetchMentors]);
+  }, [fetchData]);
 
   const assignCoordinatorClass = useCallback(async (mentorId, classId, shouldRefresh = true) => {
     const { data: coordinators, error: countError } = await supabase
@@ -435,9 +404,9 @@ export default function AdminMentorManagement() {
       return false;
     }
 
-    if (shouldRefresh) await fetchMentors();
+    if (shouldRefresh) await fetchData(true);
     return true;
-  }, [fetchMentors]);
+  }, [fetchData]);
 
   const handleSaveRoles = async (mentorId, roles, selectedClassId) => {
     setError("");
@@ -461,7 +430,7 @@ export default function AdminMentorManagement() {
         if (!coordOk) return;
       }
 
-      await fetchMentors();
+      await fetchData(true);
     } catch (err) {
       setError(err.message || "Failed to update mentor role.");
     }

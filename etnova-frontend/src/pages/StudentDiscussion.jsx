@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import DiscussionChat from "../components/DiscussionChat";
-import { apiRequest } from "../config/apiClient";
+import { fetchStudentBootstrapData } from "../services/studentData";
 
 export default function StudentDiscussion() {
   const [loading, setLoading] = useState(true);
@@ -15,11 +15,11 @@ export default function StudentDiscussion() {
       setLoading(true);
       setError("");
       try {
-        const [profileData, projects] = await Promise.all([apiRequest("/profile"), apiRequest("/projects")]);
+        const bootstrap = await fetchStudentBootstrapData();
         if (!mounted) return;
 
-        setProfile(profileData || null);
-        const currentProject = projects?.[0] || null;
+        setProfile(bootstrap?.profile || null);
+        const currentProject = bootstrap?.projects?.[0] || null;
         setProject(currentProject);
       } catch (e) {
         if (!mounted) return;
@@ -65,6 +65,7 @@ export default function StudentDiscussion() {
       userId={profile.id}
       userRole="student"
       userName={profile.full_name || "Student"}
+      initialProject={project}
       initialMembers={project.team_members || []}
       initialTitle={project.title || "Team Discussion"}
     />

@@ -513,6 +513,230 @@ export const getDashboardData = async (req, res) => {
   }
 };
 
+export const getAdminDashboardData = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const [profileResult, projectsResult, mentorsResult, classesResult, reviewStagesResult] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('full_name, email, department')
+        .eq('id', userId)
+        .eq('role', 'admin')
+        .single(),
+      supabase
+        .from('projects')
+        .select('id, title, guide_id, status, class_id, team_members(id, student_id, profiles:student_id(class_section))'),
+      supabase
+        .from('profiles')
+        .select('id, full_name, role')
+        .eq('role', 'mentor'),
+      supabase
+        .from('classes')
+        .select('id, class_section, department')
+        .order('class_section', { ascending: true, nullsFirst: false }),
+      supabase
+        .from('review_stages')
+        .select('id, class_id, stage_name, coordinator_deadline, is_active, is_completed, is_locked'),
+    ]);
+
+    if (profileResult.error) {
+      return res.status(404).json({ message: 'Admin profile not found', error: profileResult.error.message });
+    }
+    if (projectsResult.error) throw projectsResult.error;
+    if (mentorsResult.error) throw mentorsResult.error;
+    if (classesResult.error) throw classesResult.error;
+    if (reviewStagesResult.error) throw reviewStagesResult.error;
+
+    res.json({
+      profile: profileResult.data || null,
+      projects: projectsResult.data || [],
+      mentors: mentorsResult.data || [],
+      classes: classesResult.data || [],
+      review_stages: reviewStagesResult.data || [],
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const getAdminGuideAllocationData = async (req, res) => {
+  try {
+    const [mentorResult, projectResult, studentClassResult] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('id, full_name, email, department, specialization, domains_of_interest, max_team_capacity')
+        .eq('role', 'mentor')
+        .eq('designation', 'guide')
+        .order('full_name', { ascending: true }),
+      supabase
+        .from('projects')
+        .select(`
+          id,
+          title,
+          guide_id,
+          domain,
+          approved_idea_id,
+          current_idea_id,
+          team_members (
+            project_id,
+            student_id,
+            profiles:student_id (
+              class_section,
+              department
+            )
+          )
+        `)
+        .order('title', { ascending: true }),
+      supabase
+        .from('profiles')
+        .select('class_section')
+        .eq('role', 'student')
+        .not('class_section', 'is', null)
+        .order('class_section', { ascending: true }),
+    ]);
+
+    if (mentorResult.error) throw mentorResult.error;
+    if (projectResult.error) throw projectResult.error;
+    if (studentClassResult.error) throw studentClassResult.error;
+
+    const projectRows = projectResult.data || [];
+    const projectIds = projectRows.map((row) => row.id).filter(Boolean);
+    const ideaIds = [...new Set(
+      projectRows.flatMap((row) => [row.approved_idea_id, row.current_idea_id]).filter(Boolean)
+    )];
+
+    const { data: ideaRows, error: ideasError } = ideaIds.length > 0
+      ? await supabase
+        .from('project_ideas')
+        .select('id, title, domain, subdomain, keywords, confidence_score, technologies, status')
+        .in('id', ideaIds)
+      : { data: [], error: null };
+    if (ideasError) throw ideasError;
+
+    const { data: allocationRows, error: allocationsError } = projectIds.length > 0
+      ? await supabase
+        .from('guide_allocations')
+        .select('project_id, guide_id, status, assigned_at')
+        .eq('status', 'active')
+        .in('project_id', projectIds)
+        .order('assigned_at', { ascending: false })
+      : { data: [], error: null };
+    if (allocationsError) throw allocationsError;
+
+    const guideIds = [...new Set((allocationRows || []).map((row) => row.guide_id).filter(Boolean))];
+    const { data: guideRows, error: guidesError } = guideIds.length > 0
+      ? await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', guideIds)
+      : { data: [], error: null };
+    if (guidesError) throw guidesError;
+
+    const guideNameById = new Map((guideRows || []).map((row) => [row.id, row.full_name || '']));
+    const ideaById = new Map((ideaRows || []).map((row) => [row.id, row]));
+    const allocationByProject = new Map();
+
+    (allocationRows || []).forEach((row) => {
+      if (!row?.project_id || allocationByProject.has(row.project_id)) return;
+      allocationByProject.set(row.project_id, row);
+    });
+
+    const mentors = (mentorResult.data || []).map((mentor) => ({
+      id: mentor.id,
+      full_name: mentor.full_name || 'Unnamed Mentor',
+      email: mentor.email || '-',
+      department: mentor.department || '',
+      specialization: mentor.specialization || '',
+      domains_of_interest: normalizeRecommendationTagList(mentor.domains_of_interest),
+      max_team_capacity: getRecommendationMentorCapacity(mentor),
+    }));
+
+    const classSections = [...new Set(
+      (studentClassResult.data || [])
+        .map((row) => String(row.class_section || '').trim())
+        .filter(Boolean)
+    )]
+      .sort((a, b) => a.localeCompare(b))
+      .map((value) => ({ id: value, class_name: value }));
+
+    const projects = projectRows.map((project) => {
+      const allocation = allocationByProject.get(project.id) || null;
+      const members = Array.isArray(project.team_members) ? project.team_members : [];
+      const classSection = members
+        .map((member) => {
+          const profile = Array.isArray(member?.profiles) ? member.profiles[0] : member?.profiles;
+          return String(profile?.class_section || '').trim();
+        })
+        .find(Boolean) || '';
+      const teamDepartment = members
+        .map((member) => {
+          const profile = Array.isArray(member?.profiles) ? member.profiles[0] : member?.profiles;
+          return String(profile?.department || '').trim();
+        })
+        .find(Boolean) || '';
+      const detectedIdea = ideaById.get(project.approved_idea_id) || ideaById.get(project.current_idea_id) || null;
+
+      return {
+        id: project.id,
+        title: project.title || 'Untitled Project',
+        guide_id: project.guide_id || null,
+        domain: project.domain || '',
+        detected_domain: detectedIdea?.domain || project.domain || '',
+        detected_subdomain: detectedIdea?.subdomain || '',
+        detected_keywords: Array.isArray(detectedIdea?.keywords) ? detectedIdea.keywords : [],
+        confidence_score: typeof detectedIdea?.confidence_score === 'number' ? detectedIdea.confidence_score : 0,
+        technologies: Array.isArray(detectedIdea?.technologies) ? detectedIdea.technologies : [],
+        idea_title: detectedIdea?.title || '',
+        team_department: teamDepartment,
+        class_id: classSection || null,
+        class_name: classSection,
+        allocated_guide_id: allocation?.guide_id || null,
+        allocated_guide_name: guideNameById.get(allocation?.guide_id) || '',
+      };
+    });
+
+    res.json({
+      mentors,
+      projects,
+      classes: classSections,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const getAdminMentorManagementData = async (req, res) => {
+  try {
+    const [mentorResult, classResult, projectResult] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('*')
+        .eq('role', 'mentor')
+        .order('full_name', { ascending: true }),
+      supabase
+        .from('classes')
+        .select('id, class_section')
+        .order('class_section', { ascending: true }),
+      supabase
+        .from('projects')
+        .select('id, guide_id'),
+    ]);
+
+    if (mentorResult.error) throw mentorResult.error;
+    if (classResult.error) throw classResult.error;
+    if (projectResult.error) throw projectResult.error;
+
+    res.json({
+      mentors: mentorResult.data || [],
+      classes: classResult.data || [],
+      projects: projectResult.data || [],
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // ====== PROJECT MANAGEMENT FUNCTIONS ======
 
 export const createProject = async (req, res) => {

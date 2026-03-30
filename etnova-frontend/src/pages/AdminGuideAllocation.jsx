@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import supabase from "../lib/supabase";
+import { apiRequest } from "../config/apiClient";
 import AppFrame from "../components/AppFrame";
 import Sidebar from "../components/admin/Sidebar";
 import TopNavbar from "../components/admin/TopNavbar";
@@ -185,172 +186,29 @@ export default function AdminGuideAllocation() {
     return nextMap;
   }, [getGuideWorkload, mentors, projects]);
 
-  const fetchMentors = useCallback(async () => {
-    const { data, error: mentorsError } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("role", "mentor")
-      .eq("designation", "guide")
-      .order("full_name", { ascending: true });
-
-    if (mentorsError) throw mentorsError;
-
-    const normalized = (data || [])
-      .filter(isMentorProfile)
-      .map((mentor) => ({
-        id: mentor.id,
-        full_name: mentor.full_name || "Unnamed Mentor",
-        email: mentor.email || "-",
-        department: mentor.department || "",
-        specialization: mentor.specialization || "",
-        domains_of_interest: normalizeTagList(mentor.domains_of_interest),
-        max_team_capacity: getMentorCapacity(mentor),
-      }));
-
-    setMentors(normalized);
-    return normalized;
-  }, []);
-
-  const fetchClasses = useCallback(async () => {
-    const { data, error: classesError } = await supabase
-      .from("profiles")
-      .select("class_section")
-      .eq("role", "student")
-      .not("class_section", "is", null)
-      .order("class_section", { ascending: true });
-
-    if (classesError) throw classesError;
-
-    const unique = [...new Set((data || []).map((row) => String(row.class_section || "").trim()).filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b))
-      .map((value) => ({ id: value, class_name: value }));
-    setClasses(unique);
-    return unique;
-  }, []);
-
-  const fetchProjects = useCallback(async () => {
-    const { data: projectsData, error: projectsError } = await supabase
-      .from("projects")
-      .select(`
-        id,
-        title,
-        guide_id,
-        domain,
-        approved_idea_id,
-        current_idea_id,
-        team_members (
-          project_id,
-          student_id,
-          profiles:student_id (
-            class_section,
-            department
-          )
-        )
-      `)
-      .order("title", { ascending: true });
-
-    if (projectsError) throw projectsError;
-
-    const projectRows = projectsData || [];
-    const projectIds = projectRows.map((row) => row.id).filter(Boolean);
-    const ideaIds = [...new Set(
-      projectRows.flatMap((row) => [row.approved_idea_id, row.current_idea_id]).filter(Boolean),
-    )];
-
-    const { data: ideaRows, error: ideasError } = ideaIds.length > 0
-      ? await supabase
-        .from("project_ideas")
-        .select("id, title, domain, subdomain, keywords, confidence_score, technologies, status")
-        .in("id", ideaIds)
-      : { data: [], error: null };
-    if (ideasError) throw ideasError;
-
-    const { data: allocationRows, error: allocationsError } = projectIds.length > 0
-      ? await supabase
-        .from("guide_allocations")
-        .select("project_id, guide_id")
-        .in("project_id", projectIds)
-      : { data: [], error: null };
-    if (allocationsError) throw allocationsError;
-
-    const guideIds = [...new Set((allocationRows || []).map((row) => row.guide_id).filter(Boolean))];
-    const { data: guideRows, error: guidesError } = guideIds.length > 0
-      ? await supabase
-        .from("profiles")
-        .select("id, full_name")
-        .in("id", guideIds)
-      : { data: [], error: null };
-    if (guidesError) throw guidesError;
-
-    const guideNameById = new Map((guideRows || []).map((row) => [row.id, row.full_name || ""]));
-    const ideaById = new Map((ideaRows || []).map((row) => [row.id, row]));
-    const allocationByProject = new Map();
-
-    (allocationRows || []).forEach((row) => {
-      if (!row?.project_id || allocationByProject.has(row.project_id)) return;
-      allocationByProject.set(row.project_id, row);
-    });
-
-    const normalized = projectRows.map((project) => {
-      const allocation = allocationByProject.get(project.id) || null;
-      const members = Array.isArray(project.team_members) ? project.team_members : [];
-      const classSection = members
-        .map((member) => {
-          const profile = Array.isArray(member?.profiles) ? member.profiles[0] : member?.profiles;
-          return String(profile?.class_section || "").trim();
-        })
-        .find(Boolean) || "";
-      const teamDepartment = members
-        .map((member) => {
-          const profile = Array.isArray(member?.profiles) ? member.profiles[0] : member?.profiles;
-          return String(profile?.department || "").trim();
-        })
-        .find(Boolean) || "";
-      const detectedIdea = ideaById.get(project.approved_idea_id) || ideaById.get(project.current_idea_id) || null;
-
-      return {
-        id: project.id,
-        title: project.title || "Untitled Project",
-        guide_id: project.guide_id || null,
-        domain: project.domain || "",
-        detected_domain: detectedIdea?.domain || project.domain || "",
-        detected_subdomain: detectedIdea?.subdomain || "",
-        detected_keywords: Array.isArray(detectedIdea?.keywords) ? detectedIdea.keywords : [],
-        confidence_score: typeof detectedIdea?.confidence_score === "number" ? detectedIdea.confidence_score : 0,
-        technologies: Array.isArray(detectedIdea?.technologies) ? detectedIdea.technologies : [],
-        idea_title: detectedIdea?.title || "",
-        team_department: teamDepartment,
-        class_id: classSection || null,
-        class_name: classSection,
-        allocated_guide_id: allocation?.guide_id || null,
-        allocated_guide_name: guideNameById.get(allocation?.guide_id) || "",
-      };
-    });
-
-    setProjects(normalized);
-    return normalized;
-  }, []);
-
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (force = false) => {
     setLoading(true);
     setError("");
     try {
-      await Promise.all([fetchMentors(), fetchProjects(), fetchClasses()]);
+      const data = await apiRequest("/admin/guide-allocation-data", force ? { skipCache: true } : {});
+      setMentors(((data?.mentors || [])).filter(isMentorProfile));
+      setProjects(data?.projects || []);
+      setClasses(data?.classes || []);
     } catch (err) {
       setError(err.message || "Failed to load guide allocation data.");
     } finally {
       setLoading(false);
     }
-  }, [fetchClasses, fetchMentors, fetchProjects]);
+  }, []);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
   useEffect(() => {
-    const onFocus = () => fetchData();
+    const onFocus = () => fetchData(true);
     const onVisibility = () => {
-      if (document.visibilityState === "visible") fetchData();
+      if (document.visibilityState === "visible") fetchData(true);
     };
 
     window.addEventListener("focus", onFocus);
@@ -358,10 +216,11 @@ export default function AdminGuideAllocation() {
 
     const channel = supabase
       .channel("guide-allocation-projects-live")
-      .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, fetchProjects)
-      .on("postgres_changes", { event: "*", schema: "public", table: "guide_allocations" }, fetchProjects)
-      .on("postgres_changes", { event: "*", schema: "public", table: "team_members" }, fetchProjects)
-      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, fetchMentors)
+      .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, () => fetchData(true))
+      .on("postgres_changes", { event: "*", schema: "public", table: "guide_allocations" }, () => fetchData(true))
+      .on("postgres_changes", { event: "*", schema: "public", table: "team_members" }, () => fetchData(true))
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => fetchData(true))
+      .on("postgres_changes", { event: "*", schema: "public", table: "project_ideas" }, () => fetchData(true))
       .subscribe();
 
     return () => {
@@ -369,7 +228,7 @@ export default function AdminGuideAllocation() {
       document.removeEventListener("visibilitychange", onVisibility);
       supabase.removeChannel(channel);
     };
-  }, [fetchData, fetchMentors, fetchProjects]);
+  }, [fetchData]);
 
   const canAssignMentor = useCallback((project, mentorId) => {
     if (mentorId === NONE_GUIDE_VALUE) return true;
@@ -450,11 +309,11 @@ export default function AdminGuideAllocation() {
           ? `Best-fit allocation complete. ${skipped} project(s) left unassigned due to mentor capacity.`
           : "Best-fit allocation complete.",
       );
-      await fetchProjects();
+      await fetchData(true);
     } catch (err) {
       setError(err.message || "Best-fit allocation failed.");
       alert(err.message || "Best-fit allocation failed.");
-      await fetchProjects();
+      await fetchData(true);
     } finally {
       setSaving(false);
     }
@@ -476,11 +335,11 @@ export default function AdminGuideAllocation() {
       if (updateError) throw updateError;
 
       setNotice("Allocation reset completed.");
-      await fetchProjects();
+      await fetchData(true);
     } catch (err) {
       setError(err.message || "Failed to reset allocation.");
       alert(err.message || "Failed to reset allocation.");
-      await fetchProjects();
+      await fetchData(true);
     } finally {
       setSaving(false);
     }
@@ -518,11 +377,11 @@ export default function AdminGuideAllocation() {
 
       setSelectedGuides((prev) => ({ ...prev, [projectId]: "" }));
       setNotice(nextGuideId ? "Guide assigned successfully." : "Guide unassigned successfully.");
-      await fetchProjects();
+      await fetchData(true);
     } catch (err) {
       setError(err.message || "Failed to assign guide.");
       alert(err.message || "Failed to assign guide.");
-      await fetchProjects();
+      await fetchData(true);
     } finally {
       setSaving(false);
     }

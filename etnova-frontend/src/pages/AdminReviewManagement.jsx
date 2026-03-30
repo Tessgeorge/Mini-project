@@ -171,6 +171,7 @@ export default function AdminReviewManagement() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const latestRefreshTokenRef = useRef(0);
+  const classesRequestRef = useRef(null);
 
   const [classes, setClasses] = useState([]);
   const [selectedClassName, setSelectedClassName] = useState("");
@@ -191,23 +192,43 @@ export default function AdminReviewManagement() {
   const [deletingStageId, setDeletingStageId] = useState("");
   const [savingDeleteStage, setSavingDeleteStage] = useState(false);
 
-  const fetchClasses = useCallback(async () => {
-    const { data, error: fetchError } = await supabase
-      .from("classes")
-      .select("id, class_section")
-      .order("class_section", { ascending: true });
-
-    if (fetchError) {
-      throw new Error(fetchError.message || "Failed to load classes.");
+  const ensureClassesLoaded = useCallback(async (force = false) => {
+    if (!force && classes.length > 0) {
+      return classes;
     }
 
-    const normalized = (data || []).map((row) => ({
-      id: row.id,
-      name: row.class_section || String(row.id),
-    }));
-    setClasses(normalized);
-    return normalized;
-  }, []);
+    if (classesRequestRef.current) {
+      return classesRequestRef.current;
+    }
+
+    const request = (async () => {
+      const { data, error: fetchError } = await supabase
+        .from("classes")
+        .select("id, class_section")
+        .order("class_section", { ascending: true });
+
+      if (fetchError) {
+        throw new Error(fetchError.message || "Failed to load classes.");
+      }
+
+      const normalized = (data || []).map((row) => ({
+        id: row.id,
+        name: row.class_section || String(row.id),
+      }));
+      setClasses(normalized);
+      return normalized;
+    })();
+
+    classesRequestRef.current = request;
+
+    try {
+      return await request;
+    } finally {
+      if (classesRequestRef.current === request) {
+        classesRequestRef.current = null;
+      }
+    }
+  }, [classes]);
 
   const ensureDefaultStages = useCallback(async (classId, options = {}) => {
     const { silentRls = true } = options;
@@ -465,14 +486,14 @@ export default function AdminReviewManagement() {
   }, []);
 
   const refreshData = useCallback(async (classRef, options = {}) => {
-    const { keepLoading = false } = options;
+    const { keepLoading = false, refreshClasses = false } = options;
     const refreshToken = latestRefreshTokenRef.current + 1;
     latestRefreshTokenRef.current = refreshToken;
     if (!keepLoading) setLoading(true);
     setError("");
 
     try {
-      const fetchedClasses = await fetchClasses();
+      const fetchedClasses = await ensureClassesLoaded(refreshClasses);
       if (latestRefreshTokenRef.current !== refreshToken) return;
       const effectiveClassRef = classRef || selectedClassId || selectedClassName || fetchedClasses[0]?.id || fetchedClasses[0]?.name || "";
       const classRow = fetchedClasses.find((row) => row.id === effectiveClassRef)
@@ -509,43 +530,12 @@ export default function AdminReviewManagement() {
     } finally {
       if (!keepLoading && latestRefreshTokenRef.current === refreshToken) setLoading(false);
     }
-  }, [autoLockExpiredStages, clearDeadlinesForLockedStages, fetchClasses, fetchStages, reconcileStageCompletionFlags, selectedClassId, selectedClassName]);
+  }, [autoLockExpiredStages, clearDeadlinesForLockedStages, ensureClassesLoaded, fetchStages, reconcileStageCompletionFlags, selectedClassId, selectedClassName]);
 
   useEffect(() => {
     const classParam = searchParams.get("class");
-    refreshData(classParam || "");
+    refreshData(classParam || "", { refreshClasses: true });
   }, [refreshData, searchParams]);
-
-  useEffect(() => {
-    if (!selectedClassId) {
-      setStages([]);
-      setLoading(false);
-      return;
-    }
-
-    const run = async () => {
-      const refreshToken = latestRefreshTokenRef.current + 1;
-      latestRefreshTokenRef.current = refreshToken;
-      setLoading(true);
-      setError("");
-      try {
-        await autoLockExpiredStages(selectedClassId);
-        await clearDeadlinesForLockedStages(selectedClassId);
-        await reconcileStageCompletionFlags(selectedClassId);
-        if (latestRefreshTokenRef.current !== refreshToken) return;
-        await fetchStages(selectedClassId);
-        if (latestRefreshTokenRef.current !== refreshToken) return;
-      } catch (err) {
-        if (latestRefreshTokenRef.current !== refreshToken) return;
-        setStages([]);
-        setError(err.message || "Failed to load review stages.");
-      } finally {
-        if (latestRefreshTokenRef.current === refreshToken) setLoading(false);
-      }
-    };
-
-    run();
-  }, [autoLockExpiredStages, clearDeadlinesForLockedStages, fetchStages, reconcileStageCompletionFlags, selectedClassId]);
 
   useEffect(() => {
     resetDeadlineModal();
@@ -1006,9 +996,6 @@ export default function AdminReviewManagement() {
                 value={selectedClassId}
                 onChange={(event) => {
                   const nextClassId = event.target.value;
-                  setSelectedClassId(nextClassId);
-                  const selectedClass = classes.find((classItem) => classItem.id === nextClassId);
-                  setSelectedClassName(selectedClass?.name || "");
                   refreshData(nextClassId);
                 }}
                 className="glass-input rounded-xl px-3 py-2.5 text-sm text-slate-700 min-w-[180px]"

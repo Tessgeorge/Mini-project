@@ -1090,7 +1090,7 @@ export const getAdminFinalResults = async () => {
 export const getAdminClasses = async () => {
   const { data, error } = await supabase
     .from('classes')
-    .select('id, class_section')
+    .select('id, class_section, department')
     .order('class_section', { ascending: true });
 
   if (error) throw error;
@@ -1098,6 +1098,7 @@ export const getAdminClasses = async () => {
   return (data || []).map((row) => ({
     id: row.id,
     class_name: row.class_section || row.id,
+    department: row.department || '',
   }));
 };
 

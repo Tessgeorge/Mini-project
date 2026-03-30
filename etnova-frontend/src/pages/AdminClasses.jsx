@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import supabase from "../lib/supabase";
 import useAdminAuth from "../hooks/useAdminAuth";
+import { apiRequest } from "../config/apiClient";
 import { emitAdminDataUpdated } from "../utils/adminLiveSync";
 import AppFrame from "../components/AppFrame";
 import Sidebar from "../components/admin/Sidebar";
@@ -18,26 +19,22 @@ export default function AdminClasses() {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({ class_name: "", department: "" });
 
-  const fetchClasses = async () => {
+  const fetchClasses = useCallback(async (force = false) => {
     setLoading(true);
     setError("");
     try {
-      const { data, error: fetchError } = await supabase
-        .from("classes")
-        .select("id, class_name:class_section, department")
-        .order("class_section", { ascending: true });
-      if (fetchError) throw fetchError;
-      setClasses(data || []);
+      const classRows = await apiRequest("/admin/classes", force ? { skipCache: true } : {});
+      setClasses(classRows || []);
     } catch (err) {
       setError(err.message || "Failed to fetch classes.");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchClasses();
-  }, []);
+  }, [fetchClasses]);
 
   const createClass = async () => {
     if (!newClass.class_name.trim() || !newClass.department.trim()) return;

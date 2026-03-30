@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import supabase from "../config/supabaseClient";
+import { apiRequest } from "../config/apiClient";
 import AppFrame from "../components/AppFrame";
 import Sidebar from "../components/admin/Sidebar";
 import TopNavbar from "../components/admin/TopNavbar";
@@ -155,6 +156,7 @@ export default function AdminDashboard() {
   const [mentors, setMentors] = useState([]);
   const [reviewStages, setReviewStages] = useState([]);
   const [reviewClasses, setReviewClasses] = useState([]);
+  const [allReviewStageRows, setAllReviewStageRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
@@ -166,69 +168,8 @@ export default function AdminDashboard() {
     department: "",
   });
 
-  const fetchAdminProfile = useCallback(async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user?.id) {
-      setAdminProfile({ full_name: "", email: "", department: "" });
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("full_name, email, department")
-      .eq("id", user.id)
-      .eq("role", "admin")
-      .single();
-
-    if (error || !data) {
-      setAdminProfile({ full_name: "", email: "", department: "" });
-      return;
-    }
-
-    setAdminProfile({
-      full_name: data.full_name || "",
-      email: data.email || "",
-      department: data.department || "",
-    });
-  }, []);
-
-  const fetchDashboardData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [projectsRes, mentorsRes, classesRes] = await Promise.all([
-        supabase
-          .from("projects")
-          .select("id, title, guide_id, status, class_id, team_members(id, student_id, profiles:student_id(class_section))"),
-        supabase.from("profiles").select("id, full_name, role").eq("role", "mentor"),
-        supabase.from("classes").select("id, class_section, department"),
-      ]);
-
-      if (projectsRes.error) throw projectsRes.error;
-      if (mentorsRes.error) throw mentorsRes.error;
-      if (classesRes.error) throw classesRes.error;
-
-      setProjects(projectsRes.data || []);
-      setMentors(mentorsRes.data || []);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const fetchReviewStages = useCallback(async (classNameOverride = "", classIdOverride = "") => {
-    const { data: classRows, error: classError } = await supabase
-      .from("classes")
-      .select("id, class_section, department")
-      .order("class_section", { ascending: true, nullsFirst: false });
-
-    if (classError) throw classError;
-
-    const classes = classRows || [];
-
-    const normalizedClasses = normalizeClassRows(classes);
-
+  const applyReviewStageSelection = useCallback((classRows = [], stageRows = [], classNameOverride = "", classIdOverride = "") => {
+    const normalizedClasses = normalizeClassRows(classRows);
     const normalizedTargetClass = normalizeClassRef(classNameOverride || selectedClassName);
     const normalizedTargetId = normalizeClassRef(classIdOverride || selectedClassId);
     const currentClass = normalizedClasses.find((item) => normalizeClassRef(item.id) === normalizedTargetId)
@@ -245,15 +186,8 @@ export default function AdminDashboard() {
     setReviewClasses(normalizedClasses);
     setSelectedClassName(currentClass.label || "S6 CSE A");
     setSelectedClassId(currentClass.id);
-
-    const { data: stageRows, error: stageError } = await supabase
-      .from("review_stages")
-      .select("id, stage_name, coordinator_deadline, is_active, is_completed, is_locked")
-      .eq("class_id", currentClass.id);
-
-    if (stageError) throw stageError;
-
     const mapped = [...(stageRows || [])]
+      .filter((row) => normalizeClassRef(row.class_id) === normalizeClassRef(currentClass.id))
       .sort((a, b) => {
         const byOrder = stageOrderIndex(a.stage_name) - stageOrderIndex(b.stage_name);
         if (byOrder !== 0) return byOrder;
@@ -270,35 +204,57 @@ export default function AdminDashboard() {
     setReviewStages(mapped);
   }, [selectedClassId, selectedClassName]);
 
-  useEffect(() => {
-    const run = async () => {
-      await fetchDashboardData();
-      await fetchReviewStages();
-    };
+  const loadAdminDashboardData = useCallback(async (classNameOverride = "", classIdOverride = "") => {
+    setLoading(true);
+    try {
+      const data = await apiRequest("/admin/dashboard-data");
+      const projectsData = data?.projects || [];
+      const mentorsData = data?.mentors || [];
+      const classesData = data?.classes || [];
+      const reviewStageRows = data?.review_stages || [];
+      const profileData = data?.profile || null;
 
-    run();
-    fetchAdminProfile();
+      setProjects(projectsData);
+      setMentors(mentorsData);
+      setAllReviewStageRows(reviewStageRows);
+      setAdminProfile({
+        full_name: profileData?.full_name || "",
+        email: profileData?.email || "",
+        department: profileData?.department || "",
+      });
+      applyReviewStageSelection(classesData, reviewStageRows, classNameOverride, classIdOverride);
+    } finally {
+      setLoading(false);
+    }
+  }, [applyReviewStageSelection]);
+
+  useEffect(() => {
+    loadAdminDashboardData();
 
     const channel = supabase
       .channel("dashboard-projects-live")
-      .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, fetchDashboardData)
-      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, fetchDashboardData)
+      .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, () => {
+        loadAdminDashboardData(selectedClassName, selectedClassId);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => {
+        loadAdminDashboardData(selectedClassName, selectedClassId);
+      })
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "review_stages" },
-        async () => {
-          await Promise.all([fetchDashboardData(), fetchReviewStages()]);
+        () => {
+          loadAdminDashboardData(selectedClassName, selectedClassId);
         }
       )
-      .on("postgres_changes", { event: "*", schema: "public", table: "classes" }, async () => {
-        await Promise.all([fetchDashboardData(), fetchReviewStages()]);
+      .on("postgres_changes", { event: "*", schema: "public", table: "classes" }, () => {
+        loadAdminDashboardData(selectedClassName, selectedClassId);
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [fetchAdminProfile, fetchDashboardData, fetchReviewStages, selectedClassId]);
+  }, [loadAdminDashboardData, selectedClassId, selectedClassName]);
 
   const assignedProjects = useMemo(
     () => projects.filter((project) => Boolean(project.guide_id)).length,
@@ -480,14 +436,12 @@ export default function AdminDashboard() {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <select
                   value={selectedClassId || reviewClasses[0]?.id || ""}
-                  onChange={async (event) => {
+                  onChange={(event) => {
                     const nextClassId = event.target.value;
                     const matchedClass = reviewClasses.find(
                       (classItem) => normalizeClassRef(classItem.id) === normalizeClassRef(nextClassId)
                     );
-                    setSelectedClassId(nextClassId);
-                    setSelectedClassName(matchedClass?.label || "");
-                    await fetchReviewStages(matchedClass?.label || "", nextClassId);
+                    applyReviewStageSelection(reviewClasses, allReviewStageRows, matchedClass?.label || "", nextClassId);
                   }}
                   className="glass-input min-w-[220px] rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm"
                   disabled={reviewClasses.length === 0}
@@ -589,7 +543,7 @@ export default function AdminDashboard() {
       <AdminProfileSettingsModal
         isOpen={showProfileSettings}
         onClose={() => setShowProfileSettings(false)}
-        onSuccess={fetchAdminProfile}
+        onSuccess={() => loadAdminDashboardData(selectedClassName, selectedClassId)}
       />
     </AppFrame>
   );
