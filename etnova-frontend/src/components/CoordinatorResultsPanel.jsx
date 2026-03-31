@@ -56,7 +56,7 @@ export default function CoordinatorResultsPanel({ projectId = null, students = [
       let successMsg = "Results updated.";
       if (type === "internal") successMsg = "Internal marks published to students.";
       else if (type === "admin") successMsg = "Results sent to Admin for final publishing.";
-      else if (type === "unpublish_internal") successMsg = "Internal marks revoked tracking.";
+      else if (type === "unpublish_internal") successMsg = "Internal marks have been revoked. Final marks (if published by admin) remain visible.";
       else if (type === "unpublish_admin") successMsg = "Submission to Admin revoked.";
       setNotice(successMsg);
     } catch (err) {
@@ -303,7 +303,7 @@ export default function CoordinatorResultsPanel({ projectId = null, students = [
                     className="w-full text-left px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-rose-50 hover:text-rose-700 border-b border-slate-50 transition-colors"
                   >
                     Revoke Internal Marks
-                    <p className="text-[10px] text-slate-400 font-normal mt-0.5">Hide internal scores from students</p>
+                    <p className="text-[10px] text-slate-400 font-normal mt-0.5">Remove internal marks (can be done even after admin publishes final results)</p>
                   </button>
                   <button
                     onClick={() => handlePublish("admin")}

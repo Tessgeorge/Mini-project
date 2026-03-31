@@ -53,6 +53,13 @@ export async function publishAdminFinalResults(studentIds = []) {
   });
 }
 
+export async function revokeAdminFinalResults(studentIds = []) {
+  return apiRequest("/admin/final-results/revoke", {
+    method: "POST",
+    body: { student_ids: studentIds },
+  });
+}
+
 export async function fetchEvaluatorRubrics(stage, reviewStage = null) {
   const params = new URLSearchParams({ stage });
   if (reviewStage) params.set("review_stage", reviewStage);

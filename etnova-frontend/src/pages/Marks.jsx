@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchPublishedStudentResult } from "../services/rubrics";
 import { apiRequest } from "../config/apiClient";
+import supabase from "../config/supabaseClient";
 
 const REVIEW_STAGE_TABS = [
   { key: "zeroth_review", label: "Zeroth Review" },
@@ -20,7 +21,7 @@ function formatDateTime(value) {
   if (!value) return "Not published yet";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "Not published yet";
-  return parsed.toLocaleString("en-IN");
+  return parsed.toLocaleDateString("en-IN");
 }
 
 function getFeedbackGroupLabel(item) {
@@ -92,13 +93,23 @@ function ScoreCard({ label, value, tone = "slate", hint }) {
 }
 
 function DetailCard({ label, value, icon }) {
+  const isArray = Array.isArray(value);
+  
   return (
     <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
       <div className="flex items-center gap-2 text-slate-400">
         <span className="material-symbols-outlined text-[18px]">{icon}</span>
         <p className="text-xs font-bold uppercase tracking-[0.18em]">{label}</p>
       </div>
-      <p className="mt-3 text-sm font-bold leading-6 text-slate-900">{value}</p>
+      {isArray ? (
+        <div className="mt-3 space-y-1">
+          {value.map((item, idx) => (
+            <p key={idx} className="text-sm font-bold leading-6 text-slate-900">{item}</p>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 text-sm font-bold leading-6 text-slate-900">{value}</p>
+      )}
     </div>
   );
 }
@@ -125,7 +136,7 @@ export default function Marks() {
   const [result, setResult] = useState(null);
   const [feedbackItems, setFeedbackItems] = useState([]);
   const [projectName, setProjectName] = useState("");
-  const [coordinatorName, setCoordinatorName] = useState("");
+  const [coordinatorNames, setCoordinatorNames] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -136,10 +147,11 @@ export default function Marks() {
       setResultError("");
       setFeedbackError("");
 
-      const [resultResponse, notificationResponse, projectResponse] = await Promise.allSettled([
+      const [resultResponse, notificationResponse, projectResponse, profileResponse] = await Promise.allSettled([
         fetchPublishedStudentResult(),
         apiRequest("/notifications", { skipCache: true }),
         apiRequest("/projects", { skipCache: true }),
+        apiRequest("/profile", { skipCache: true }),
       ]);
 
       if (cancelled) return;
@@ -167,19 +179,37 @@ export default function Marks() {
       }
 
       if (projectResponse.status === "fulfilled") {
-        const firstProject = Array.isArray(projectResponse.value) ? projectResponse.value[0] : null;
+        const projects = Array.isArray(projectResponse.value) ? projectResponse.value : [];
+        const firstProject = projects[0] || null;
         setProjectName(String(firstProject?.title || firstProject?.team_name || "").trim());
-        setCoordinatorName(
-          String(
-            firstProject?.coordinator?.full_name ||
-            firstProject?.guide?.full_name ||
-            firstProject?.mentor?.full_name ||
-            ""
-          ).trim()
-        );
       } else {
         setProjectName("");
-        setCoordinatorName("");
+      }
+
+      // Get coordinators from student's class
+      if (profileResponse.status === "fulfilled" && profileResponse.value?.class_id) {
+        const classId = profileResponse.value.class_id;
+        try {
+          // Fetch all coordinators for this class from Supabase
+          const { data: coordinators, error } = await supabase
+            .from("profiles")
+            .select("full_name")
+            .eq("class_id", classId)
+            .eq("is_coordinator", true);
+
+          if (!error && Array.isArray(coordinators) && coordinators.length > 0) {
+            const names = coordinators
+              .map(coord => String(coord?.full_name || "").trim())
+              .filter(name => name.length > 0);
+            setCoordinatorNames(names.length > 0 ? names : ["Coordinator not assigned"]);
+          } else {
+            setCoordinatorNames(["Coordinator not assigned"]);
+          }
+        } catch (err) {
+          setCoordinatorNames(["Coordinator not assigned"]);
+        }
+      } else {
+        setCoordinatorNames(["Coordinator not assigned"]);
       }
 
       setResultLoading(false);
@@ -236,7 +266,18 @@ export default function Marks() {
     adminPublished ? 1 : 0,
     adminPublished ? 1 : 0,
   ].reduce((sum, value) => sum + value, 0);
-  const statusLabel = adminPublished && publishedCount === 3 ? "Completed" : "-";
+  
+  // Map database status to display status
+  let statusLabel = "Pending";
+  if (result?.is_published === true) {
+    statusLabel = "Published";
+  } else if (!result) {
+    statusLabel = "Pending";
+  }
+  
+  console.log("DEBUG: result =", result); // Debug log
+  console.log("DEBUG: statusLabel =", statusLabel); // Debug log
+  
   const publicationNote = !resultPublished
     ? "Marks will appear here after the coordinator or admin publishes them."
     : internalOnly
@@ -334,7 +375,7 @@ export default function Marks() {
                   </div>
 
                   <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                    <DetailCard label="Coordinator" value={coordinatorName || "Coordinator not assigned"} icon="supervisor_account" />
+                    <DetailCard label="Coordinator" value={coordinatorNames.length > 0 ? coordinatorNames : ["Coordinator not assigned"]} icon="supervisor_account" />
                     <DetailCard
                       label="Published On"
                       value={adminPublished ? formatDateTime(result.published_at) : "-"}
