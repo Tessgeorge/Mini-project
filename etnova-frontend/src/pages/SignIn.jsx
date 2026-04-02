@@ -16,7 +16,6 @@ export default function SignIn() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [rememberMe, setRememberMe] = useState(false)
   const [authError, setAuthError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
@@ -208,20 +207,6 @@ export default function SignIn() {
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <input
-                type="checkbox"
-                id="remember"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="size-4 rounded border-slate-300 text-primary focus:ring-primary cursor-pointer"
-              />
-              <label htmlFor="remember" className="text-sm text-muted cursor-pointer select-none">
-                Keep me logged in
-              </label>
-              
-            </div>
-
             <button
               type="submit"
               className="w-full py-4 text-bg-left font-bold rounded-xl border border-transparent focus:ring-1 focus:ring-muted/50 focus:border-muted transition-all shadow-primary flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
@@ -233,20 +218,6 @@ export default function SignIn() {
             </button>
           </form>
 
-          {/* Help Link */}
-          <div className="mt-10 pt-8 border-t border-line flex flex-col sm:flex-row items-center justify-between gap-4">
-            <p className="text-sm text-muted">Need assistance?</p>
-            <div className="flex gap-6">
-              <a href="#" className="flex items-center gap-1.5 text-sm font-medium text-muted hover:text-primary transition-colors">
-                <span className="material-symbols-outlined text-base">help_center</span>
-                Support Center
-              </a>
-              <a href="#" className="flex items-center gap-1.5 text-sm font-medium text-muted hover:text-primary transition-colors">
-                <span className="material-symbols-outlined text-base">info</span>
-                About Project
-              </a>
-            </div>
-          </div>
         </div>
       </div>
     </div>
