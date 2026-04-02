@@ -1507,30 +1507,31 @@ export default function MentorDashboard() {
           : Promise.resolve({ data: [] }),
       ]);
 
-      const members = membersRes.data || [];
-      const classEvals = evalRes.data || [];
-      const guides = guidesRes.data || [];
-      const documents = docsRes.data || [];
-      const guideMap = new Map(guides.map(g => [g.id, g.full_name || "Unassigned"]));
-      const memberCountByProject = members.reduce((acc, item) => { acc[item.project_id] = (acc[item.project_id] || 0) + 1; return acc; }, {});
-      const studentsByProject = members.reduce((acc, item) => {
-        if (!item?.project_id || !item?.student_id) return acc;
-        if (!acc[item.project_id]) acc[item.project_id] = new Set();
-        acc[item.project_id].add(item.student_id);
-        return acc;
-      }, {});
-      const evalByProject = classEvals.reduce((acc, item) => {
-        if (!acc[item.project_id]) acc[item.project_id] = [];
-        const normalizedScore = Number(item.score ?? item.obtained_marks);
-        acc[item.project_id].push(Number.isNaN(normalizedScore) ? 0 : normalizedScore);
-        return acc;
-      }, {});
-      const latestDocumentByProjectType = documents.reduce((acc, item) => {
-        if (!item?.project_id || !item?.document_type) return acc;
-        const key = `${item.project_id}:${String(item.document_type).trim().toLowerCase()}`;
-        if (!acc[key]) acc[key] = item;
-        return acc;
-      }, {});
+    const members = membersRes.data || [];
+    const classEvals = evalRes.data || [];
+    const guides = guidesRes.data || [];
+    const documents = docsRes.data || [];
+    const guideMap = new Map(guides.map(g => [g.id, g.full_name || "Unassigned"]));
+    const memberCountByProject = members.reduce((acc, item) => { acc[item.project_id] = (acc[item.project_id] || 0) + 1; return acc; }, {});
+    const totalStudents = new Set(members.map((item) => item.student_id).filter(Boolean)).size;
+    const studentsByProject = members.reduce((acc, item) => {
+      if (!item?.project_id || !item?.student_id) return acc;
+      if (!acc[item.project_id]) acc[item.project_id] = new Set();
+      acc[item.project_id].add(item.student_id);
+      return acc;
+    }, {});
+    const evalByProject = classEvals.reduce((acc, item) => {
+      if (!acc[item.project_id]) acc[item.project_id] = [];
+      const normalizedScore = Number(item.score ?? item.obtained_marks);
+      acc[item.project_id].push(Number.isNaN(normalizedScore) ? 0 : normalizedScore);
+      return acc;
+    }, {});
+    const latestDocumentByProjectType = documents.reduce((acc, item) => {
+      if (!item?.project_id || !item?.document_type) return acc;
+      const key = `${item.project_id}:${String(item.document_type).trim().toLowerCase()}`;
+      if (!acc[key]) acc[key] = item;
+      return acc;
+    }, {});
 
       let reviewMarks = [];
       if (projectIds.length) {
@@ -1589,6 +1590,7 @@ export default function MentorDashboard() {
       return {
         classId, classTitle: classRow?.class_section || "Untitled Class",
         totalProjects: projectRows.length, evaluatedProjects: evaluatedCount,
+        totalStudents,
         pendingEvaluations: projectRows.length - evaluatedCount,
         classAverageScore, stageProgress, projects: projectRows,
         reviewStages: sortReviewStages(reviewStageRows || []),
@@ -1913,15 +1915,13 @@ export default function MentorDashboard() {
             />
           )}
           {["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews", "my-class-marks"].includes(active) && isCoordinatorWithClass && (
-            <Suspense fallback={<TabPanelLoader label="Loading class workspace..." />}>
-              <MyClass
-                classData={myClassData}
-                loading={myClassLoading}
-                onSaveStudentDeadline={handleSaveStudentDeadline}
-                activeSubPage={active.replace("my-class-", "")}
-                onNavigate={(sub) => setActive("my-class-" + sub)}
-              />
-            </Suspense>
+            <MyClass
+              classData={myClassData}
+              loading={myClassLoading}
+              onSaveStudentDeadline={handleSaveStudentDeadline}
+              activeSubPage={active.replace("my-class-", "")}
+              onNavigate={(sub) => setActive("my-class-" + sub)}
+            />
           )}
         </main>
       </div>
@@ -1937,4 +1937,4 @@ export default function MentorDashboard() {
       )}
     </div>
   );
-}
+  }
