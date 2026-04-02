@@ -10,9 +10,11 @@ import {
   fetchAdminFinalResults,
   fetchAdminRubrics,
   publishAdminFinalResults,
+  revokeAdminFinalResults,
   saveAdminRubrics,
 } from "../services/rubrics";
 import supabase from "../config/supabaseClient";
+import Modal from "../components/Modal";
 
 const ADMIN_RUBRIC_STAGE_OPTIONS = RUBRIC_STAGE_OPTIONS.filter((item) => item.value !== "guide");
 const ADMIN_REVIEW_RUBRIC_OPTIONS = [
@@ -31,6 +33,34 @@ function makeDraftRow(stageMeta, index = 0) {
   };
 }
 
+function getFinalResultStatusMeta(row) {
+  if (row?.is_published) {
+    return {
+      label: "Published",
+      className: "bg-emerald-100 text-emerald-700",
+    };
+  }
+
+  const status = String(row?.status || "").trim().toLowerCase();
+  if (status === "internal_published") {
+    return {
+      label: "Coordinator Published",
+      className: "bg-amber-100 text-amber-700",
+    };
+  }
+  if (status === "internal_and_sent" || status === "sent_to_admin") {
+    return {
+      label: "Ready for Admin",
+      className: "bg-sky-100 text-sky-700",
+    };
+  }
+
+  return {
+    label: row?.status || "pending",
+    className: "bg-slate-100 text-slate-700",
+  };
+}
+
 export default function AdminRubrics() {
   const navigate = useNavigate();
   const [stage, setStage] = useState(ADMIN_RUBRIC_STAGE_OPTIONS[0].value);
@@ -45,6 +75,7 @@ export default function AdminRubrics() {
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [showRevokeConfirm, setShowRevokeConfirm] = useState(false);
 
   const stageMeta = useMemo(
     () => ADMIN_RUBRIC_STAGE_OPTIONS.find((item) => item.value === stage) || ADMIN_RUBRIC_STAGE_OPTIONS[0],
@@ -186,12 +217,48 @@ export default function AdminRubrics() {
     setError("");
     setNotice("");
     try {
-      await publishAdminFinalResults([]);
+      // Collect all student IDs from the current filtered results
+      // If no filters applied, publish all final results
+      const studentIds = finalResults.map(row => row.student_id).filter(Boolean);
+      
+      if (studentIds.length === 0) {
+        setError("No students found to publish results for.");
+        setPublishing(false);
+        return;
+      }
+
+      await publishAdminFinalResults(studentIds);
       const refreshed = await fetchAdminFinalResults();
       setFinalResults(refreshed || []);
-      setNotice("Final results published successfully.");
+      setNotice(`Final results published successfully for ${studentIds.length} student(s).`);
     } catch (err) {
       setError(err.message || "Failed to publish final results.");
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const revokeResults = async () => {
+    setPublishing(true);
+    setError("");
+    setNotice("");
+    try {
+      // Get all published student IDs from current finalResults
+      const publishedStudents = finalResults.filter(row => row.is_published === true).map(row => row.student_id).filter(Boolean);
+      
+      if (publishedStudents.length === 0) {
+        setError("No published results found to revoke. All results are either unpublished or pending.");
+        setPublishing(false);
+        return;
+      }
+
+      await revokeAdminFinalResults(publishedStudents);
+      const refreshed = await fetchAdminFinalResults();
+      setFinalResults(refreshed || []);
+      setNotice(`Final results revoked for ${publishedStudents.length} student(s). Internal marks published by coordinator remain unaffected.`);
+      setShowRevokeConfirm(false);
+    } catch (err) {
+      setError(err.message || "Failed to revoke results.");
     } finally {
       setPublishing(false);
     }
@@ -336,9 +403,19 @@ export default function AdminRubrics() {
               <h2 className="text-lg font-semibold text-slate-800">Final Results</h2>
               <p className="text-sm text-slate-500 mt-1">Admin-only final marks view grouped class wise. No mark breakdown is shown here.</p>
             </div>
-            <button type="button" onClick={publishResults} disabled={publishing || loading} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
-              {publishing ? "Publishing..." : "Publish Final Results"}
-            </button>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={publishResults} disabled={publishing || loading} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">
+                {publishing ? "Publishing..." : "Publish Final Results"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowRevokeConfirm(true)}
+                disabled={publishing || loading}
+                className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60 hover:bg-rose-700"
+              >
+                {publishing ? "Revoking..." : "Revoke Results"}
+              </button>
+            </div>
           </div>
           <div className="px-6 py-4 border-b border-slate-200/70 bg-slate-50/60">
             <div className="flex flex-col lg:flex-row gap-3">
@@ -395,8 +472,8 @@ export default function AdminRubrics() {
                           <td className="px-4 py-3 text-slate-700">{row.student_id}</td>
                           <td className="px-4 py-3 font-semibold text-slate-900">{row.final_marks ?? "-"}</td>
                           <td className="px-4 py-3">
-                            <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
-                              {row.status || "pending"}
+                            <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getFinalResultStatusMeta(row).className}`}>
+                              {getFinalResultStatusMeta(row).label}
                             </span>
                           </td>
                         </tr>
@@ -409,6 +486,51 @@ export default function AdminRubrics() {
           )}
         </section>
       </div>
+
+      <Modal
+        isOpen={showRevokeConfirm}
+        onClose={() => {
+          if (!publishing) setShowRevokeConfirm(false);
+        }}
+        title="Revoke Final Results"
+        maxWidth="max-w-lg"
+        disableClose={publishing}
+      >
+        <div className="space-y-5 p-6">
+          <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
+            <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+              <span className="material-symbols-outlined text-[20px]">warning</span>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-slate-900">
+                Are you sure you want to revoke final results?
+              </p>
+              <p className="mt-1 text-sm leading-6 text-slate-600">
+                Marks published by coordinator will remain unaffected.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setShowRevokeConfirm(false)}
+              disabled={publishing}
+              className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={revokeResults}
+              disabled={publishing}
+              className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {publishing ? "Revoking..." : "Confirm Revoke"}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </AppFrame>
   );
 }

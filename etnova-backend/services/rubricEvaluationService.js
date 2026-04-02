@@ -162,6 +162,44 @@ const getProjectTeamMemberIds = async (projectId) => {
   return [...new Set((data || []).map((row) => row.student_id).filter(Boolean))];
 };
 
+export const publishCoordinatorMarks = async ({ classId, publishType }) => {
+  const studentIds = await getClassStudentIds(classId);
+  if (studentIds.length === 0) return { updatedCount: 0 };
+
+  const { data: finalRows, error: fetchError } = await supabase
+    .from('final_results')
+    .select('student_id, status')
+    .in('student_id', studentIds);
+
+  if (fetchError) throw fetchError;
+
+  let count = 0;
+  for (const row of (finalRows || [])) {
+    let newStatus = row.status;
+    if (publishType === 'internal') {
+      if (newStatus === 'sent_to_admin' || newStatus === 'internal_and_sent') newStatus = 'internal_and_sent';
+      else newStatus = 'internal_published';
+    } else if (publishType === 'admin') {
+      if (newStatus === 'internal_published' || newStatus === 'internal_and_sent') newStatus = 'internal_and_sent';
+      else newStatus = 'sent_to_admin';
+    } else if (publishType === 'unpublish_internal') {
+      // Revoke internal marks - can revoke even after admin publishes final
+      if (newStatus === 'internal_and_sent') newStatus = 'published';
+      else if (newStatus === 'internal_published') newStatus = 'frozen';
+    } else if (publishType === 'unpublish_admin') {
+      if (newStatus === 'internal_and_sent') newStatus = 'internal_published';
+      else if (newStatus === 'sent_to_admin') newStatus = 'frozen';
+    }
+
+    if (newStatus !== row.status) {
+      await supabase.from('final_results').update({ status: newStatus }).eq('student_id', row.student_id);
+      count++;
+    }
+  }
+
+  return { updatedCount: count };
+};
+
 const getClassStudentIds = async (classId) => {
   const { data: projects, error: projectError } = await supabase
     .from('projects')
@@ -353,8 +391,11 @@ const getDeadlineStateForStudent = async (studentId) => {
   }, {});
 };
 
-const computeResultStatus = ({ attendanceMarks, reportMarks, reviewTotal, guideTotal, eseTotal, lockedAt, isPublished }) => {
+const computeResultStatus = ({ attendanceMarks, reportMarks, reviewTotal, guideTotal, eseTotal, lockedAt, isPublished, existingStatus }) => {
   if (isPublished) return 'published';
+  if (existingStatus === 'internal_published') return 'internal_published';
+  if (existingStatus === 'sent_to_admin') return 'sent_to_admin';
+  if (existingStatus === 'internal_and_sent') return 'internal_and_sent';
   if (lockedAt) return 'frozen';
   if (Number(attendanceMarks) || Number(reportMarks) || Number(reviewTotal) || Number(guideTotal) || Number(eseTotal)) {
     return 'calculated';
@@ -365,7 +406,7 @@ const computeResultStatus = ({ attendanceMarks, reportMarks, reviewTotal, guideT
 const getFinalResultRow = async (studentId) => {
   const { data, error } = await supabase
     .from('final_results')
-    .select('student_id, attendance_marks, report_marks, is_published')
+    .select('student_id, attendance_marks, report_marks, is_published, status')
     .eq('student_id', studentId)
     .maybeSingle();
 
@@ -691,6 +732,7 @@ export const autoCalculateStudent = async (studentId) => {
     eseTotal,
     lockedAt,
     isPublished: Boolean(existing?.is_published),
+    existingStatus: existing?.status,
   });
 
   const payload = {
@@ -719,11 +761,7 @@ export const autoCalculateStudent = async (studentId) => {
 
 export const autoCalculateProject = async (projectId) => {
   const studentIds = await getProjectTeamMemberIds(projectId);
-  const results = [];
-  for (const studentId of studentIds) {
-    results.push(await autoCalculateStudent(studentId));
-  }
-  return results;
+  return Promise.all(studentIds.map((studentId) => autoCalculateStudent(studentId)));
 };
 
 export const upsertStageMarks = async ({ stage, projectId, evaluatorId, entries, reviewStage = null, feedbackEntries = [], senderName = '' }) => {
@@ -1023,18 +1061,14 @@ export const setEvaluatorEntryLock = async ({ projectId, evaluatorId, stage, rev
 
 export const recalculateClassFinalResults = async (classId) => {
   const studentIds = await getClassStudentIds(classId);
-  const results = [];
-  for (const studentId of studentIds) {
-    results.push(await autoCalculateStudent(studentId));
-  }
-  return results;
+  return Promise.all(studentIds.map((studentId) => autoCalculateStudent(studentId)));
 };
 
 export const getAdminFinalResults = async () => {
   const { data, error } = await supabase
     .from('final_results')
     .select('student_id, final_marks, status, is_published')
-    .eq('is_published', true)
+    .in('status', ['internal_published', 'sent_to_admin', 'internal_and_sent', 'published'])
     .order('updated_at', { ascending: false });
 
   if (error) throw error;
@@ -1078,6 +1112,7 @@ export const getAdminFinalResults = async () => {
         class_name: classLabel,
         final_marks: row?.final_marks ?? 0,
         status: row?.status || 'pending',
+        is_published: row?.is_published || false,
       };
     })
     .sort((left, right) => {
@@ -1278,7 +1313,6 @@ export const getCoordinatorFinalResults = async (classId) => {
 };
 
 export const getCoordinatorInternalComponents = async (classId) => {
-  await recalculateClassFinalResults(classId);
   const studentIds = await getClassStudentIds(classId);
   if (studentIds.length === 0) return [];
 
@@ -1345,22 +1379,48 @@ export const saveCoordinatorInternalComponents = async ({ classId, entries }) =>
 };
 
 export const publishFinalResults = async ({ studentIds = null, adminId }) => {
-  let query = supabase
-    .from('final_results')
-    .update({
-      is_published: true,
-      published_at: new Date().toISOString(),
-      published_by: adminId,
-      status: 'published',
-      updated_at: new Date().toISOString(),
-    });
-
-  if (Array.isArray(studentIds) && studentIds.length > 0) {
-    query = query.in('student_id', studentIds);
+  // Ensure studentIds is provided and not empty
+  if (!Array.isArray(studentIds) || studentIds.length === 0) {
+    throw createHttpError('No student IDs provided for publishing results.', 400);
   }
 
-  const { data, error } = await query
-    .select('student_id, final_marks, status');
+  // Fetch current status to preserve internal marks
+  const { data: currentRows, error: fetchError } = await supabase
+    .from('final_results')
+    .select('student_id, status')
+    .in('student_id', studentIds);
+
+  if (fetchError) throw fetchError;
+
+  for (const row of (currentRows || [])) {
+    // Preserve internal marks status if already published by coordinator
+    let newStatus = row.status;
+    if (newStatus === 'internal_and_sent' || newStatus === 'internal_published') {
+      // Already has internal marks published, keep it as internal_and_sent
+      newStatus = 'internal_and_sent';
+    } else {
+      // No internal marks, mark as published by admin only
+      newStatus = 'published';
+    }
+
+    const { error } = await supabase
+      .from('final_results')
+      .update({
+        is_published: true,
+        published_at: new Date().toISOString(),
+        published_by: adminId,
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('student_id', row.student_id);
+
+    if (error) throw error;
+  }
+
+  const { data, error } = await supabase
+    .from('final_results')
+    .select('student_id, final_marks, status')
+    .in('student_id', studentIds);
 
   if (error) throw error;
   return data || [];
@@ -1369,14 +1429,86 @@ export const publishFinalResults = async ({ studentIds = null, adminId }) => {
 export const getStudentPublishedResult = async (studentId) => {
   const { data, error } = await supabase
     .from('final_results')
-    .select('student_id, final_marks, status, is_published, published_at')
+    .select('student_id, cie_total, ese_total, final_marks, status, is_published, published_at')
     .eq('student_id', studentId)
-    .eq('is_published', true)
     .single();
 
   if (error || !data) {
     throw createHttpError('Final result is not published yet.', 404);
   }
 
+  const isFinalPublished = data.is_published;
+  const isInternalPublished = data.status === 'internal_published' || data.status === 'internal_and_sent' || isFinalPublished;
+
+  if (!isInternalPublished && !isFinalPublished) {
+    throw createHttpError('Final result is not published yet.', 404);
+  }
+
+  if (!isFinalPublished) {
+    return {
+      student_id: data.student_id,
+      cie_total: data.cie_total,
+      ese_total: null,
+      final_marks: null,
+      status: data.status,
+      is_published: false,
+      published_at: data.published_at,
+      internal_only: true,
+    };
+  }
+
   return data;
+};
+
+export const revokePublishedResults = async ({ studentIds = null, adminId }) => {
+  // Ensure studentIds is provided and not empty
+  if (!Array.isArray(studentIds) || studentIds.length === 0) {
+    throw createHttpError('No student IDs provided for revoking results.', 400);
+  }
+
+  // Fetch current status for all students to preserve internal marks
+  const { data: currentRows, error: fetchError } = await supabase
+    .from('final_results')
+    .select('student_id, status')
+    .in('student_id', studentIds);
+
+  if (fetchError) throw fetchError;
+
+  for (const row of (currentRows || [])) {
+    let newStatus = row.status;
+    
+    // Preserve internal marks if they were published by coordinator
+    if (newStatus === 'internal_and_sent') {
+      // Keep internal marks published, just remove final marks
+      newStatus = 'internal_published';
+    } else if (newStatus === 'published') {
+      // No internal marks, set to sent_to_admin
+      newStatus = 'sent_to_admin';
+    } else if (newStatus === 'internal_published') {
+      // Already internal only, skip (should not be in published list)
+      continue;
+    }
+
+    // Update only the final marks publication status
+    const { error } = await supabase
+      .from('final_results')
+      .update({
+        is_published: false,
+        published_at: null,
+        published_by: null,
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('student_id', row.student_id);
+
+    if (error) throw error;
+  }
+
+  const { data, error } = await supabase
+    .from('final_results')
+    .select('student_id, final_marks, status')
+    .in('student_id', studentIds);
+
+  if (error) throw error;
+  return data || [];
 };

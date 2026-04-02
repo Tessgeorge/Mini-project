@@ -9,6 +9,7 @@ import {
   getRubricsForAdmin,
   getStudentPublishedResult,
   publishFinalResults,
+  revokePublishedResults,
   saveRubricsForStage,
   setEvaluatorEntryLock,
   upsertStageMarks,
@@ -199,6 +200,19 @@ export const publishResults = async (req, res) => {
   try {
     const { student_ids: studentIds } = req.body || {};
     const result = await publishFinalResults({
+      studentIds,
+      adminId: req.user.id,
+    });
+    return res.json(result);
+  } catch (error) {
+    return handleControllerError(res, error);
+  }
+};
+
+export const revokeResults = async (req, res) => {
+  try {
+    const { student_ids: studentIds } = req.body || {};
+    const result = await revokePublishedResults({
       studentIds,
       adminId: req.user.id,
     });

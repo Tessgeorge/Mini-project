@@ -3,6 +3,7 @@ import {
   recalculateClassFinalResults,
   getCoordinatorInternalComponents,
   saveCoordinatorInternalComponents,
+  publishCoordinatorMarks,
 } from '../services/rubricEvaluationService.js';
 
 const supabase = supabaseAdmin;
@@ -664,6 +665,23 @@ export const saveInternalMarks = async (req, res) => {
       entries,
     });
     res.json(rows);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const publishCoordinatorResults = async (req, res) => {
+  try {
+    const coord = await getCoordinatorClassId(req.user.id);
+    if (!coord?.class_id) return res.status(403).json({ message: 'Not a coordinator.' });
+
+    const { type } = req.body || {};
+    const result = await publishCoordinatorMarks({
+      classId: coord.class_id,
+      publishType: type
+    });
+
+    res.json(result);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

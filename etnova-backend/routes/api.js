@@ -79,6 +79,7 @@ import {
   getStageMarksBreakdown,
   listRubrics,
   publishResults,
+  revokeResults,
   removeRubric,
   saveStageRubrics,
   submitStageMarks,
@@ -175,6 +176,7 @@ router.delete('/admin/rubrics/:id', authenticateUser, requireRole(['admin']), re
 router.get('/admin/classes', authenticateUser, requireRole(['admin']), getAdminClassList);
 router.get('/admin/final-results', authenticateUser, requireRole(['admin']), getAdminFinalMarks);
 router.post('/admin/final-results/publish', authenticateUser, requireRole(['admin']), publishResults);
+router.post('/admin/final-results/revoke', authenticateUser, requireRole(['admin']), revokeResults);
 
 // Student published result route
 router.get('/results/me', authenticateUser, requireRole(['student']), getMyPublishedResult);
