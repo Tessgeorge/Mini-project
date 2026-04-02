@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import supabase from '../config/supabaseClient'
+import supabase, { setAuthPersistence } from '../config/supabaseClient'
 import { apiRequest } from '../config/apiClient'
 
 const ACCENT_COLOR = '#00D2C4'
@@ -16,6 +16,7 @@ export default function SignIn() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [rememberMe, setRememberMe] = useState(false)
   const [authError, setAuthError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
@@ -25,6 +26,8 @@ export default function SignIn() {
     setIsLoading(true)
 
     try {
+      setAuthPersistence(rememberMe)
+
       const {
         data: authData,
         error: signInError,
@@ -205,6 +208,19 @@ export default function SignIn() {
                   </span>
                 </button>
               </div>
+            </div>
+
+            <div className="flex items-center gap-3 pt-1">
+              <input
+                type="checkbox"
+                id="remember"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="size-4 rounded border-slate-300 text-primary focus:ring-primary cursor-pointer"
+              />
+              <label htmlFor="remember" className="text-sm text-muted cursor-pointer select-none">
+                Keep me logged in
+              </label>
             </div>
 
             <button
