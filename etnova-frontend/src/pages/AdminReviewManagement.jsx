@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import supabase from "../config/supabaseClient";
+import { apiRequest } from "../config/apiClient";
 import AppFrame from "../components/AppFrame";
 import Sidebar from "../components/admin/Sidebar";
 import TopNavbar from "../components/admin/TopNavbar";
@@ -268,93 +269,24 @@ export default function AdminReviewManagement() {
     }
   }, []);
 
-  const fetchStages = useCallback(async (classId) => {
-    if (!classId) {
-      setStages([]);
-      return;
+  const fetchStages = useCallback(async (classRef, options = {}) => {
+    const { force = false } = options;
+    const params = new URLSearchParams();
+    if (classRef) {
+      params.set("class_id", classRef);
     }
 
-    await ensureDefaultStages(classId, { silentRls: true });
+    const data = await apiRequest(
+      `/admin/review-management-data${params.toString() ? `?${params.toString()}` : ""}`,
+      force ? { skipCache: true } : {},
+    );
 
-    let data = null;
-    let fetchError = null;
-    {
-      const result = await supabase
-        .from("review_stages")
-        .select("id, stage_name, stage_order, class_id, coordinator_deadline, is_active, is_completed, is_locked")
-        .eq("class_id", classId);
-      data = result.data;
-      fetchError = result.error;
-    }
-
-    if (fetchError && /stage_order/i.test(String(fetchError.message || ""))) {
-      const fallbackResult = await supabase
-        .from("review_stages")
-        .select("id, stage_name, class_id, coordinator_deadline, is_active, is_completed, is_locked")
-        .eq("class_id", classId);
-      data = fallbackResult.data;
-      fetchError = fallbackResult.error;
-    }
-
-    if (fetchError) {
-      if (/coordinator_deadline/i.test(String(fetchError.message || ""))) {
-        throw new Error('The "coordinator_deadline" column is missing in "review_stages". Run the Supabase ALTER TABLE migration first.');
-      }
-      throw new Error(fetchError.message || "Failed to load review stages.");
-    }
-
-    const rows = [...(data || [])].sort((a, b) => {
-      const byExplicitOrder = parseStageOrder(a.stage_order) - parseStageOrder(b.stage_order);
-      if (byExplicitOrder !== 0) return byExplicitOrder;
-      const byOrder = stageOrderIndex(a.stage_name) - stageOrderIndex(b.stage_name);
-      if (byOrder !== 0) return byOrder;
-      return String(a.stage_name || "").localeCompare(String(b.stage_name || ""));
-    });
-
-    if (rows.length === 0) {
-      const fallbackStages = STAGE_ORDER.map((stageName, index) => ({
-        id: `default-${index}`,
-        name: stageName,
-        className: classId,
-        deadline: null,
-        status: toDisplayStatus(STATUS.INACTIVE),
-        statusValue: STATUS.INACTIVE,
-        submissions: 0,
-      }));
-      setStages(fallbackStages);
-      return;
-    }
-
-    const [coordinatorEvaluationCounts, classProjectCount] = await Promise.all([
-      fetchCoordinatorEvaluationProgressByStage(rows, classId),
-      fetchProjectCount(classId),
-    ]);
-
-    const mappedStages = rows.map((row) => {
-      const normalizedName = normalizeStageName(row.stage_name);
-      const shouldTrackEvaluation = isEvaluationStageName(normalizedName);
-      const completedOnTime = shouldTrackEvaluation
-        ? (classProjectCount > 0 && (coordinatorEvaluationCounts[row.id] || 0) >= classProjectCount)
-        : Boolean(row.is_completed);
-      const statusValue = shouldTrackEvaluation
-        ? (completedOnTime ? STATUS.COMPLETED : STATUS.PENDING)
-        : resolveStatusValue(row, completedOnTime);
-
-      return {
-        id: row.id,
-        order: parseStageOrder(row.stage_order, rows.findIndex((item) => item.id === row.id) + 1),
-        name: normalizedName,
-        className: row.class_id,
-        deadline: row.coordinator_deadline || null,
-        status: toDisplayStatus(statusValue),
-        statusValue,
-        isLocked: Boolean(row.is_locked),
-        submissions: coordinatorEvaluationCounts[row.id] || 0,
-      };
-    });
-
-    setStages(mappedStages);
-  }, [ensureDefaultStages]);
+    setClasses(data?.classes || []);
+    setSelectedClassId(data?.selected_class_id || "");
+    setSelectedClassName(data?.selected_class_name || "");
+    setStages(data?.stages || []);
+    return data;
+  }, []);
 
   const resolveStageId = useCallback(async (stage) => {
     if (!stage || !selectedClassId) {
@@ -486,43 +418,15 @@ export default function AdminReviewManagement() {
   }, []);
 
   const refreshData = useCallback(async (classRef, options = {}) => {
-    const { keepLoading = false, refreshClasses = false } = options;
+    const { keepLoading = false, force = false } = options;
     const refreshToken = latestRefreshTokenRef.current + 1;
     latestRefreshTokenRef.current = refreshToken;
     if (!keepLoading) setLoading(true);
     setError("");
 
     try {
-      const fetchedClasses = await ensureClassesLoaded(refreshClasses);
+      await fetchStages(classRef || selectedClassId || selectedClassName || "", { force });
       if (latestRefreshTokenRef.current !== refreshToken) return;
-      const effectiveClassRef = classRef || selectedClassId || selectedClassName || fetchedClasses[0]?.id || fetchedClasses[0]?.name || "";
-      const classRow = fetchedClasses.find((row) => row.id === effectiveClassRef)
-        || fetchedClasses.find((row) => row.name === effectiveClassRef)
-        || null;
-      const effectiveClassName = classRow?.name || "";
-      const effectiveClassId = classRow?.id || "";
-
-      if (!effectiveClassName || !effectiveClassId) {
-        if (latestRefreshTokenRef.current !== refreshToken) return;
-        setSelectedClassName("");
-        setSelectedClassId("");
-        setStages([]);
-        return;
-      }
-
-      if (effectiveClassName !== selectedClassName) setSelectedClassName(effectiveClassName);
-      if (effectiveClassId !== selectedClassId) setSelectedClassId(effectiveClassId);
-
-      const didAutoLock = await autoLockExpiredStages(effectiveClassId);
-      const didClearLockedDeadlines = await clearDeadlinesForLockedStages(effectiveClassId);
-      const didReconcile = await reconcileStageCompletionFlags(effectiveClassId);
-      if (latestRefreshTokenRef.current !== refreshToken) return;
-      await fetchStages(effectiveClassId);
-      if (latestRefreshTokenRef.current !== refreshToken) return;
-      if (didAutoLock || didReconcile || didClearLockedDeadlines) {
-        await fetchStages(effectiveClassId);
-        if (latestRefreshTokenRef.current !== refreshToken) return;
-      }
     } catch (err) {
       if (latestRefreshTokenRef.current !== refreshToken) return;
       setStages([]);
@@ -530,11 +434,11 @@ export default function AdminReviewManagement() {
     } finally {
       if (!keepLoading && latestRefreshTokenRef.current === refreshToken) setLoading(false);
     }
-  }, [autoLockExpiredStages, clearDeadlinesForLockedStages, ensureClassesLoaded, fetchStages, reconcileStageCompletionFlags, selectedClassId, selectedClassName]);
+  }, [fetchStages, selectedClassId, selectedClassName]);
 
   useEffect(() => {
     const classParam = searchParams.get("class");
-    refreshData(classParam || "", { refreshClasses: true });
+    refreshData(classParam || "", { force: true });
   }, [refreshData, searchParams]);
 
   useEffect(() => {
@@ -545,16 +449,11 @@ export default function AdminReviewManagement() {
     if (!selectedClassId) return undefined;
 
     const timer = setInterval(async () => {
-      const didAutoLock = await autoLockExpiredStages(selectedClassId);
-      const didClearLockedDeadlines = await clearDeadlinesForLockedStages(selectedClassId);
-      const didReconcile = await reconcileStageCompletionFlags(selectedClassId);
-      if (didAutoLock || didReconcile || didClearLockedDeadlines) {
-        await fetchStages(selectedClassId);
-      }
+      await fetchStages(selectedClassId, { force: true });
     }, 60000);
 
     return () => clearInterval(timer);
-  }, [autoLockExpiredStages, clearDeadlinesForLockedStages, fetchStages, reconcileStageCompletionFlags, selectedClassId]);
+  }, [fetchStages, selectedClassId]);
 
   useEffect(() => {
     const channel = supabase
@@ -565,7 +464,7 @@ export default function AdminReviewManagement() {
         async (payload) => {
           const changedClass = payload.new?.class_id || payload.old?.class_id || "";
           if (!selectedClassId || changedClass === selectedClassId || !changedClass) {
-            await refreshData(selectedClassId || selectedClassName || "", { keepLoading: true });
+            await refreshData(selectedClassId || selectedClassName || "", { keepLoading: true, force: true });
           }
         }
       )
@@ -574,7 +473,7 @@ export default function AdminReviewManagement() {
         { event: "*", schema: "public", table: "evaluations" },
         async () => {
           if (!selectedClassId) return;
-          await refreshData(selectedClassId, { keepLoading: true });
+          await refreshData(selectedClassId, { keepLoading: true, force: true });
         }
       )
       .on(
@@ -582,7 +481,7 @@ export default function AdminReviewManagement() {
         { event: "*", schema: "public", table: "documents" },
         async () => {
           if (!selectedClassId) return;
-          await refreshData(selectedClassId, { keepLoading: true });
+          await refreshData(selectedClassId, { keepLoading: true, force: true });
         }
       )
       .on(
@@ -590,7 +489,7 @@ export default function AdminReviewManagement() {
         { event: "*", schema: "public", table: "projects" },
         async () => {
           if (!selectedClassId) return;
-          await refreshData(selectedClassId, { keepLoading: true });
+          await refreshData(selectedClassId, { keepLoading: true, force: true });
         }
       )
       .subscribe();
@@ -630,7 +529,7 @@ export default function AdminReviewManagement() {
         throw new Error(updateError.message || "Failed to lock stage.");
       }
 
-      await fetchStages(selectedClassId);
+      await fetchStages(selectedClassId, { force: true });
       emitAdminDataUpdated();
     } catch (err) {
       setError(err.message || "Failed to lock stage.");
@@ -673,7 +572,7 @@ export default function AdminReviewManagement() {
         throw new Error(unlockError.message || "Failed to unlock stage.");
       }
 
-      await fetchStages(selectedClassId);
+      await fetchStages(selectedClassId, { force: true });
       emitAdminDataUpdated();
     } catch (err) {
       setError(err.message || "Failed to unlock stage.");
@@ -763,7 +662,7 @@ export default function AdminReviewManagement() {
         }
       }
 
-      await fetchStages(selectedClassId);
+      await fetchStages(selectedClassId, { force: true });
       closeStageNameModal();
       emitAdminDataUpdated();
     } catch (err) {
@@ -806,7 +705,7 @@ export default function AdminReviewManagement() {
         throw new Error(deleteError.message || "Failed to delete stage.");
       }
 
-      await fetchStages(selectedClassId);
+      await fetchStages(selectedClassId, { force: true });
       setDeletingStageId("");
       emitAdminDataUpdated();
     } catch (err) {
@@ -857,7 +756,7 @@ export default function AdminReviewManagement() {
         throw new Error(targetErr.message || "Failed to move stage.");
       }
 
-      await fetchStages(selectedClassId);
+      await fetchStages(selectedClassId, { force: true });
       emitAdminDataUpdated();
     } catch (err) {
       setError(err.message || "Failed to reorder stages.");
@@ -927,7 +826,7 @@ export default function AdminReviewManagement() {
       }
 
       await autoLockExpiredStages(selectedClassId);
-      await fetchStages(selectedClassId);
+      await fetchStages(selectedClassId, { force: true });
       resetDeadlineModal();
       emitAdminDataUpdated();
     } catch (err) {

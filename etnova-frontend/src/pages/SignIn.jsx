@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import supabase from '../config/supabaseClient'
-import { apiRequest } from '../config/apiClient'
+import { useAuth } from '../context/AuthContext'
 
 const ACCENT_COLOR = '#00D2C4'
 
@@ -13,17 +13,37 @@ const ROLE_ROUTES = {
 
 export default function SignIn() {
   const navigate = useNavigate()
+  const { user, role, loading: authLoading } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [rememberMe, setRememberMe] = useState(false)
   const [authError, setAuthError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [pendingRedirect, setPendingRedirect] = useState(false)
+
+  useEffect(() => {
+    if (!pendingRedirect) return
+    if (authLoading) return
+
+    if (user && role) {
+      const destination = ROLE_ROUTES[String(role).toLowerCase()]
+      if (destination) {
+        navigate(destination, { replace: true })
+        return
+      }
+    }
+
+    setAuthError('Your role is not assigned yet. Please contact support.')
+    setPendingRedirect(false)
+    setIsLoading(false)
+  }, [authLoading, navigate, pendingRedirect, role, user])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setAuthError('')
     setIsLoading(true)
+    setPendingRedirect(false)
 
     try {
       const {
@@ -41,21 +61,12 @@ export default function SignIn() {
         throw new Error('Unable to determine user identity. Please try again.')
       }
 
-      const profile = await apiRequest('/profile')
-
-      const normalizedRole = profile?.role?.toLowerCase()
-      const destination = ROLE_ROUTES[normalizedRole]
-
-      if (!destination) {
-        throw new Error('Your role is not assigned yet. Please contact support.')
-      }
-
-      navigate(destination, { replace: true })
+      setPendingRedirect(true)
     } catch (error) {
       setAuthError(error.message ?? 'Unable to sign in right now.')
-      console.error('Sign-in failed:', error)
-    } finally {
+      setPendingRedirect(false)
       setIsLoading(false)
+      console.error('Sign-in failed:', error)
     }
   }
 

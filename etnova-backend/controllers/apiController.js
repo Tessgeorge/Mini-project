@@ -10,6 +10,59 @@ const LOCKED_PROJECT_STATUSES = new Set(['approved', 'completed']);
 const isProjectLocked = (status) => LOCKED_PROJECT_STATUSES.has((status || '').toLowerCase());
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isUuid = (value) => typeof value === 'string' && UUID_REGEX.test(value);
+const REVIEW_STAGE_ORDER = ['Idea', 'Abstract', 'Zeroth Review', 'First Review', 'Second Review', 'Final Review'];
+
+const normalizeReviewStageName = (stageName) => {
+  const value = String(stageName || '').trim().toLowerCase();
+  if (value === '0th review' || value === 'zeroth review') return 'Zeroth Review';
+  if (value === '1st review' || value === 'first review') return 'First Review';
+  if (value === '2nd review' || value === 'second review') return 'Second Review';
+  if (value === 'idea') return 'Idea';
+  if (value === 'abstract') return 'Abstract';
+  if (value === 'final review') return 'Final Review';
+  return String(stageName || '').trim();
+};
+
+const reviewStageOrderIndex = (stageName) => {
+  const normalized = normalizeReviewStageName(stageName).toLowerCase();
+  const idx = REVIEW_STAGE_ORDER.findIndex((name) => name.toLowerCase() === normalized);
+  return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
+};
+
+const parseReviewStageOrder = (value, fallback = Number.MAX_SAFE_INTEGER) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+};
+
+const reviewStageNameToEvaluationKey = (stageName) => {
+  const value = normalizeReviewStageName(stageName).toLowerCase();
+  if (value === 'idea') return 'idea';
+  if (value === 'abstract') return 'abstract';
+  if (value === 'zeroth review') return 'zeroth_review';
+  if (value === 'first review') return 'first_review';
+  if (value === 'second review') return 'second_review';
+  if (value === 'final review') return 'final_review';
+  return '';
+};
+
+const normalizeEvaluationKey = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'idea' || normalized === 'idea approval') return 'idea';
+  if (normalized === 'abstract' || normalized === 'abstract submission') return 'abstract';
+  if (normalized === 'zeroth review' || normalized === '0th review' || normalized === 'proposal' || normalized === 'srs') return 'zeroth_review';
+  if (normalized === 'first review' || normalized === '1st review' || normalized === 'report') return 'first_review';
+  if (normalized === 'second review' || normalized === '2nd review' || normalized === 'presentation') return 'second_review';
+  if (normalized === 'final review' || normalized === 'final_report') return 'final_review';
+  return normalized;
+};
+
+const reviewStatusDisplay = (status) => {
+  if (status === 'active') return 'Active';
+  if (status === 'completed') return 'Completed';
+  if (status === 'pending') return 'Pending';
+  if (status === 'locked') return 'Locked';
+  return 'Inactive';
+};
 
 const enrichProjectsWithAllocations = async (projects) => {
   if (!projects?.length) return projects || [];
@@ -731,6 +784,172 @@ export const getAdminMentorManagementData = async (req, res) => {
       mentors: mentorResult.data || [],
       classes: classResult.data || [],
       projects: projectResult.data || [],
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const getAdminReviewManagementData = async (req, res) => {
+  try {
+    const classRef = String(req.query.class_id || req.query.class_name || '').trim();
+
+    const { data: classRows, error: classesError } = await supabase
+      .from('classes')
+      .select('id, class_section')
+      .order('class_section', { ascending: true });
+
+    if (classesError) throw classesError;
+
+    const classes = (classRows || []).map((row) => ({
+      id: row.id,
+      name: row.class_section || String(row.id),
+    }));
+
+    const effectiveClass = classes.find((row) => row.id === classRef)
+      || classes.find((row) => row.name === classRef)
+      || classes[0]
+      || null;
+
+    if (!effectiveClass) {
+      return res.json({
+        classes,
+        selected_class_id: '',
+        selected_class_name: '',
+        stages: [],
+      });
+    }
+
+    let stageRows = [];
+    {
+      const { data, error } = await supabase
+        .from('review_stages')
+        .select('id, stage_name, stage_order, class_id, coordinator_deadline, is_active, is_completed, is_locked')
+        .eq('class_id', effectiveClass.id);
+
+      if (error && /stage_order/i.test(String(error.message || ''))) {
+        const fallback = await supabase
+          .from('review_stages')
+          .select('id, stage_name, class_id, coordinator_deadline, is_active, is_completed, is_locked')
+          .eq('class_id', effectiveClass.id);
+        if (fallback.error) throw fallback.error;
+        stageRows = fallback.data || [];
+      } else if (error) {
+        throw error;
+      } else {
+        stageRows = data || [];
+      }
+    }
+
+    if (stageRows.length === 0) {
+      const inserts = REVIEW_STAGE_ORDER.map((stageName, index) => ({
+        class_id: effectiveClass.id,
+        stage_name: stageName,
+        stage_order: index + 1,
+        coordinator_deadline: null,
+        is_active: false,
+        is_completed: false,
+        is_locked: false,
+      }));
+
+      const { error: insertError } = await supabase.from('review_stages').insert(inserts);
+      if (insertError) throw insertError;
+
+      const { data: insertedRows, error: insertedError } = await supabase
+        .from('review_stages')
+        .select('id, stage_name, stage_order, class_id, coordinator_deadline, is_active, is_completed, is_locked')
+        .eq('class_id', effectiveClass.id);
+      if (insertedError) throw insertedError;
+      stageRows = insertedRows || [];
+    }
+
+    const [projectCountResult, coordinatorResult, evaluationResult] = await Promise.all([
+      supabase
+        .from('projects')
+        .select('id', { count: 'exact', head: true })
+        .eq('class_id', effectiveClass.id),
+      supabase
+        .from('profiles')
+        .select('id')
+        .eq('class_id', effectiveClass.id)
+        .eq('is_coordinator', true),
+      supabase
+        .from('evaluations')
+        .select('project_id, evaluation_type, phase, evaluator_id, guide_id, obtained_marks, max_marks, projects!inner(class_id)')
+        .eq('projects.class_id', effectiveClass.id),
+    ]);
+
+    if (projectCountResult.error) throw projectCountResult.error;
+    if (coordinatorResult.error) throw coordinatorResult.error;
+    if (evaluationResult.error) throw evaluationResult.error;
+
+    const coordinatorIds = new Set((coordinatorResult.data || []).map((row) => row.id).filter(Boolean));
+    const stageRowsByKey = new Map();
+    stageRows.forEach((row) => {
+      const key = reviewStageNameToEvaluationKey(row?.stage_name);
+      if (!key || !row?.id) return;
+      if (!stageRowsByKey.has(key)) stageRowsByKey.set(key, []);
+      stageRowsByKey.get(key).push(row.id);
+    });
+
+    const progressSets = {};
+    (evaluationResult.data || []).forEach((row) => {
+      const evaluatorId = row?.evaluator_id || row?.guide_id;
+      if (!coordinatorIds.has(evaluatorId)) return;
+      if (row?.obtained_marks == null || row?.max_marks == null) return;
+
+      const stageKey = normalizeEvaluationKey(row?.phase || row?.evaluation_type);
+      const stageIds = stageRowsByKey.get(stageKey) || [];
+      stageIds.forEach((stageId) => {
+        if (!progressSets[stageId]) progressSets[stageId] = new Set();
+        if (row?.project_id) progressSets[stageId].add(row.project_id);
+      });
+    });
+
+    const classProjectCount = projectCountResult.count || 0;
+    const stages = [...stageRows]
+      .sort((a, b) => {
+        const byExplicitOrder = parseReviewStageOrder(a.stage_order) - parseReviewStageOrder(b.stage_order);
+        if (byExplicitOrder !== 0) return byExplicitOrder;
+        const byOrder = reviewStageOrderIndex(a.stage_name) - reviewStageOrderIndex(b.stage_name);
+        if (byOrder !== 0) return byOrder;
+        return String(a.stage_name || '').localeCompare(String(b.stage_name || ''));
+      })
+      .map((row, index) => {
+        const normalizedName = normalizeReviewStageName(row.stage_name);
+        const evaluationKey = reviewStageNameToEvaluationKey(normalizedName);
+        const submissions = progressSets[row.id]?.size || 0;
+        const completedOnTime = evaluationKey
+          ? (classProjectCount > 0 && submissions >= classProjectCount)
+          : Boolean(row.is_completed);
+        const statusValue = row.is_locked
+          ? (completedOnTime ? 'completed' : 'pending')
+          : evaluationKey
+            ? (completedOnTime ? 'completed' : 'pending')
+            : row.is_completed
+              ? 'completed'
+              : row.is_active
+                ? 'active'
+                : 'inactive';
+
+        return {
+          id: row.id,
+          order: parseReviewStageOrder(row.stage_order, index + 1),
+          name: normalizedName,
+          className: effectiveClass.id,
+          deadline: row.coordinator_deadline || null,
+          status: reviewStatusDisplay(statusValue),
+          statusValue,
+          isLocked: Boolean(row.is_locked),
+          submissions,
+        };
+      });
+
+    res.json({
+      classes,
+      selected_class_id: effectiveClass.id,
+      selected_class_name: effectiveClass.name,
+      stages,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

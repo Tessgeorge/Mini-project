@@ -4,6 +4,7 @@ import {
   getAdminDashboardData,
   getAdminGuideAllocationData,
   getAdminMentorManagementData,
+  getAdminReviewManagementData,
   getUserProfile, 
   updateUserProfile,
 
@@ -94,6 +95,7 @@ router.get('/dashboard-data', authenticateUser, getDashboardData);
 router.get('/admin/dashboard-data', authenticateUser, requireRole(['admin']), getAdminDashboardData);
 router.get('/admin/guide-allocation-data', authenticateUser, requireRole(['admin']), getAdminGuideAllocationData);
 router.get('/admin/mentor-management-data', authenticateUser, requireRole(['admin']), getAdminMentorManagementData);
+router.get('/admin/review-management-data', authenticateUser, requireRole(['admin']), getAdminReviewManagementData);
 router.get('/profile', authenticateUser, getUserProfile);
 router.put('/profile', authenticateUser, updateUserProfile);
 
