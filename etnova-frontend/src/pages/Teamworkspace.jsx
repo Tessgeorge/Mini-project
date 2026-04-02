@@ -176,18 +176,43 @@ function fmtSz2(b) { return fmtSz(b); }
 function getTeamDisplayName(proj) {
   return proj?.team_name || proj?.title || "Untitled Team";
 }
+function isMentorVisibleIdea(idea) {
+  if (!idea) return false;
+  const status = String(idea.status || "").toLowerCase();
+  return Boolean(
+    idea.submitted_at
+    || ["submitted", "revision_required", "rejected", "approved"].includes(status)
+  );
+}
 function getActiveIdea(proj) {
-  return proj?.approved_idea || proj?.current_idea || proj?.active_idea || null;
+  if (isMentorVisibleIdea(proj?.mentor_visible_idea)) return proj.mentor_visible_idea;
+  if (isMentorVisibleIdea(proj?.approved_idea)) return proj.approved_idea;
+  if (isMentorVisibleIdea(proj?.current_idea)) return proj.current_idea;
+  if (isMentorVisibleIdea(proj?.active_idea)) return proj.active_idea;
+  return null;
 }
 function getIdeaTitle(proj) {
   const idea = getActiveIdea(proj);
   if (idea?.title) return idea.title;
+  if (hasTrackedIdeaHistory(proj)) return "";
   if (!proj?.title || proj?.team_name === proj?.title) return "";
   return proj.title;
 }
+function hasTrackedIdeaHistory(proj) {
+  return Boolean(
+    proj?.mentor_visible_idea?.id
+    || proj?.approved_idea?.id
+    || proj?.current_idea?.id
+    || proj?.active_idea?.id
+    || proj?.approved_idea_id
+    || proj?.current_idea_id
+  );
+}
 function getIdeaDescription(proj) {
   const idea = getActiveIdea(proj);
-  return idea?.description || proj?.description || "";
+  if (idea?.description) return idea.description;
+  if (hasTrackedIdeaHistory(proj)) return "";
+  return proj?.description || "";
 }
 
 const ST_PILL = {
@@ -1168,7 +1193,7 @@ function TabSubmissions({ projId, members, mentorName }) {
           .order("version_no", { ascending: false }),
       ]);
 
-      const fetchedIdeas = ideasRes.data || [];
+      const fetchedIdeas = (ideasRes.data || []).filter((idea) => isMentorVisibleIdea(idea));
       let fetchedIdeaReviews = [];
       const ideaIds = fetchedIdeas.map((idea) => idea.id).filter(Boolean);
 
@@ -1859,6 +1884,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
   const teamDisplayName = getTeamDisplayName(proj);
   const ideaTitle = getIdeaTitle(proj);
   const ideaDescription = getIdeaDescription(proj);
+  const heroTitle = ideaTitle || teamDisplayName;
   const projInitials = getInitials(teamDisplayName);
   const projGradient = gradFromTitle(teamDisplayName);
   const isDiscussionTab = tab === "feedback";
@@ -1891,25 +1917,20 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
                 {!isDiscussionTab && <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-slate-900/80 border border-teal-300/30 text-[10px] text-teal-200 flex items-center justify-center">AI</span>}
               </div>
               <div>
-                <h1 className={`${isDiscussionTab ? "text-xl" : "text-2xl"} font-extrabold text-white leading-tight`}>{teamDisplayName}</h1>
-                {!isDiscussionTab && proj.approved_idea_id && ideaTitle && (
-                  <p className="text-slate-300 text-sm mt-1 max-w-xl line-clamp-1 leading-relaxed">Approved idea: {ideaTitle}</p>
-                )}
-                {!isDiscussionTab && ideaDescription && (
-                  <p className="text-slate-300 text-sm mt-1 max-w-xl line-clamp-2 leading-relaxed">{ideaDescription}</p>
+                <h1 className={`${isDiscussionTab ? "text-xl" : "text-2xl"} font-extrabold text-white leading-tight`}>{heroTitle}</h1>
+                {!isDiscussionTab && ideaTitle && teamDisplayName && ideaTitle !== teamDisplayName && (
+                  <p className="text-slate-400 text-sm mt-1 max-w-xl line-clamp-1 leading-relaxed">Team: {teamDisplayName}</p>
                 )}
                 {!isDiscussionTab && proj.abstract && proj.abstract !== ideaDescription && (
                   <p className="text-slate-400 text-sm mt-1 max-w-xl line-clamp-1 leading-relaxed">{proj.abstract}</p>
                 )}
                 <div className={`flex items-center gap-3 ${isDiscussionTab ? "mt-1.5" : "mt-2.5"} flex-wrap`}>
                   <Pill status={projectStatus} />
-                  <span className="text-xs text-slate-400">Current step: <span className="text-teal-400 font-semibold">{workflowSnapshot.label}</span></span>
-                  {avg && <span className={"text-xs font-bold " + sClr(avg)}>Avg: {avg}/100</span>}
                 </div>
               </div>
             </div>
             {!isDiscussionTab && (
-              <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
+              <div className="flex flex-col flex-shrink-0 sm:self-stretch sm:items-end sm:justify-between">
                 <button
                   type="button"
                   onClick={() => setTab("ideas")}
@@ -1917,6 +1938,9 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
                 >
                   <Ic.Ideas /> Review Ideas
                 </button>
+                <span className="text-xs text-slate-400 sm:translate-y-3">
+                  Current step: <span className="text-teal-400 font-semibold">{workflowSnapshot.label}</span>
+                </span>
               </div>
             )}
           </div>
@@ -1981,7 +2005,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
               mentorId={mentorId}
               members={members}
               mentorName={mentorName}
-              projectTitle={teamDisplayName}
+              projectTitle={proj?.approved_idea?.title || "Team Discussion"}
             />
           )}
           {tab === "evaluation" && <TabEvaluation projId={proj.id} mentorId={mentorId} mentorName={mentorName} members={members} evaluations={evaluations} setEvaluations={setEvaluations} markingEnabled={markingEnabled} />}

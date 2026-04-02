@@ -100,6 +100,15 @@ const mapProjectIdeaSnapshot = (idea) => {
   };
 };
 
+const isMentorVisibleIdeaSnapshot = (idea) => {
+  if (!idea?.id) return false;
+  const status = String(idea.status || '').toLowerCase();
+  return Boolean(
+    idea.submitted_at
+    || ['submitted', 'revision_required', 'rejected', 'approved'].includes(status)
+  );
+};
+
 const enrichProjectsWithIdeaSnapshots = async (projects) => {
   if (!projects?.length) return projects || [];
 
@@ -115,6 +124,7 @@ const enrichProjectsWithIdeaSnapshots = async (projects) => {
       approved_idea: null,
       current_idea: null,
       active_idea: null,
+      mentor_visible_idea: null,
     }));
   }
 
@@ -144,12 +154,16 @@ const enrichProjectsWithIdeaSnapshots = async (projects) => {
     const approvedIdea = ideaById.get(project?.approved_idea_id) || null;
     const currentIdea = ideaById.get(project?.current_idea_id) || null;
     const activeIdea = approvedIdea || currentIdea || null;
+    const mentorVisibleIdea = isMentorVisibleIdeaSnapshot(approvedIdea)
+      ? approvedIdea
+      : (isMentorVisibleIdeaSnapshot(currentIdea) ? currentIdea : null);
 
     return {
       ...project,
       approved_idea: approvedIdea,
       current_idea: currentIdea,
       active_idea: activeIdea,
+      mentor_visible_idea: mentorVisibleIdea,
     };
   });
 };
@@ -286,6 +300,72 @@ const normalizeTextField = (value, { required = false, maxLength = 5000 } = {}) 
   }
 
   return normalized.slice(0, maxLength);
+};
+
+const normalizeLooseKey = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+const normalizeClassSectionInput = (value) => {
+  const normalized = normalizeTextField(value, { maxLength: 120 });
+  if (!normalized) return null;
+  return String(normalized).replace(/\s+/g, ' ').trim().toUpperCase();
+};
+
+const resolveProfileClassAssignment = async ({ classSection, semester, department }) => {
+  if (classSection === undefined) {
+    return {};
+  }
+
+  const normalizedInput = normalizeClassSectionInput(classSection);
+  if (!normalizedInput) {
+    return { class_section: null, class_id: null };
+  }
+
+  const { data: classes, error } = await supabase
+    .from('classes')
+    .select('id, class_section, department')
+    .order('class_section', { ascending: true });
+
+  if (error) throw error;
+
+  const parsedSemester = Number.parseInt(semester, 10);
+  const semesterToken = Number.isFinite(parsedSemester) && parsedSemester > 0 ? `S${parsedSemester}` : null;
+  const departmentKey = normalizeLooseKey(department);
+  const exactKey = normalizeLooseKey(normalizedInput);
+  const sectionLetter = /^[A-Z]$/.test(normalizedInput) ? normalizedInput : null;
+
+  const rows = (classes || []).map((row) => ({
+    id: row.id,
+    classSection: String(row.class_section || '').trim(),
+    classKey: normalizeClassSectionInput(row.class_section),
+    departmentKey: normalizeLooseKey(row.department),
+  }));
+
+  let match = rows.find((row) => normalizeLooseKey(row.classKey) === exactKey) || null;
+
+  if (!match && sectionLetter) {
+    let candidates = rows.filter((row) => row.classKey?.endsWith(` ${sectionLetter}`) || row.classKey === sectionLetter);
+
+    if (semesterToken) {
+      const semesterMatches = candidates.filter((row) => row.classKey?.startsWith(`${semesterToken} `));
+      if (semesterMatches.length) {
+        candidates = semesterMatches;
+      }
+    }
+
+    if (departmentKey) {
+      const departmentMatches = candidates.filter((row) => row.departmentKey === departmentKey);
+      if (departmentMatches.length) {
+        candidates = departmentMatches;
+      }
+    }
+
+    match = candidates[0] || null;
+  }
+
+  return {
+    class_section: match?.classSection || normalizedInput,
+    class_id: match?.id || null,
+  };
 };
 
 const normalizeTechnologyStacks = (value) => {
@@ -441,9 +521,21 @@ export const getUserProfile = async (req, res) => {
 
 export const updateUserProfile = async (req, res) => {
   try {
+    const updates = { ...req.body };
+    const resolvedClassAssignment = await resolveProfileClassAssignment({
+      classSection: req.body?.class_section,
+      semester: req.body?.semester,
+      department: req.body?.department,
+    });
+
+    if (Object.prototype.hasOwnProperty.call(resolvedClassAssignment, 'class_section')) {
+      updates.class_section = resolvedClassAssignment.class_section;
+      updates.class_id = resolvedClassAssignment.class_id;
+    }
+
     const { data, error } = await supabase
       .from('profiles')
-      .update(req.body)
+      .update(updates)
       .eq('id', req.user.id)
       .select()
       .single();

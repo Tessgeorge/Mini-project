@@ -28,7 +28,10 @@ export default function ProfileSettingsModal({ isOpen, onClose, profile, onSucce
     }, [isOpen, profile]);
 
     const handleChange = (e) => {
-        const value = e.target.name === 'semester' ? parseInt(e.target.value) || '' : e.target.value;
+        let value = e.target.name === 'semester' ? parseInt(e.target.value) || '' : e.target.value;
+        if (e.target.name === 'class_section') {
+            value = String(value || '').toUpperCase();
+        }
         setFormData({ ...formData, [e.target.name]: value });
     };
 
@@ -191,6 +194,9 @@ export default function ProfileSettingsModal({ isOpen, onClose, profile, onSucce
                             className="glass-input w-full px-4 py-3 text-slate-900 placeholder:text-slate-400 outline-none"
                             placeholder="e.g., A"
                         />
+                        <p className="text-xs text-slate-500 mt-1">
+                            Enter just <span className="font-semibold text-slate-700">A</span>, <span className="font-semibold text-slate-700">B</span>, or <span className="font-semibold text-slate-700">C</span>. We will map it to your full class automatically.
+                        </p>
                     </div>
                 </div>
 

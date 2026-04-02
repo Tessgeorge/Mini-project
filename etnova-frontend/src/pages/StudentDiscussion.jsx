@@ -2,6 +2,10 @@ import { useEffect, useState } from "react";
 import DiscussionChat from "../components/DiscussionChat";
 import { fetchStudentBootstrapData } from "../services/studentData";
 
+function getApprovedDiscussionTitle(project) {
+  return project?.approved_idea?.title || "Team Discussion";
+}
+
 export default function StudentDiscussion() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -67,7 +71,7 @@ export default function StudentDiscussion() {
       userName={profile.full_name || "Student"}
       initialProject={project}
       initialMembers={project.team_members || []}
-      initialTitle={project.title || "Team Discussion"}
+      initialTitle={getApprovedDiscussionTitle(project)}
     />
   );
 }

@@ -45,6 +45,7 @@ const COPILOT_STATES = {
   OPEN: "open",
   MINIMIZED: "minimized",
 };
+const CHAT_MESSAGE_EDIT_WINDOW_MS = 10 * 60 * 1000;
 
 const STARTER_ASSISTANT_MESSAGE = {
   id: "assistant-welcome",
@@ -142,6 +143,24 @@ function buildChatTimeline(messages) {
   return timeline;
 }
 
+function normalizeAssistantDraftPayload(value) {
+  if (!value || typeof value !== "object") return null;
+
+  return {
+    title: String(value.title || "").trim(),
+    description: String(value.description || "").trim(),
+    technologies: Array.isArray(value.technologies)
+      ? value.technologies.map((item) => String(item || "").trim()).filter(Boolean)
+      : [],
+    domain: String(value.domain || "").trim(),
+    subdomain: String(value.subdomain || "").trim(),
+    confidence_score: Number.isFinite(Number(value.confidence_score)) ? Number(value.confidence_score) : 0,
+    keywords: Array.isArray(value.keywords)
+      ? value.keywords.map((item) => String(item || "").trim()).filter(Boolean)
+      : [],
+  };
+}
+
 function formatChatListTime(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -203,6 +222,12 @@ function isDraftConfirmationMessage(value) {
   const phraseMatches = [
     "can you draft",
     "please draft",
+    "draft an idea",
+    "draft the idea",
+    "draft idea",
+    "give me the draft",
+    "where is the draft",
+    "show the idea draft",
     "show me the draft",
     "let s draft",
     "lets draft",
@@ -217,6 +242,19 @@ function isDraftConfirmationMessage(value) {
   ];
 
   return phraseMatches.some((phrase) => normalized.includes(phrase));
+}
+
+function hasMeaningfulAssistantDraft(draft) {
+  if (!draft || typeof draft !== "object") return false;
+
+  return Boolean(
+    String(draft.title || "").trim()
+    || String(draft.description || "").trim()
+    || String(draft.domain || "").trim()
+    || String(draft.subdomain || "").trim()
+    || (Array.isArray(draft.technologies) && draft.technologies.length > 0)
+    || (Array.isArray(draft.keywords) && draft.keywords.length > 0)
+  );
 }
 
 function CopilotAvatar({ role }) {
@@ -402,6 +440,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
   const [assistantSidebarHidden, setAssistantSidebarHidden] = useState(false);
   const [chatMenuOpenId, setChatMenuOpenId] = useState("");
   const [chatDialog, setChatDialog] = useState({ type: "", chat: null, value: "" });
+  const [editingAssistantMessage, setEditingAssistantMessage] = useState({ messageId: "", value: "" });
   const assistantEndRef = useRef(null);
   const assistantInputRef = useRef(null);
 
@@ -467,6 +506,21 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
       || assistantDraft?.domain
       || (assistantDraft?.technologies || []).length
   );
+
+  useEffect(() => {
+    if (!assistantIsOpen) return;
+    setEditingAssistantMessage({ messageId: "", value: "" });
+  }, [assistantIsOpen, activeChatId, messages.length]);
+
+  useEffect(() => {
+    if (!assistantIsOpen) return;
+    setAssistantMeta(EMPTY_ASSISTANT_META);
+  }, [activeChatId, assistantIsOpen]);
+
+  useEffect(() => {
+    if (!assistantIsOpen) return;
+    setAssistantDraft(normalizeAssistantDraftPayload(activeChat?.latest_draft));
+  }, [activeChat?.latest_draft, assistantIsOpen]);
 
   const openCreate = () => {
     if (workspaceLocked) {
@@ -615,7 +669,10 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
       const createdChat = await apiRequest(`/projects/${project.id}/idea-chats`, {
         method: "POST",
       });
-      setChats((current) => [createdChat, ...current]);
+      setChats((current) => [{
+        ...createdChat,
+        latest_draft: normalizeAssistantDraftPayload(createdChat?.latest_draft),
+      }, ...current]);
       setActiveChatId(createdChat?.id || "");
       setMessages([]);
       setAssistantDraft(null);
@@ -653,7 +710,11 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
         body: { title: trimmedTitle },
       });
       setChats((current) =>
-        current.map((item) => (item.id === updatedChat.id ? { ...item, ...updatedChat } : item))
+        current.map((item) => (item.id === updatedChat.id ? {
+          ...item,
+          ...updatedChat,
+          latest_draft: normalizeAssistantDraftPayload(updatedChat?.latest_draft),
+        } : item))
       );
       setChatDialog({ type: "", chat: null, value: "" });
     } catch (chatError) {
@@ -694,7 +755,10 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     setAssistantError("");
     try {
       const response = await apiRequest(`/projects/${project.id}/idea-chats`);
-      const nextChats = Array.isArray(response) ? response : [];
+      const nextChats = (Array.isArray(response) ? response : []).map((chat) => ({
+        ...chat,
+        latest_draft: normalizeAssistantDraftPayload(chat?.latest_draft),
+      }));
       setChats(nextChats);
       setActiveChatId((current) => {
         if (current && nextChats.some((chat) => chat.id === current)) return current;
@@ -719,7 +783,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     try {
       const response = await apiRequest(`/idea-chats/${activeChatId}/messages`);
       setMessages(Array.isArray(response?.messages) ? response.messages : []);
-      setAssistantDraft(response?.latest_draft || null);
+      setAssistantDraft(normalizeAssistantDraftPayload(response?.latest_draft));
       setAssistantMeta({
         readiness: response?.readiness || EMPTY_ASSISTANT_META.readiness,
         follow_up_questions: Array.isArray(response?.follow_up_questions)
@@ -728,9 +792,13 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
       });
       if (response?.chat) {
         setChats((current) => {
-          const exists = current.some((chat) => chat.id === response.chat.id);
-          if (!exists) return [response.chat, ...current];
-          return current.map((chat) => (chat.id === response.chat.id ? { ...chat, ...response.chat } : chat));
+          const normalizedChat = {
+            ...response.chat,
+            latest_draft: normalizeAssistantDraftPayload(response.chat?.latest_draft),
+          };
+          const exists = current.some((chat) => chat.id === normalizedChat.id);
+          if (!exists) return [normalizedChat, ...current];
+          return current.map((chat) => (chat.id === normalizedChat.id ? { ...chat, ...normalizedChat } : chat));
         });
       }
     } catch (chatError) {
@@ -779,6 +847,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
   useEffect(() => {
     setAssistantInput("");
     clearAssistantAttachment();
+    setEditingAssistantMessage({ messageId: "", value: "" });
   }, [activeChatId]);
 
   useEffect(() => {
@@ -863,9 +932,13 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
         const nextChat = response.chat || current.find((chat) => chat.id === activeChatId) || null;
         if (!nextChat) return current;
         const withoutActive = current.filter((chat) => chat.id !== nextChat.id);
-        return [{ ...nextChat, title: response.title || nextChat.title || null }, ...withoutActive];
+        return [{
+          ...nextChat,
+          title: response.title || nextChat.title || null,
+          latest_draft: normalizeAssistantDraftPayload(nextChat?.latest_draft || response?.draft_patch),
+        }, ...withoutActive];
       });
-      setAssistantDraft(response.draft_patch || null);
+      setAssistantDraft(normalizeAssistantDraftPayload(response.draft_patch));
       setAssistantMeta({
         readiness: response?.readiness || EMPTY_ASSISTANT_META.readiness,
         follow_up_questions: Array.isArray(response?.follow_up_questions)
@@ -876,6 +949,93 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     } catch (generationError) {
       setMessages((current) => current.filter((message) => message.id !== tempUserId));
       setAssistantError(generationError.message || "Failed to get a response from the assistant.");
+    } finally {
+      setAssistantLoading(false);
+    }
+  };
+
+  const latestEditableUserMessageId = useMemo(() => {
+    if (!messages.length || assistantLoading) return "";
+    const candidate = [...messages].reverse().find((entry) => entry?.role === "user");
+    if (!candidate?.id) return "";
+    const createdAtMs = new Date(candidate.created_at).getTime();
+    if (!Number.isFinite(createdAtMs)) return "";
+    if ((Date.now() - createdAtMs) > CHAT_MESSAGE_EDIT_WINDOW_MS) return "";
+    return candidate.id;
+  }, [assistantLoading, messages]);
+
+  const startEditingAssistantMessage = (message) => {
+    if (!message?.id) return;
+    setEditingAssistantMessage({
+      messageId: message.id,
+      value: message.content || "",
+    });
+    setAssistantError("");
+  };
+
+  const cancelEditingAssistantMessage = () => {
+    setEditingAssistantMessage({ messageId: "", value: "" });
+  };
+
+  const saveEditedAssistantMessage = async (messageId) => {
+    const nextContent = editingAssistantMessage.value.trim();
+    if (!messageId || messageId !== editingAssistantMessage.messageId) return;
+    if (!nextContent) {
+      setAssistantError("Edited message cannot be empty.");
+      return;
+    }
+
+    setAssistantLoading(true);
+    setAssistantError("");
+    try {
+      const response = await apiRequest(`/idea-chats/${activeChatId}/messages/${messageId}`, {
+        method: "PUT",
+        body: {
+          message: nextContent,
+          currentDraft: {
+            title: form.title,
+            domain: form.domain,
+            subdomain: form.subdomain,
+            description: form.description,
+            technologies: parseTechnologies(form.technologies),
+            confidence_score: Number(form.confidence_score || 0),
+            keywords: parseTechnologies(form.keywords),
+          },
+        },
+      });
+
+      setMessages((current) => {
+        const withoutReplacedAssistant = response?.replaced_assistant_message_id
+          ? current.filter((entry) => entry.id !== response.replaced_assistant_message_id)
+          : [...current];
+
+        return withoutReplacedAssistant.map((entry) => {
+          if (entry.id === messageId) {
+            return response.user_message || { ...entry, content: nextContent };
+          }
+          return entry;
+        }).concat(response.assistant_message ? [response.assistant_message] : []);
+      });
+      setChats((current) => {
+        const nextChat = response.chat || current.find((chat) => chat.id === activeChatId) || null;
+        if (!nextChat) return current;
+        const withoutActive = current.filter((chat) => chat.id !== nextChat.id);
+        return [{
+          ...nextChat,
+          title: response.title || nextChat.title || null,
+          latest_draft: normalizeAssistantDraftPayload(nextChat?.latest_draft || response?.draft_patch),
+        }, ...withoutActive];
+      });
+      setAssistantDraft(normalizeAssistantDraftPayload(response.draft_patch));
+      setAssistantMeta({
+        readiness: response?.readiness || EMPTY_ASSISTANT_META.readiness,
+        follow_up_questions: Array.isArray(response?.follow_up_questions)
+          ? response.follow_up_questions
+          : EMPTY_ASSISTANT_META.follow_up_questions,
+      });
+      cancelEditingAssistantMessage();
+    } catch (editError) {
+      setAssistantError(editError.message || "Failed to update the message.");
     } finally {
       setAssistantLoading(false);
     }
@@ -969,16 +1129,22 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     [visibleAssistantMessages]
   );
   const draftPreviewAnchorMessageId = useMemo(() => {
-    if (!assistantDraft || !messages.length) return "";
+    if (!messages.length || !hasMeaningfulAssistantDraft(assistantDraft)) return "";
 
-    const hasEnteredDraftMode = messages.some(
+    const hasExplicitDraftRequest = messages.some(
       (entry) => entry?.role === "user" && isDraftConfirmationMessage(entry?.content)
     );
+    const latestAssistantMessage = [...messages].reverse().find((entry) => entry?.role === "assistant") || null;
+    const assistantMentionsDraft = /\bdraft\b/i.test(String(latestAssistantMessage?.content || ""));
+    const shouldRevealDraft =
+      assistantMeta.readiness === "ready_to_apply"
+      || hasExplicitDraftRequest
+      || assistantMentionsDraft;
 
-    if (!hasEnteredDraftMode) return "";
+    if (!shouldRevealDraft) return "";
 
-    return [...messages].reverse().find((entry) => entry?.role === "assistant")?.id || "";
-  }, [assistantDraft, messages]);
+    return latestAssistantMessage?.id || "";
+  }, [assistantDraft, assistantMeta.readiness, messages]);
 
   const floatingAssistantButton = typeof document !== "undefined" && assistantWidgetState === COPILOT_STATES.CLOSED
     ? createPortal(
@@ -1242,6 +1408,8 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
 
                       const isAssistant = entry.role === "assistant";
                       const showContextualApply = isAssistant && assistantCanApply && latestAssistantMessageId === entry.id;
+                      const canEditMessage = !isAssistant && entry.id === latestEditableUserMessageId;
+                      const isEditingMessage = editingAssistantMessage.messageId === entry.id;
 
                       return (
                         <div key={entry.id} className="space-y-3">
@@ -1251,14 +1419,54 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                             {isAssistant ? <CopilotAvatar role="assistant" /> : null}
                             <div className={`max-w-[84%] ${isAssistant ? "" : "order-first"}`}>
                               <div
-                                className={`rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
+                                className={`group relative rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
                                   isAssistant
                                     ? "border border-slate-200/80 bg-slate-50/90 text-slate-700 shadow-[0_8px_20px_rgba(15,23,42,0.04)]"
                                     : "text-slate-950"
                                 }`}
                                 style={isAssistant ? undefined : { backgroundColor: "rgba(0,210,196,0.18)" }}
                               >
-                                <p className="whitespace-pre-wrap">{entry.content}</p>
+                                {canEditMessage ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => startEditingAssistantMessage(entry)}
+                                    className={`absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/70 bg-white/85 text-slate-500 shadow-sm transition duration-200 hover:border-slate-200 hover:text-slate-700 ${isEditingMessage ? "opacity-0 pointer-events-none" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}`}
+                                    aria-label="Edit message"
+                                  >
+                                    <span className="material-symbols-outlined text-[15px]">edit</span>
+                                  </button>
+                                ) : null}
+
+                                {isEditingMessage ? (
+                                  <div className="space-y-3">
+                                    <textarea
+                                      value={editingAssistantMessage.value}
+                                      onChange={(event) => setEditingAssistantMessage((current) => ({ ...current, value: event.target.value }))}
+                                      rows={4}
+                                      className="w-full resize-none rounded-2xl border border-white/70 bg-white/65 px-3 py-2.5 text-sm leading-relaxed text-slate-900 outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-500/10"
+                                    />
+                                    <div className="flex justify-end gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={cancelEditingAssistantMessage}
+                                        className="rounded-full border border-slate-200 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-white"
+                                        disabled={assistantLoading}
+                                      >
+                                        Cancel
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => saveEditedAssistantMessage(entry.id)}
+                                        className="rounded-full bg-teal-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-teal-600 disabled:cursor-not-allowed disabled:opacity-60"
+                                        disabled={assistantLoading}
+                                      >
+                                        Send again
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <p className={`whitespace-pre-wrap ${canEditMessage ? "pr-8" : ""}`}>{entry.content}</p>
+                                )}
                                 {Array.isArray(entry.attachments) && entry.attachments.length > 0 ? (
                                   <div className="space-y-2">
                                     {entry.attachments.map((attachment, index) => (
@@ -1804,6 +2012,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     </>
   );
 }
+
 
 
 

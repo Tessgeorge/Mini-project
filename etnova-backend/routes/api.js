@@ -65,6 +65,7 @@ import {
   renameProjectIdeaChatSession,
   deleteProjectIdeaChatSession,
   sendProjectIdeaChatMessage,
+  editProjectIdeaChatMessage,
   generateProjectIdeaDraft,
   generateProjectIdeaChat,
   getProjectIdeaChat,
@@ -118,6 +119,7 @@ router.get('/idea-chats/:chatId/messages', authenticateUser, requireRole(['stude
 router.put('/idea-chats/:chatId', authenticateUser, requireRole(['student']), renameProjectIdeaChatSession);
 router.delete('/idea-chats/:chatId', authenticateUser, requireRole(['student']), deleteProjectIdeaChatSession);
 router.post('/idea-chats/:chatId/messages', authenticateUser, requireRole(['student']), sendProjectIdeaChatMessage);
+router.put('/idea-chats/:chatId/messages/:messageId', authenticateUser, requireRole(['student']), editProjectIdeaChatMessage);
 router.get('/ideas/:ideaId/chat', authenticateUser, requireRole(['student']), getProjectIdeaChat);
 router.post('/ideas/:ideaId/chat', authenticateUser, requireRole(['student']), generateProjectIdeaChat);
 

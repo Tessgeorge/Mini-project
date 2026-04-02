@@ -23,6 +23,8 @@ const PROJECT_STATUS_MAP = {
   rejected: 'rejected',
   completed: 'completed',
 };
+const CHAT_MESSAGE_EDIT_WINDOW_MS = 10 * 60 * 1000;
+const MENTOR_VISIBLE_IDEA_STATUSES = new Set(['submitted', 'revision_required', 'approved', 'rejected']);
 
 const IDEA_ASSISTANT_SCHEMA = {
   type: 'object',
@@ -625,6 +627,12 @@ function mapIdeaContextSnapshot(idea) {
   };
 }
 
+function isMentorVisibleIdea(idea) {
+  if (!idea?.id) return false;
+  const status = String(idea.status || '').toLowerCase();
+  return Boolean(idea.submitted_at || MENTOR_VISIBLE_IDEA_STATUSES.has(status));
+}
+
 async function getProjectIdeaContext(project) {
   if (!project?.id) {
     return {
@@ -730,6 +738,30 @@ async function listProjectIdeaChats(projectId) {
   return data || [];
 }
 
+function buildProjectIdeaChatDraft(chat, project, ideaContext, requestCurrentDraft = {}) {
+  const activeIdea = ideaContext?.activeIdea || null;
+
+  return buildAssistantCurrentDraft({
+    title: requestCurrentDraft?.title || chat?.latest_draft?.title || activeIdea?.title || project?.title || '',
+    description: requestCurrentDraft?.description || chat?.latest_draft?.description || activeIdea?.description || project?.description || '',
+    technologies: requestCurrentDraft?.technologies || chat?.latest_draft?.technologies || activeIdea?.technologies || project?.technology_stacks,
+    domain: requestCurrentDraft?.domain || chat?.latest_draft?.domain || activeIdea?.domain || project?.domain || '',
+    subdomain: requestCurrentDraft?.subdomain || chat?.latest_draft?.subdomain || activeIdea?.subdomain || '',
+    confidence_score: requestCurrentDraft?.confidence_score ?? chat?.latest_draft?.confidence_score ?? activeIdea?.confidence_score ?? 0,
+    keywords: requestCurrentDraft?.keywords || chat?.latest_draft?.keywords || activeIdea?.keywords || [],
+  }, project);
+}
+
+function normalizeProjectIdeaChat(chat, project, ideaContext) {
+  if (!chat?.id) return chat;
+
+  return {
+    ...chat,
+    title: chat.title || deriveChatTitleFromMessages([], chat.latest_draft, 'New Idea Chat') || 'New Idea Chat',
+    latest_draft: buildProjectIdeaChatDraft(chat, project, ideaContext),
+  };
+}
+
 async function createProjectIdeaChatRecord(projectId) {
   const { data, error } = await supabase
     .from('idea_chats')
@@ -770,6 +802,38 @@ async function createProjectIdeaChatMessage(chatId, role, content, attachments =
 
   if (error) throw error;
   return data;
+}
+
+async function getProjectIdeaChatMessageById(messageId) {
+  const { data, error } = await supabase
+    .from('idea_chat_messages')
+    .select('id, chat_id, role, content, attachments, created_at')
+    .eq('id', messageId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data || null;
+}
+
+async function updateProjectIdeaChatMessage(messageId, updates) {
+  const { data, error } = await supabase
+    .from('idea_chat_messages')
+    .update(updates)
+    .eq('id', messageId)
+    .select('id, chat_id, role, content, attachments, created_at')
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+async function deleteProjectIdeaChatMessage(messageId) {
+  const { error } = await supabase
+    .from('idea_chat_messages')
+    .delete()
+    .eq('id', messageId);
+
+  if (error) throw error;
 }
 
 async function updateProjectIdeaChatSession(chatId, updates) {
@@ -1705,8 +1769,12 @@ async function generateIdeaAssistantChat({ project, messages, currentDraft, idea
 
 export const getProjectIdeaChats = async (req, res) => {
   try {
-    const chats = await listProjectIdeaChats(req.params.id);
-    res.json(chats);
+    const [project, chats] = await Promise.all([
+      getProjectRow(req.params.id),
+      listProjectIdeaChats(req.params.id),
+    ]);
+    const ideaContext = await getProjectIdeaContext(project);
+    res.json((chats || []).map((chat) => normalizeProjectIdeaChat(chat, project, ideaContext)));
   } catch (error) {
     res.status(error.statusCode || 500).json({ message: error.message });
   }
@@ -1723,13 +1791,15 @@ export const createProjectIdeaChatSession = async (req, res) => {
 
 export const getProjectIdeaChatMessages = async (req, res) => {
   try {
-    const { chat } = await assertStudentCanAccessProjectChat(req.params.chatId, req.user.id);
+    const { chat, project } = await assertStudentCanAccessProjectChat(req.params.chatId, req.user.id);
     const messages = await listProjectIdeaChatMessages(chat.id);
+    const ideaContext = await getProjectIdeaContext(project);
+    const normalizedChat = normalizeProjectIdeaChat(chat, project, ideaContext);
 
     res.json({
-      chat,
+      chat: normalizedChat,
       messages,
-      latest_draft: chat.latest_draft || null,
+      latest_draft: normalizedChat.latest_draft || null,
       readiness: 'exploring',
       follow_up_questions: [],
     });
@@ -1785,7 +1855,6 @@ export const sendProjectIdeaChatMessage = async (req, res) => {
 
     const { chat, project } = await assertStudentCanAccessProjectChat(req.params.chatId, req.user.id);
     const ideaContext = await getProjectIdeaContext(project);
-    const activeIdea = ideaContext.activeIdea;
     const persistedMessages = await listProjectIdeaChatMessages(chat.id);
     const normalizedPersistedMessages = sanitizeAssistantMessages(persistedMessages);
     const attachments = attachment?.dataUrl ? [await enrichAttachmentForChat(attachment)].filter(Boolean) : [];
@@ -1798,15 +1867,7 @@ export const sendProjectIdeaChatMessage = async (req, res) => {
       },
     ];
 
-    const currentDraft = buildAssistantCurrentDraft({
-      title: requestCurrentDraft?.title || chat?.latest_draft?.title || activeIdea?.title || project.title || '',
-      description: requestCurrentDraft?.description || chat?.latest_draft?.description || activeIdea?.description || project.description || '',
-      technologies: requestCurrentDraft?.technologies || chat?.latest_draft?.technologies || activeIdea?.technologies || project.technology_stacks,
-      domain: requestCurrentDraft?.domain || chat?.latest_draft?.domain || activeIdea?.domain || project.domain || '',
-      subdomain: requestCurrentDraft?.subdomain || chat?.latest_draft?.subdomain || activeIdea?.subdomain || '',
-      confidence_score: requestCurrentDraft?.confidence_score ?? chat?.latest_draft?.confidence_score ?? activeIdea?.confidence_score ?? 0,
-      keywords: requestCurrentDraft?.keywords || chat?.latest_draft?.keywords || activeIdea?.keywords || [],
-    }, project);
+    const currentDraft = buildProjectIdeaChatDraft(chat, project, ideaContext, requestCurrentDraft);
 
     const assistantReply = await generateIdeaAssistantChat({
       project,
@@ -1848,6 +1909,105 @@ export const sendProjectIdeaChatMessage = async (req, res) => {
       provider: assistantReply.provider,
       model: assistantReply.model,
       generated_at: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ message: error.message });
+  }
+};
+
+export const editProjectIdeaChatMessage = async (req, res) => {
+  try {
+    const message = normalizeTextField(req.body?.message, { required: true, maxLength: 2500 });
+    const requestCurrentDraft = req.body?.currentDraft || {};
+
+    if (!message) {
+      return res.status(400).json({ message: 'Edited message cannot be empty.' });
+    }
+
+    const { chat, project } = await assertStudentCanAccessProjectChat(req.params.chatId, req.user.id);
+    const persistedMessages = await listProjectIdeaChatMessages(chat.id);
+    const targetIndex = persistedMessages.findIndex((entry) => entry.id === req.params.messageId);
+
+    if (targetIndex === -1) {
+      return res.status(404).json({ message: 'Message not found.' });
+    }
+
+    const targetMessage = persistedMessages[targetIndex];
+    if (targetMessage.role !== 'user') {
+      return res.status(400).json({ message: 'Only user messages can be edited.' });
+    }
+
+    const messageAgeMs = Date.now() - new Date(targetMessage.created_at).getTime();
+    if (!Number.isFinite(messageAgeMs) || messageAgeMs > CHAT_MESSAGE_EDIT_WINDOW_MS) {
+      return res.status(400).json({ message: 'This message can no longer be edited.' });
+    }
+
+    const nextMessage = persistedMessages[targetIndex + 1] || null;
+    const hasLaterMessagesBeyondPair = persistedMessages.slice(targetIndex + (nextMessage?.role === 'assistant' ? 2 : 1)).length > 0;
+    if (hasLaterMessagesBeyondPair) {
+      return res.status(400).json({ message: 'Only the latest exchange can be edited.' });
+    }
+
+    const updatedUserMessage = await updateProjectIdeaChatMessage(targetMessage.id, { content: message });
+
+    if (nextMessage?.role === 'assistant') {
+      await deleteProjectIdeaChatMessage(nextMessage.id);
+    }
+
+    const updatedMessages = persistedMessages.map((entry, index) => {
+      if (index === targetIndex) {
+        return {
+          ...entry,
+          content: message,
+        };
+      }
+      return entry;
+    });
+
+    const normalizedPersistedMessages = sanitizeAssistantMessages(
+      nextMessage?.role === 'assistant'
+        ? updatedMessages.filter((entry) => entry.id !== nextMessage.id)
+        : updatedMessages
+    );
+
+    const ideaContext = await getProjectIdeaContext(project);
+    const currentDraft = buildProjectIdeaChatDraft(chat, project, ideaContext, requestCurrentDraft);
+
+    const assistantReply = await generateIdeaAssistantChat({
+      project,
+      messages: normalizedPersistedMessages,
+      currentDraft,
+      ideaContext,
+    });
+
+    const savedAssistantMessage = await createProjectIdeaChatMessage(
+      chat.id,
+      'assistant',
+      assistantReply.message
+    );
+
+    const nextTitle =
+      chat.title
+      || deriveChatTitleFromMessages(normalizedPersistedMessages, assistantReply?.draft_patch, 'New Idea Chat')
+      || 'New Idea Chat';
+    const updatedChat = await updateProjectIdeaChatSession(chat.id, {
+      title: nextTitle,
+      latest_draft: assistantReply.draft_patch,
+    });
+
+    res.json({
+      chat: updatedChat,
+      user_message: updatedUserMessage,
+      assistant_message: savedAssistantMessage,
+      draft_patch: assistantReply.draft_patch,
+      title: updatedChat.title || null,
+      readiness: assistantReply.readiness,
+      follow_up_questions: assistantReply.follow_up_questions,
+      provider: assistantReply.provider,
+      model: assistantReply.model,
+      generated_at: new Date().toISOString(),
+      edited_message_id: updatedUserMessage.id,
+      replaced_assistant_message_id: nextMessage?.role === 'assistant' ? nextMessage.id : null,
     });
   } catch (error) {
     res.status(error.statusCode || 500).json({ message: error.message });
@@ -2293,8 +2453,9 @@ export const getMentorIdeas = async (req, res) => {
 
     if (error) throw error;
 
-    const reviews = await fetchIdeaReviews((ideas || []).map((idea) => idea.id));
-    const enriched = attachReviewHistory(ideas || [], reviews).map((idea) => ({
+    const mentorVisibleIdeas = (ideas || []).filter(isMentorVisibleIdea);
+    const reviews = await fetchIdeaReviews(mentorVisibleIdeas.map((idea) => idea.id));
+    const enriched = attachReviewHistory(mentorVisibleIdeas, reviews).map((idea) => ({
       ...idea,
       project: projectMap.get(idea.project_id) || null,
     }));
@@ -2339,6 +2500,10 @@ export const reviewProjectIdea = async (req, res) => {
 
     if (!mentorCanReviewProject(ideaRow.project, req)) {
       return res.status(403).json({ message: 'You do not have access to review this idea.' });
+    }
+
+    if (!isMentorVisibleIdea(ideaRow)) {
+      return res.status(400).json({ message: 'This idea has not been submitted for mentor review yet.' });
     }
 
     if (action === 'approved') {

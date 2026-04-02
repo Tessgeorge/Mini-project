@@ -487,7 +487,7 @@ export default function Discussion({
         if (!mounted) return;
         setProject({
           id: resolvedProjectId,
-          title: detail?.title || initialTitle || "Team Discussion",
+          title: detail?.approved_idea?.title || initialTitle || "Team Discussion",
           team_members: detail?.team_members?.length ? detail.team_members : (initialMembers || []),
           guide: detail?.guide || null,
           mentor: detail?.mentor || null,

@@ -244,6 +244,38 @@ function TabPanelLoader({ label = "Loading section..." }) {
 const REVIEW_STAGE_ORDER = ["Idea", "Abstract", "Zeroth Review", "First Review", "Second Review", "Final Review"];
 const REVIEW_STAGE_VALUE_ORDER = REVIEW_ROUND_OPTIONS.map((option) => option.value);
 const MY_CLASS_TABS = ["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews"];
+const MENTOR_TABS = new Set(["overview", "teams", "evaluation", ...MY_CLASS_TABS, "my-class-marks"]);
+const MENTOR_ACTIVE_TAB_STORAGE_KEY = "etnova:mentorDashboard:activeTab";
+const MENTOR_SELECTED_TEAM_STORAGE_KEY = "etnova:mentorDashboard:selectedTeamId";
+const MENTOR_SELECTED_REVIEW_PROJECT_STORAGE_KEY = "etnova:mentorDashboard:selectedReviewProjectId";
+
+function getStoredMentorTab() {
+  if (typeof window === "undefined") return "overview";
+  try {
+    const stored = window.sessionStorage.getItem(MENTOR_ACTIVE_TAB_STORAGE_KEY);
+    return MENTOR_TABS.has(stored || "") ? stored : "overview";
+  } catch {
+    return "overview";
+  }
+}
+
+function getStoredMentorSelectedTeamId() {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage.getItem(MENTOR_SELECTED_TEAM_STORAGE_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+function getStoredMentorSelectedReviewProjectId() {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage.getItem(MENTOR_SELECTED_REVIEW_PROJECT_STORAGE_KEY) || null;
+  } catch {
+    return null;
+  }
+}
 
 function normalizeReviewStageName(stageName) {
   const value = String(stageName || "").trim().toLowerCase();
@@ -735,7 +767,7 @@ function Sidebar({ active, setActive, onSignOut, showMyClass, showEvaluation, is
   ];
 
   return (
-    <aside className={`w-72 h-[100dvh] fixed inset-y-0 left-0 bg-white border-r border-slate-100 flex flex-col shadow-[0_8px_30px_rgba(15,23,42,0.1)] flex-shrink-0 overflow-hidden z-40 transform transition-transform duration-300 md:translate-x-0 ${isOpen ? "translate-x-0" : "-translate-x-full"}`}>
+    <aside className={`w-72 h-[100dvh] fixed inset-y-0 left-0 bg-white border-r border-slate-100 flex flex-col shadow-none flex-shrink-0 overflow-hidden z-40 transform transition-transform duration-300 md:translate-x-0 ${isOpen ? "translate-x-0" : "-translate-x-full"}`}>
       <div className="flex items-center gap-3 px-6 py-6 border-b border-slate-100">
         <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#00D2C4] to-[#00a89d] flex items-center justify-center shadow-sm">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -999,7 +1031,27 @@ function OverviewTab({ projects, evaluations, milestones, recentActivity, loadin
 
 // ─── TEAMS TAB ──────────────────────────────────────────────────────────────
 function TeamsTab({ projects, evaluations, loading, mentorId, mentorName }) {
-  const [sel, setSel] = useState(null);
+  const [sel, setSel] = useState(() => getStoredMentorSelectedTeamId());
+
+  useEffect(() => {
+    if (!sel) {
+      try {
+        window.sessionStorage.removeItem(MENTOR_SELECTED_TEAM_STORAGE_KEY);
+      } catch {}
+      return;
+    }
+    try {
+      window.sessionStorage.setItem(MENTOR_SELECTED_TEAM_STORAGE_KEY, sel);
+    } catch {}
+  }, [sel]);
+
+  useEffect(() => {
+    if (loading || !sel) return;
+    const stillExists = projects.some((project) => project.id === sel);
+    if (!stillExists) {
+      setSel(null);
+    }
+  }, [loading, projects, sel]);
 
   if (loading) return <Spinner />;
 
@@ -1100,9 +1152,30 @@ function TeamsTab({ projects, evaluations, loading, mentorId, mentorName }) {
 
 // ─── EVALUATION TAB (ENHANCED) ──────────────────────────────────────────────
 function EvaluationTab({ projects, loading, allowedReviewStages = [], writableReviewStages = [] }) {
-  const [selectedProject, setSelectedProject] = useState(null);
+  const [selectedProjectId, setSelectedProjectId] = useState(() => getStoredMentorSelectedReviewProjectId());
   const [search, setSearch] = useState("");
   const [batchFilter, setBatchFilter] = useState("all"); // "all" | "1" | "2" | "unassigned"
+  const selectedProject = projects.find((project) => project.id === selectedProjectId) || null;
+
+  useEffect(() => {
+    if (!selectedProjectId) {
+      try {
+        window.sessionStorage.removeItem(MENTOR_SELECTED_REVIEW_PROJECT_STORAGE_KEY);
+      } catch {}
+      return;
+    }
+    try {
+      window.sessionStorage.setItem(MENTOR_SELECTED_REVIEW_PROJECT_STORAGE_KEY, selectedProjectId);
+    } catch {}
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    if (loading || !selectedProjectId) return;
+    const stillExists = projects.some((project) => project.id === selectedProjectId);
+    if (!stillExists) {
+      setSelectedProjectId(null);
+    }
+  }, [loading, projects, selectedProjectId]);
 
   // ── derive class name & batch buckets ──────────────────────────────────
   const className = projects.length > 0
@@ -1169,7 +1242,7 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
         <div className="flex items-center gap-2 text-sm">
           <button
             type="button"
-            onClick={() => setSelectedProject(null)}
+            onClick={() => setSelectedProjectId(null)}
             className="text-teal-600 hover:text-teal-700 font-semibold flex items-center gap-1.5"
           >
             <span className="rotate-180 inline-flex"><Icon.ArrowRight /></span>
@@ -1385,7 +1458,7 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
           return (
             <div
               key={project.id}
-              onClick={() => setSelectedProject(project)}
+              onClick={() => setSelectedProjectId(project.id)}
               className="group bg-white rounded-xl border border-gray-100 shadow-[0_1px_2px_rgba(0,0,0,0.02)] hover:shadow-md hover:border-teal-300 transition-all duration-200 p-3 sm:px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer relative overflow-hidden"
             >
               {/* Batch colour accent bar on the left */}
@@ -1464,7 +1537,7 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
 
 // ─── MAIN ──────────────────────────────────────────────────────────────────
 export default function MentorDashboard() {
-  const [active, setActive] = useState("overview");
+  const [active, setActive] = useState(() => getStoredMentorTab());
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [projects, setProjects] = useState([]);
   const [guideProjects, setGuideProjects] = useState([]);
@@ -1483,6 +1556,19 @@ export default function MentorDashboard() {
   const [myClassData, setMyClassData] = useState(null);
   const [myClassLoading, setMyClassLoading] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (MENTOR_TABS.has(active || "")) {
+        window.sessionStorage.setItem(MENTOR_ACTIVE_TAB_STORAGE_KEY, active);
+      } else {
+        window.sessionStorage.removeItem(MENTOR_ACTIVE_TAB_STORAGE_KEY);
+      }
+    } catch {
+      // best-effort persistence only
+    }
+  }, [active]);
 
   const loadCoordinatorClassData = useCallback(async (classId) => {
     return withInflight(coordinatorClassDataInflight, classId, async () => {
@@ -1774,16 +1860,18 @@ export default function MentorDashboard() {
   const isMyClassActive = MY_CLASS_TABS.includes(active);
 
   useEffect(() => {
+    if (loading) return;
     if (!isCoordinatorWithClass && MY_CLASS_TABS.includes(active)) {
       setActive("overview");
     }
-  }, [active, isCoordinatorWithClass]);
+  }, [active, isCoordinatorWithClass, loading]);
 
   useEffect(() => {
+    if (loading) return;
     if (!canOpenEvaluationPanel && active === "evaluation") {
       setActive("overview");
     }
-  }, [active, canOpenEvaluationPanel]);
+  }, [active, canOpenEvaluationPanel, loading]);
 
   useEffect(() => {
     if (!mentorProfile?.is_coordinator || !coordinatorClassId || !isMyClassActive) return undefined;
