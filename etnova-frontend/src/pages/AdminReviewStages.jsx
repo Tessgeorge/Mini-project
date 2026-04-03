@@ -2,10 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import supabase from "../lib/supabase";
 import useAdminAuth from "../hooks/useAdminAuth";
+import useAdminProfilePanel from "../hooks/useAdminProfilePanel";
 import { emitAdminDataUpdated } from "../utils/adminLiveSync";
 import AppFrame from "../components/AppFrame";
 import Sidebar from "../components/admin/Sidebar";
 import TopNavbar from "../components/admin/TopNavbar";
+import AdminProfileSettingsModal from "../components/admin/AdminProfileSettingsModal";
+import ProfileMenu from "../components/ProfileMenu";
 
 function formatDeadline(deadline) {
   if (!deadline) return "-";
@@ -21,6 +24,14 @@ function stageKey(row) {
 export default function AdminReviewStages() {
   const navigate = useNavigate();
   const { loading: authLoading, isAdmin } = useAdminAuth();
+  const {
+    adminProfile,
+    showProfileMenu,
+    setShowProfileMenu,
+    showProfileSettings,
+    setShowProfileSettings,
+    refreshAdminProfile,
+  } = useAdminProfilePanel();
   const [stages, setStages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
@@ -210,12 +221,35 @@ export default function AdminReviewStages() {
       sidebar={<Sidebar activeItem="review-management" onSignOut={handleSignOut} onNavigate={handleNavigate} />}
       header={(
         <TopNavbar
-          adminName="Meenakshi"
+          adminName={adminProfile.full_name || "Admin"}
           academicYearLabel="2026 - S6 Mini Project"
           pageTitle="Review Stages"
           onHomeClick={() => navigate("/admin")}
+          onProfileClick={() => setShowProfileMenu((value) => !value)}
         />
       )}
+      headerOverlay={showProfileMenu ? (
+        <div className="fixed top-14 right-2 sm:right-6 md:right-8 z-50">
+          <ProfileMenu
+            profile={adminProfile}
+            isOpen={showProfileMenu}
+            onClose={() => setShowProfileMenu(false)}
+            onLogout={handleSignOut}
+            onEditProfile={() => {
+              setShowProfileMenu(false);
+              setShowProfileSettings(true);
+            }}
+            roleLabel="Administrator"
+            roleIcon="admin_panel_settings"
+            infoItems={[
+              { label: "Full Name", value: adminProfile.full_name || "-" },
+              { label: "Email", value: adminProfile.email || "-" },
+              { label: "Role", value: "Administrator" },
+              { label: "Department", value: adminProfile.department || "-" },
+            ]}
+          />
+        </div>
+      ) : null}
     >
       <section className="p-6">
       <div className="max-w-7xl mx-auto bg-white/90 rounded-2xl shadow-sm border border-slate-200/70 p-6 space-y-6">
@@ -277,6 +311,11 @@ export default function AdminReviewStages() {
         </div>
       </div>
       </section>
+      <AdminProfileSettingsModal
+        isOpen={showProfileSettings}
+        onClose={() => setShowProfileSettings(false)}
+        onSuccess={refreshAdminProfile}
+      />
     </AppFrame>
   );
 }

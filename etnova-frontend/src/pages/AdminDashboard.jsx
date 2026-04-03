@@ -375,7 +375,7 @@ export default function AdminDashboard() {
       <div className="p-4 md:p-6 lg:p-8 space-y-6">
           <section className="glass-card p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-semibold text-slate-800">Good Evening, Dr. {adminName}</h1>
+              <h1 className="text-2xl font-semibold text-slate-800">Good Evening, {adminName}</h1>
               <p className="text-slate-500 mt-1 text-sm">{adminDepartment} Department - Project Evaluation Control Panel</p>
             </div>
             <div className="text-sm sm:text-right text-slate-500">
@@ -536,7 +536,10 @@ export default function AdminDashboard() {
             </div>
           </SectionCard>
 
-          <PublishPanel verificationStatus="All review sheets verified by HOD panel" />
+          <PublishPanel
+            verificationStatus="All review sheets verified by HOD panel"
+            onPublishClick={() => navigate("/admin/rubrics#final-results")}
+          />
 
       </div>
       <AdminProfileSettingsModal

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import supabase from "../config/supabaseClient";
+import useAdminProfilePanel from "../hooks/useAdminProfilePanel";
 import AppFrame from "../components/AppFrame";
 import Sidebar from "../components/admin/Sidebar";
 import TopNavbar from "../components/admin/TopNavbar";
@@ -8,6 +9,8 @@ import ReviewTimeline from "../components/admin/ReviewTimeline";
 import StageTable from "../components/admin/StageTable";
 import DeadlineModal from "../components/admin/DeadlineModal";
 import StageStatCard from "../components/admin/StageStatCard";
+import AdminProfileSettingsModal from "../components/admin/AdminProfileSettingsModal";
+import ProfileMenu from "../components/ProfileMenu";
 import Modal from "../components/Modal";
 import { emitAdminDataUpdated } from "../utils/adminLiveSync";
 import { subscribeWithDeferredCleanup } from "../utils/realtimeChannel";
@@ -170,6 +173,14 @@ async function fetchProjectCount(classId) {
 
 export default function AdminReviewManagement() {
   const navigate = useNavigate();
+  const {
+    adminProfile,
+    showProfileMenu,
+    setShowProfileMenu,
+    showProfileSettings,
+    setShowProfileSettings,
+    refreshAdminProfile,
+  } = useAdminProfilePanel();
   const [searchParams] = useSearchParams();
   const searchClassParam = searchParams.get("class") || "";
   const latestRefreshTokenRef = useRef(0);
@@ -791,7 +802,7 @@ export default function AdminReviewManagement() {
             coordinator_deadline: null,
             is_active: false,
             is_completed: false,
-            is_locked: false,
+            is_locked: true,
           });
 
         if (insertError) {
@@ -941,7 +952,6 @@ export default function AdminReviewManagement() {
       const isFutureDeadline = !Number.isNaN(deadlineDate.getTime()) && deadlineDate.getTime() > Date.now();
       const updatePayload = { coordinator_deadline: deadlineIso };
       if (isFutureDeadline) {
-        updatePayload.is_locked = false;
         if (stage?.statusValue === STATUS.LOCKED || stage?.statusValue === STATUS.PENDING) {
           updatePayload.is_completed = false;
           updatePayload.is_active = false;
@@ -1013,12 +1023,35 @@ export default function AdminReviewManagement() {
       )}
       header={(
         <TopNavbar
-          adminName={ADMIN_NAME}
+          adminName={adminProfile.full_name || ADMIN_NAME}
           academicYearLabel="2026 - S6 Mini Project"
           pageTitle="Review Management"
           onHomeClick={() => navigate("/admin")}
+          onProfileClick={() => setShowProfileMenu((value) => !value)}
         />
       )}
+      headerOverlay={showProfileMenu ? (
+        <div className="fixed top-14 right-2 sm:right-6 md:right-8 z-50">
+          <ProfileMenu
+            profile={adminProfile}
+            isOpen={showProfileMenu}
+            onClose={() => setShowProfileMenu(false)}
+            onLogout={handleSignOut}
+            onEditProfile={() => {
+              setShowProfileMenu(false);
+              setShowProfileSettings(true);
+            }}
+            roleLabel="Administrator"
+            roleIcon="admin_panel_settings"
+            infoItems={[
+              { label: "Full Name", value: adminProfile.full_name || "-" },
+              { label: "Email", value: adminProfile.email || "-" },
+              { label: "Role", value: "Administrator" },
+              { label: "Department", value: adminProfile.department || "-" },
+            ]}
+          />
+        </div>
+      ) : null}
     >
       <div className="p-4 md:p-6 lg:p-8 space-y-6">
           <section className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
@@ -1180,6 +1213,11 @@ export default function AdminReviewManagement() {
         saving={savingDeadline}
         onClose={resetDeadlineModal}
         onSave={handleSaveDeadline}
+      />
+      <AdminProfileSettingsModal
+        isOpen={showProfileSettings}
+        onClose={() => setShowProfileSettings(false)}
+        onSuccess={refreshAdminProfile}
       />
     </AppFrame>
   );

@@ -10,6 +10,7 @@ export const EVALUATION_STAGE_CONFIG = {
 
 const STAGE_ORDER = ['review', 'guide', 'ese'];
 const REVIEW_ROUNDS = ['zeroth_review', 'first_review', 'second_review', 'final_review'];
+const REVIEW_TOTAL_ROUNDS = ['zeroth_review', 'first_review', 'second_review'];
 const INTERNAL_LIMITS = {
   attendance: 10,
   report: 10,
@@ -113,6 +114,55 @@ const buildReviewRoundAverages = async (rows = []) => {
   return roundAverages;
 };
 
+const getCompletedEvaluatorRows = (rows = [], expectedRubricCount = 0) => {
+  if (!expectedRubricCount || expectedRubricCount <= 0) return [];
+
+  const evaluatorBuckets = new Map();
+  (rows || []).forEach((row) => {
+    const evaluatorKey = row.evaluator_id || 'anonymous';
+    if (!evaluatorBuckets.has(evaluatorKey)) {
+      evaluatorBuckets.set(evaluatorKey, {
+        rows: [],
+        rubricIds: new Set(),
+      });
+    }
+    const bucket = evaluatorBuckets.get(evaluatorKey);
+    bucket.rows.push(row);
+    if (row.rubric_id) bucket.rubricIds.add(row.rubric_id);
+  });
+
+  return [...evaluatorBuckets.values()]
+    .filter((bucket) => bucket.rubricIds.size === expectedRubricCount)
+    .flatMap((bucket) => bucket.rows);
+};
+
+const buildSimpleStageAverageTotal = async ({ stage, studentId }) => {
+  const rubrics = await getActiveRubricsByStage(stage);
+  const expectedRubricCount = rubrics.length;
+  if (expectedRubricCount === 0) return 0;
+
+  const { data, error } = await supabase
+    .from(EVALUATION_STAGE_CONFIG[stage].table)
+    .select('rubric_id, marks, evaluator_id')
+    .eq('student_id', studentId);
+
+  if (error) throw error;
+
+  const completedRows = getCompletedEvaluatorRows(data || [], expectedRubricCount);
+  if (completedRows.length === 0) return 0;
+
+  const evaluatorTotals = new Map();
+  completedRows.forEach((row) => {
+    const evaluatorKey = row.evaluator_id || 'anonymous';
+    evaluatorTotals.set(evaluatorKey, (evaluatorTotals.get(evaluatorKey) || 0) + Number(row.marks || 0));
+  });
+
+  const totals = [...evaluatorTotals.values()];
+  return totals.length
+    ? roundMarks(totals.reduce((sum, value) => sum + value, 0) / totals.length)
+    : 0;
+};
+
 const createNotifications = async (rows) => {
   const validRows = (rows || []).filter((row) => row?.user_id && row?.title && row?.message && row?.type);
   if (!validRows.length) return;
@@ -201,15 +251,24 @@ export const publishCoordinatorMarks = async ({ classId, publishType }) => {
 };
 
 const getClassStudentIds = async (classId) => {
-  const { data: projects, error: projectError } = await supabase
-    .from('projects')
-    .select('id')
-    .eq('class_id', classId);
+  const [{ data: projects, error: projectError }, { data: classProfiles, error: profileError }] = await Promise.all([
+    supabase
+      .from('projects')
+      .select('id')
+      .eq('class_id', classId),
+    supabase
+      .from('profiles')
+      .select('id')
+      .eq('role', 'student')
+      .eq('class_id', classId),
+  ]);
 
   if (projectError) throw projectError;
+  if (profileError) throw profileError;
 
+  const profileIds = (classProfiles || []).map((row) => row.id).filter(Boolean);
   const projectIds = (projects || []).map((row) => row.id);
-  if (projectIds.length === 0) return [];
+  if (projectIds.length === 0) return [...new Set(profileIds)];
 
   const { data: teamMembers, error: teamError } = await supabase
     .from('team_members')
@@ -217,7 +276,10 @@ const getClassStudentIds = async (classId) => {
     .in('project_id', projectIds);
 
   if (teamError) throw teamError;
-  return [...new Set((teamMembers || []).map((row) => row.student_id).filter(Boolean))];
+  return [...new Set([
+    ...profileIds,
+    ...(teamMembers || []).map((row) => row.student_id).filter(Boolean),
+  ])];
 };
 
 const getProjectRow = async (projectId) => {
@@ -415,6 +477,10 @@ const getFinalResultRow = async (studentId) => {
 };
 
 const sumSimpleStageMarks = async ({ stage, studentId }) => {
+  if (stage === 'ese') {
+    return buildSimpleStageAverageTotal({ stage, studentId });
+  }
+
   const tableName = EVALUATION_STAGE_CONFIG[stage].table;
   const { data, error } = await supabase
     .from(tableName)
@@ -437,6 +503,7 @@ const calculateReviewTotal = async (studentId) => {
   const roundAverages = await buildReviewRoundAverages(data || []);
 
   const completedRoundValues = REVIEW_ROUNDS
+    .filter((reviewStage) => REVIEW_TOTAL_ROUNDS.includes(reviewStage))
     .map((reviewStage) => roundAverages[reviewStage])
     .filter((value) => value != null);
 
@@ -840,6 +907,28 @@ export const upsertStageMarks = async ({ stage, projectId, evaluatorId, entries,
       .insert(rows);
 
     if (insertError) throw insertError;
+  } else if (normalizedStage === 'ese') {
+    const affectedStudents = [...new Set(rows.map((row) => row.student_id))];
+    const rubricIds = [...new Set(rows.map((row) => row.rubric_id).filter(Boolean))];
+
+    let deleteQuery = supabase
+      .from(table)
+      .delete()
+      .eq('evaluator_id', evaluatorId)
+      .in('student_id', affectedStudents);
+
+    if (rubricIds.length > 0) {
+      deleteQuery = deleteQuery.in('rubric_id', rubricIds);
+    }
+
+    const { error: deleteError } = await deleteQuery;
+    if (deleteError) throw deleteError;
+
+    const { error: insertError } = await supabase
+      .from(table)
+      .insert(rows);
+
+    if (insertError) throw insertError;
   } else {
     const { error } = await supabase
       .from(table)
@@ -932,6 +1021,9 @@ export const getProjectStageBreakdown = async ({ projectId, stage, reviewStage =
     rubrics,
     students: (students || []).map((student) => {
       const studentMarks = marksByStudent.get(student.id) || [];
+      const completedEseRows = normalizedStage === 'ese' && coordinatorView
+        ? getCompletedEvaluatorRows(studentMarks, rubrics.length)
+        : studentMarks;
       return {
         student_id: student.id,
         full_name: student.full_name,
@@ -954,7 +1046,8 @@ export const getProjectStageBreakdown = async ({ projectId, stage, reviewStage =
             };
           }
 
-          const rubricRows = studentMarks.filter((row) => row.rubric_id === rubric.id);
+          const rubricRowsSource = normalizedStage === 'ese' && coordinatorView ? completedEseRows : studentMarks;
+          const rubricRows = rubricRowsSource.filter((row) => row.rubric_id === rubric.id);
           const directMatch = rubricRows[0] || null;
           const averageMarks = rubricRows.length
             ? roundMarks(rubricRows.reduce((sum, row) => sum + Number(row.marks || 0), 0) / rubricRows.length)
@@ -1199,7 +1292,7 @@ const getSimpleStageBreakdownForClassProjects = async ({ stage, projectIds }) =>
 
   const { data: marksRows, error: marksError } = await supabase
     .from(table)
-    .select('student_id, rubric_id, marks')
+    .select('student_id, rubric_id, marks, evaluator_id')
     .in('student_id', studentIds);
 
   if (marksError) throw marksError;
@@ -1207,6 +1300,9 @@ const getSimpleStageBreakdownForClassProjects = async ({ stage, projectIds }) =>
   const map = {};
   studentIds.forEach((studentId) => {
     const studentMarks = (marksRows || []).filter((row) => row.student_id === studentId);
+    const completedEseRows = normalizedStage === 'ese'
+      ? getCompletedEvaluatorRows(studentMarks, rubrics.length)
+      : studentMarks;
     map[studentId] = rubrics.map((rubric) => {
       if (normalizedStage === 'guide') {
         return {
@@ -1217,7 +1313,8 @@ const getSimpleStageBreakdownForClassProjects = async ({ stage, projectIds }) =>
         };
       }
 
-      const matches = studentMarks.filter((mark) => mark.rubric_id === rubric.id);
+      const sourceRows = normalizedStage === 'ese' ? completedEseRows : studentMarks;
+      const matches = sourceRows.filter((mark) => mark.rubric_id === rubric.id);
       return {
         rubric_id: rubric.id,
         rubric_title: rubric.title,
@@ -1233,26 +1330,36 @@ const getSimpleStageBreakdownForClassProjects = async ({ stage, projectIds }) =>
 export const getCoordinatorFinalResults = async (classId) => {
   await recalculateClassFinalResults(classId);
 
-  const { data: projects, error: projectError } = await supabase
-    .from('projects')
-    .select('id, title')
-    .eq('class_id', classId);
+  const [{ data: projects, error: projectError }, { data: classProfiles, error: classProfileError }] = await Promise.all([
+    supabase
+      .from('projects')
+      .select('id, title')
+      .eq('class_id', classId),
+    supabase
+      .from('profiles')
+      .select('id, full_name, roll_number')
+      .eq('role', 'student')
+      .eq('class_id', classId),
+  ]);
 
   if (projectError) throw projectError;
+  if (classProfileError) throw classProfileError;
 
   const projectIds = (projects || []).map((row) => row.id);
-  if (projectIds.length === 0) return [];
+  let teamMembers = [];
+  if (projectIds.length > 0) {
+    const { data, error: teamError } = await supabase
+      .from('team_members')
+      .select('project_id, student_id')
+      .in('project_id', projectIds);
 
-  const { data: teamMembers, error: teamError } = await supabase
-    .from('team_members')
-    .select('project_id, student_id')
-    .in('project_id', projectIds);
-
-  if (teamError) throw teamError;
+    if (teamError) throw teamError;
+    teamMembers = data || [];
+  }
 
   const projectTitleMap = new Map((projects || []).map((row) => [row.id, row.title]));
   const studentProjectMap = new Map();
-  const studentIds = [];
+  const studentIds = (classProfiles || []).map((row) => row.id).filter(Boolean);
 
   (teamMembers || []).forEach((row) => {
     if (!row.student_id) return;
@@ -1261,12 +1368,22 @@ export const getCoordinatorFinalResults = async (classId) => {
   });
 
   const uniqueStudentIds = [...new Set(studentIds)];
-  const { data: profiles, error: profileError } = await supabase
-    .from('profiles')
-    .select('id, full_name, roll_number')
-    .in('id', uniqueStudentIds);
+  if (uniqueStudentIds.length === 0) return [];
 
-  if (profileError) throw profileError;
+  const profiles = classProfiles && classProfiles.length === uniqueStudentIds.length
+    ? classProfiles
+    : (() => { return null; })();
+
+  let resolvedProfiles = profiles;
+  if (!resolvedProfiles) {
+    const { data, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, full_name, roll_number')
+      .in('id', uniqueStudentIds);
+
+    if (profileError) throw profileError;
+    resolvedProfiles = data || [];
+  }
 
   const { data: finalRows, error: finalError } = await supabase
     .from('final_results')
@@ -1275,7 +1392,7 @@ export const getCoordinatorFinalResults = async (classId) => {
 
   if (finalError) throw finalError;
 
-  const profileMap = new Map((profiles || []).map((row) => [row.id, row]));
+  const profileMap = new Map((resolvedProfiles || []).map((row) => [row.id, row]));
   const finalMap = new Map((finalRows || []).map((row) => [row.student_id, row]));
   const [reviewRoundsMap, guideMap, eseMap] = await Promise.all([
     getReviewRoundBreakdownForClassProjects({ projectIds }),
