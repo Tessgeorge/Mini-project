@@ -744,6 +744,7 @@ export default function StudentDashboard() {
         <TopBar
           title="Dashboard"
           subtitle="Home"
+          onSubtitleClick={() => navigate("/student/dashboard")}
           profile={profile}
           searchValue={searchTerm}
           onSearchChange={setSearchTerm}

@@ -213,6 +213,7 @@ export default function AdminReviewStages() {
           adminName="Meenakshi"
           academicYearLabel="2026 - S6 Mini Project"
           pageTitle="Review Stages"
+          onHomeClick={() => navigate("/admin")}
         />
       )}
     >

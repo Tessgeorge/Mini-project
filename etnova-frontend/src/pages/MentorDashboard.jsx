@@ -839,7 +839,7 @@ function Sidebar({ active, setActive, onSignOut, showMyClass, showEvaluation, is
   );
 }
 
-function Topbar({ active, mentorName, onProfileClick, onToggleSidebar }) {
+function Topbar({ active, mentorName, onProfileClick, onToggleSidebar, onNavigateHome }) {
   const labels = {
     overview:                "Dashboard",
     teams:                   "My Teams",
@@ -856,7 +856,19 @@ function Topbar({ active, mentorName, onProfileClick, onToggleSidebar }) {
         <button onClick={onToggleSidebar} className="md:hidden p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors">
           <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
         </button>
-        <span className="hidden sm:inline">Home</span><Icon.ChevronRight className="hidden sm:inline" />
+        <button
+          type="button"
+          onClick={onNavigateHome}
+          disabled={active === "overview"}
+          className={`hidden sm:inline transition-colors ${
+            active === "overview"
+              ? "cursor-default text-gray-400"
+              : "text-gray-400 hover:text-teal-600"
+          }`}
+        >
+          Home
+        </button>
+        <Icon.ChevronRight className="hidden sm:inline" />
         <span className="text-gray-700 font-semibold">{labels[active]}</span>
       </div>
       <button onClick={onProfileClick}
@@ -1030,20 +1042,8 @@ function OverviewTab({ projects, evaluations, milestones, recentActivity, loadin
 }
 
 // ─── TEAMS TAB ──────────────────────────────────────────────────────────────
-function TeamsTab({ projects, evaluations, loading, mentorId, mentorName }) {
-  const [sel, setSel] = useState(() => getStoredMentorSelectedTeamId());
-
-  useEffect(() => {
-    if (!sel) {
-      try {
-        window.sessionStorage.removeItem(MENTOR_SELECTED_TEAM_STORAGE_KEY);
-      } catch {}
-      return;
-    }
-    try {
-      window.sessionStorage.setItem(MENTOR_SELECTED_TEAM_STORAGE_KEY, sel);
-    } catch {}
-  }, [sel]);
+function TeamsTab({ projects, evaluations, loading, mentorId, mentorName, onNavigateHome }) {
+  const [sel, setSel] = useState(null);
 
   useEffect(() => {
     if (loading || !sel) return;
@@ -1064,6 +1064,7 @@ function TeamsTab({ projects, evaluations, loading, mentorId, mentorName }) {
           proj={proj}
           mentorId={mentorId}
           mentorName={mentorName}
+          onNavigateHome={onNavigateHome}
           onBack={() => setSel(null)}
         />
       </Suspense>
@@ -1570,6 +1571,15 @@ export default function MentorDashboard() {
     }
   }, [active]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.sessionStorage.removeItem(MENTOR_SELECTED_TEAM_STORAGE_KEY);
+    } catch {
+      // best-effort cleanup only
+    }
+  }, [active]);
+
   const loadCoordinatorClassData = useCallback(async (classId) => {
     return withInflight(coordinatorClassDataInflight, classId, async () => {
       const [{ data: classRow }, { data: classProjects }, { data: reviewStageRows, error: reviewStageError }] = await Promise.all([
@@ -1960,7 +1970,7 @@ export default function MentorDashboard() {
       <Sidebar active={active} setActive={(k) => { setActive(k); setIsSidebarOpen(false); }} onSignOut={handleSignOut} showMyClass={isCoordinatorWithClass} showEvaluation={canOpenEvaluationPanel} isOpen={isSidebarOpen} />
       <div className="flex-1 min-w-0 md:ml-72 h-[100dvh] flex flex-col overflow-hidden">
         <div className="relative">
-          <Topbar active={active} mentorName={mentorProfile?.full_name} showMyClass={isCoordinatorWithClass} onProfileClick={() => setShowProfileMenu(v => !v)} onToggleSidebar={() => setIsSidebarOpen(true)} />
+          <Topbar active={active} mentorName={mentorProfile?.full_name} showMyClass={isCoordinatorWithClass} onProfileClick={() => setShowProfileMenu(v => !v)} onToggleSidebar={() => setIsSidebarOpen(true)} onNavigateHome={() => setActive("overview")} />
           {showProfileMenu && (
             <div className="fixed top-14 right-2 sm:right-6 md:right-8 z-50">
               <ProfileMenu
@@ -1989,7 +1999,8 @@ export default function MentorDashboard() {
           )}
           {active === "teams" && (
             <TeamsTab projects={guideProjects} evaluations={evaluations} loading={loading}
-              onStartReview={handleSubmitReview} mentorId={mentorProfile?.id} mentorName={mentorProfile?.full_name} />
+              onStartReview={handleSubmitReview} mentorId={mentorProfile?.id} mentorName={mentorProfile?.full_name}
+              onNavigateHome={() => setActive("overview")} />
           )}
           {active === "evaluation" && canOpenEvaluationPanel && (
             <EvaluationTab

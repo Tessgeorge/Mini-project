@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 export default function TopBar({
   title,
   subtitle = "Home",
+  onSubtitleClick,
   profile,
   onProfileClick,
   notificationCount = 0,
@@ -38,7 +39,17 @@ export default function TopBar({
   return (
     <header className="glass-topbar flex items-center justify-between px-4 sm:px-6 md:px-8 py-3.5 sticky top-0 z-10 w-full">
       <div className="flex items-center gap-2 text-sm min-w-0">
-        <span className="text-slate-400 font-medium hidden sm:inline">{subtitle}</span>
+        {onSubtitleClick ? (
+          <button
+            type="button"
+            onClick={onSubtitleClick}
+            className="text-slate-400 font-medium hidden sm:inline transition-colors hover:text-slate-600"
+          >
+            {subtitle}
+          </button>
+        ) : (
+          <span className="text-slate-400 font-medium hidden sm:inline">{subtitle}</span>
+        )}
         <span className="material-symbols-outlined text-xs text-slate-300 hidden sm:inline">chevron_right</span>
         <span className="font-bold text-slate-800 truncate">{title}</span>
       </div>

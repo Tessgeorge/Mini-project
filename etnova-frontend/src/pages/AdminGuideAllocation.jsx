@@ -450,6 +450,7 @@ export default function AdminGuideAllocation() {
           adminName={ADMIN_NAME}
           academicYearLabel="2026 - S6 Mini Project"
           pageTitle="Guide Allocation"
+          onHomeClick={() => navigate("/admin")}
         />
       )}
     >

@@ -1724,7 +1724,7 @@ const TABS = [
   { key: "activity", label: "Activity", Icon: Ic.Activity },
 ];
 
-export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
+export default function TeamWorkspace({ proj, mentorId, mentorName, onBack, onNavigateHome }) {
   const [tab, setTab] = useState("overview");
   const [evaluations, setEvaluations] = useState([]);
   const [documents, setDocuments] = useState([]);
@@ -1896,7 +1896,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack }) {
         <div className={isDiscussionTab ? "px-5 pt-4 pb-0" : "px-7 pt-6 pb-0"}>
           {/* Breadcrumb */}
           <nav className={`flex items-center gap-2 ${isDiscussionTab ? "text-xs mb-3" : "text-sm mb-5"}`}>
-            <button onClick={onBack} className="text-teal-300 hover:text-teal-200 font-semibold transition-colors">Home</button>
+            <button onClick={() => (onNavigateHome || onBack)?.()} className="text-teal-300 hover:text-teal-200 font-semibold transition-colors">Home</button>
             <span className="text-slate-500">/</span>
             <button onClick={onBack} className="text-teal-300 hover:text-teal-200 font-semibold transition-colors">Teams</button>
             <span className="text-slate-500">/</span>
