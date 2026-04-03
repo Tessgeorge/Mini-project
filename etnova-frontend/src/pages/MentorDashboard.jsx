@@ -768,7 +768,7 @@ function Sidebar({ active, setActive, onSignOut, showMyClass, showEvaluation, is
 
   return (
     <aside className={`w-72 h-[100dvh] fixed inset-y-0 left-0 bg-white border-r border-slate-100 flex flex-col shadow-none flex-shrink-0 overflow-hidden z-40 transform transition-transform duration-300 md:translate-x-0 ${isOpen ? "translate-x-0" : "-translate-x-full"}`}>
-      <div className="flex items-center gap-3 px-6 py-6 border-b border-slate-100">
+      <div className="flex items-center gap-3 px-6 py-6">
         <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#00D2C4] to-[#00a89d] flex items-center justify-center shadow-sm">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
