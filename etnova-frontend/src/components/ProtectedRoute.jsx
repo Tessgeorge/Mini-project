@@ -20,6 +20,14 @@ export default function ProtectedRoute({ allowedRoles, children }) {
     return <Navigate to="/signin" replace />
   }
 
+  if (normalizedAllowedRoles.length > 0 && !role) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#F4F8F8] text-muted">
+        Restoring session...
+      </div>
+    )
+  }
+
   if (normalizedAllowedRoles.length > 0 && !normalizedAllowedRoles.includes(role)) {
     return <Navigate to="/signin" replace />
   }
