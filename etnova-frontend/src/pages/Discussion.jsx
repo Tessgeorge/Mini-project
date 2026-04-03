@@ -65,6 +65,7 @@ export default function Discussion({
   initialProject = null,
   initialMembers = null,
   initialTitle = "",
+  embedded = false,
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -850,7 +851,7 @@ export default function Discussion({
   const typingList = Object.values(typingUsers);
 
   if (loading) return (
-    <div className="etnova-bg min-h-screen flex items-center justify-center">
+    <div className={`etnova-bg ${embedded ? "h-full min-h-0" : "min-h-screen"} flex items-center justify-center`}>
       <div className="text-center">
         <div className="size-12 border-4 border-white/30 border-t-[#00C4B4] rounded-full animate-spin mx-auto" />
         <p className="mt-4 text-slate-600 text-sm font-semibold">Loading chat...</p>
@@ -858,13 +859,13 @@ export default function Discussion({
     </div>
   );
   if (!project) return (
-    <div className="etnova-bg min-h-screen flex items-center justify-center text-slate-500 text-sm">No project found.</div>
+    <div className={`etnova-bg ${embedded ? "h-full min-h-0" : "min-h-screen"} flex items-center justify-center text-slate-500 text-sm`}>No project found.</div>
   );
 
   /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
   return (
-    <div className="h-full etnova-bg p-3 md:p-4">
-      <div className="h-full flex overflow-hidden rounded-3xl border border-white/75 shadow-[0_20px_60px_rgba(15,23,42,0.10)] bg-white/35 backdrop-blur-[6px]">
+    <div className={`h-full etnova-bg p-3 md:p-4 ${embedded ? "min-h-0" : ""}`}>
+      <div className="h-full min-h-0 flex overflow-hidden rounded-3xl border border-white/75 shadow-[0_20px_60px_rgba(15,23,42,0.10)] bg-white/35 backdrop-blur-[6px]">
 
       {/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ LEFT SIDEBAR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div className="w-[300px] flex-shrink-0 flex flex-col glass-sidebar border-r border-white/70 overflow-hidden">
@@ -931,7 +932,7 @@ export default function Discussion({
       </div>
 
       {/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ CHAT PANEL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-white/35 relative">
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-white/35 relative">
 
         {/* Chat header */}
         <div className="flex-shrink-0 flex items-center gap-3 px-5 py-3.5 border-b border-white/70"
