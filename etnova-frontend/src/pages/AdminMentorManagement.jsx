@@ -460,7 +460,7 @@ export default function AdminMentorManagement() {
       return;
     }
     if (itemId === "review-management") {
-      navigate("/admin/review-stages");
+      navigate("/admin/review-management");
       return;
     }
     if (itemId === "rubrics-management") {

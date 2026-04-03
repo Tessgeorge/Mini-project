@@ -12,7 +12,6 @@ const AdminMentorManagement = lazy(() => import('./pages/AdminMentorManagement')
 const AdminReviewManagement = lazy(() => import('./pages/AdminReviewManagement'))
 const AdminRubrics = lazy(() => import('./pages/AdminRubrics'))
 const AdminClasses = lazy(() => import('./pages/AdminClasses'))
-const AdminReviewStages = lazy(() => import('./pages/AdminReviewStages'))
 const StudentLayout = lazy(() => import('./components/StudentLayout'))
 const StudentDashboard = lazy(() => import('./pages/StudentDashboard'))
 const IdeaWorkspace = lazy(() => import('./pages/IdeaWorkspace'))
@@ -124,7 +123,7 @@ function App() {
             path="/admin/review-stages"
             element={
               <ProtectedRoute allowedRoles={['admin']}>
-                <AdminReviewStages />
+                <Navigate to="/admin/review-management" replace />
               </ProtectedRoute>
             }
           />
