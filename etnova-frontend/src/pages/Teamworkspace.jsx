@@ -1095,8 +1095,8 @@ function TabOverview({ proj, evaluations, members, documents, onAddReview, onNav
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
         {[
           { label: "Members", value: members.length, color: "text-teal-500", bg: "bg-teal-50", border: "border-teal-100" },
-          { label: "Reviews", value: evaluations.length, color: "text-blue-500", bg: "bg-blue-50", border: "border-blue-100" },
-          { label: "Avg Score", value: avg ? avg + "%" : "—", color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-100" },
+          { label: "Submissions", value: documents.length, color: "text-blue-500", bg: "bg-blue-50", border: "border-blue-100" },
+          { label: "Progress", value: `${workflowSnapshot.progressPercent || 0}%`, color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-100" },
           { label: "Current Step", value: workflowSnapshot.label, color: "text-purple-600", bg: "bg-purple-50", border: "border-purple-100" },
         ].map(s => (
           <div key={s.label} className={`${s.bg} ${s.border} rounded-2xl p-4 border shadow-sm`}>
@@ -1683,7 +1683,8 @@ function TabEvaluation({ projId, members, markingEnabled }) {
 
 function TabActivity({ evaluations, documents }) {
   const items = [
-    ...evaluations.map(e => ({ emoji: "🎯", time: e.created_at, title: "Evaluation submitted — " + e.phase, sub: "Score: " + (e.score || 0) + "/100", color: "bg-blue-50 border-blue-100", dot: "bg-blue-400" })),
+    // Note: We deliberately exclude legacy evaluation scores from the activity feed
+    // since final results are managed via the rubric system and published by coordinators.
     ...documents.map(d => ({ emoji: "📄", time: d.uploaded_at, title: "Document uploaded — " + (d.file_name || "file"), sub: "by " + (d.profiles?.full_name || "Team member") + " · " + (d.status || "submitted"), color: "bg-teal-50 border-teal-100", dot: "bg-teal-400" })),
   ].sort((a, b) => new Date(b.time) - new Date(a.time));
 
