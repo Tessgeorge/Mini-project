@@ -654,7 +654,7 @@ export const getAdminDashboardData = async (req, res) => {
 
 export const getAdminGuideAllocationData = async (req, res) => {
   try {
-    const [mentorResult, projectResult, studentClassResult] = await Promise.all([
+    const [mentorResult, projectResult, classResult] = await Promise.all([
       supabase
         .from('profiles')
         .select('id, full_name, email, department, specialization, domains_of_interest, max_team_capacity')
@@ -674,6 +674,7 @@ export const getAdminGuideAllocationData = async (req, res) => {
             project_id,
             student_id,
             profiles:student_id (
+              class_id,
               class_section,
               department
             )
@@ -681,16 +682,14 @@ export const getAdminGuideAllocationData = async (req, res) => {
         `)
         .order('title', { ascending: true }),
       supabase
-        .from('profiles')
-        .select('class_section')
-        .eq('role', 'student')
-        .not('class_section', 'is', null)
+        .from('classes')
+        .select('id, class_section')
         .order('class_section', { ascending: true }),
     ]);
 
     if (mentorResult.error) throw mentorResult.error;
     if (projectResult.error) throw projectResult.error;
-    if (studentClassResult.error) throw studentClassResult.error;
+    if (classResult.error) throw classResult.error;
 
     const projectRows = projectResult.data || [];
     const projectIds = projectRows.map((row) => row.id).filter(Boolean);
@@ -728,6 +727,13 @@ export const getAdminGuideAllocationData = async (req, res) => {
     const guideNameById = new Map((guideRows || []).map((row) => [row.id, row.full_name || '']));
     const ideaById = new Map((ideaRows || []).map((row) => [row.id, row]));
     const allocationByProject = new Map();
+    const classRows = (classResult.data || []).map((row) => ({
+      id: row.id,
+      class_name: String(row.class_section || '').trim(),
+      class_key: normalizeClassSectionInput(row.class_section),
+    }));
+    const classById = new Map(classRows.map((row) => [row.id, row]));
+    const classByKey = new Map(classRows.map((row) => [String(row.class_key || '').trim(), row]));
 
     (allocationRows || []).forEach((row) => {
       if (!row?.project_id || allocationByProject.has(row.project_id)) return;
@@ -744,23 +750,18 @@ export const getAdminGuideAllocationData = async (req, res) => {
       max_team_capacity: getRecommendationMentorCapacity(mentor),
     }));
 
-    const classSections = [...new Set(
-      (studentClassResult.data || [])
-        .map((row) => String(row.class_section || '').trim())
-        .filter(Boolean)
-    )]
-      .sort((a, b) => a.localeCompare(b))
-      .map((value) => ({ id: value, class_name: value }));
-
     const projects = projectRows.map((project) => {
       const allocation = allocationByProject.get(project.id) || null;
       const members = Array.isArray(project.team_members) ? project.team_members : [];
-      const classSection = members
-        .map((member) => {
-          const profile = Array.isArray(member?.profiles) ? member.profiles[0] : member?.profiles;
-          return String(profile?.class_section || '').trim();
-        })
-        .find(Boolean) || '';
+      const classProfile = members
+        .map((member) => (Array.isArray(member?.profiles) ? member.profiles[0] : member?.profiles))
+        .find(Boolean) || null;
+      const normalizedClassSection = normalizeClassSectionInput(classProfile?.class_section);
+      const matchedClass = (
+        (classProfile?.class_id && classById.get(classProfile.class_id))
+        || (normalizedClassSection ? classByKey.get(normalizedClassSection) : null)
+        || null
+      );
       const teamDepartment = members
         .map((member) => {
           const profile = Array.isArray(member?.profiles) ? member.profiles[0] : member?.profiles;
@@ -781,8 +782,8 @@ export const getAdminGuideAllocationData = async (req, res) => {
         technologies: Array.isArray(detectedIdea?.technologies) ? detectedIdea.technologies : [],
         idea_title: detectedIdea?.title || '',
         team_department: teamDepartment,
-        class_id: classSection || null,
-        class_name: classSection,
+        class_id: matchedClass?.id || classProfile?.class_id || null,
+        class_name: matchedClass?.class_name || String(classProfile?.class_section || '').trim(),
         allocated_guide_id: allocation?.guide_id || null,
         allocated_guide_name: guideNameById.get(allocation?.guide_id) || '',
       };
@@ -791,7 +792,7 @@ export const getAdminGuideAllocationData = async (req, res) => {
     res.json({
       mentors,
       projects,
-      classes: classSections,
+      classes: classRows.map(({ id, class_name }) => ({ id, class_name })),
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

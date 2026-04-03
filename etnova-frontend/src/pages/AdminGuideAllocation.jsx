@@ -6,6 +6,7 @@ import AppFrame from "../components/AppFrame";
 import Sidebar from "../components/admin/Sidebar";
 import TopNavbar from "../components/admin/TopNavbar";
 import AllocationSummary from "../components/admin/AllocationSummary";
+import { subscribeWithDeferredCleanup } from "../utils/realtimeChannel";
 
 const ADMIN_NAME = "Meenakshi";
 const MAX_PROJECTS_PER_GUIDE = 2;
@@ -221,12 +222,12 @@ export default function AdminGuideAllocation() {
       .on("postgres_changes", { event: "*", schema: "public", table: "team_members" }, () => fetchData(true))
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => fetchData(true))
       .on("postgres_changes", { event: "*", schema: "public", table: "project_ideas" }, () => fetchData(true))
-      .subscribe();
+    const cleanupRealtime = subscribeWithDeferredCleanup(supabase, channel);
 
     return () => {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
-      supabase.removeChannel(channel);
+      cleanupRealtime();
     };
   }, [fetchData]);
 
@@ -432,8 +433,7 @@ export default function AdminGuideAllocation() {
 
   const filteredProjects = useMemo(() => {
     if (!selectedClassId) return projects;
-    const selected = String(selectedClassId).trim().toLowerCase();
-    return projects.filter((project) => String(project.class_name || "").trim().toLowerCase() === selected);
+    return projects.filter((project) => String(project.class_id || "").trim() === String(selectedClassId).trim());
   }, [projects, selectedClassId]);
 
   return (
