@@ -283,7 +283,7 @@ export default function AdminRubrics() {
   return (
     <AppFrame
       sidebar={<Sidebar activeItem="rubrics-management" onSignOut={handleSignOut} onNavigate={handleNavigate} />}
-      header={<TopNavbar adminName="Meenakshi" academicYearLabel="2026 - S6 Mini Project" pageTitle="Rubrics Management" />}
+      header={<TopNavbar adminName="Meenakshi" academicYearLabel="2026 - S6 Mini Project" pageTitle="Rubrics Management" onHomeClick={() => navigate("/admin")} />}
     >
       <div className="p-4 md:p-6 lg:p-8 space-y-6">
         <section className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">

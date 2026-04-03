@@ -7,22 +7,27 @@ export default function MentorDiscussion({
   mentorName = "Mentor",
   projectTitle = "Team Project",
 }) {
+  const chatShellClass = "h-[calc(100vh-250px)] min-h-[560px] min-h-0";
+
   if (!projId || !mentorId) {
     return (
-      <div className="h-[calc(100vh-250px)] min-h-[560px] bg-slate-100 rounded-3xl border border-slate-200 flex items-center justify-center text-slate-500 text-sm">
+      <div className={`${chatShellClass} bg-slate-100 rounded-3xl border border-slate-200 flex items-center justify-center text-slate-500 text-sm`}>
         Discussion unavailable.
       </div>
     );
   }
 
   return (
-    <DiscussionChat
-      projectId={projId}
-      userId={mentorId}
-      userRole="mentor"
-      userName={mentorName}
-      initialMembers={members}
-      initialTitle={projectTitle}
-    />
+    <div className={chatShellClass}>
+      <DiscussionChat
+        projectId={projId}
+        userId={mentorId}
+        userRole="mentor"
+        userName={mentorName}
+        initialMembers={members}
+        initialTitle={projectTitle}
+        embedded
+      />
+    </div>
   );
 }

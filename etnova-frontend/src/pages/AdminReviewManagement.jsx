@@ -1016,6 +1016,7 @@ export default function AdminReviewManagement() {
           adminName={ADMIN_NAME}
           academicYearLabel="2026 - S6 Mini Project"
           pageTitle="Review Management"
+          onHomeClick={() => navigate("/admin")}
         />
       )}
     >

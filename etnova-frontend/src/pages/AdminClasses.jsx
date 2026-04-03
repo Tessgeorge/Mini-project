@@ -126,6 +126,7 @@ export default function AdminClasses() {
           adminName="Meenakshi"
           academicYearLabel="2026 - S6 Mini Project"
           pageTitle="Classes"
+          onHomeClick={() => navigate("/admin")}
         />
       )}
     >

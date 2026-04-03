@@ -345,6 +345,7 @@ export default function AdminDashboard() {
           adminName={adminName}
           academicYearLabel="2026 - S6 Mini Project"
           pageTitle="Admin Dashboard"
+          onHomeClick={() => navigate("/admin")}
           onProfileClick={() => setShowProfileMenu((value) => !value)}
         />
       )}
