@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import TopBar from "../components/TopBar";
 import ProfileMenu from "../components/ProfileMenu";
@@ -520,14 +520,6 @@ export default function StudentDashboard() {
     ? getWorkflowActionLabel(currentStageDeadline.stageKey, "student")
     : getWorkflowActionLabel(workflowSnapshot.key, "student");
 
-  const reviewScore = useMemo(() => {
-    const scores = evaluations
-      .map((entry) => Number(entry.score ?? entry.obtained_marks))
-      .filter((value) => !Number.isNaN(value));
-    if (scores.length === 0) return "-";
-    return `${Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length)}/100`;
-  }, [evaluations]);
-
   const activeMembers = project?.team_members?.length ?? 0;
   const profileComplete = useMemo(() => isProfileComplete(profile), [profile]);
   const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -664,9 +656,6 @@ export default function StudentDashboard() {
       if (doc.status === "approved") items.push({ id: `da${doc.id}`, icon: "verified", text: `${label} approved by mentor`, time: fmtRelative(doc.uploaded_at), color: "#10b981" });
       if (isRejectedStatus(doc.status)) items.push({ id: `dr${doc.id}`, icon: "edit_note", text: `Revision requested for ${label}`, time: fmtRelative(doc.uploaded_at), color: "#f59e0b" });
     });
-    evaluations.slice(0, 2).forEach(ev =>
-      items.push({ id: `e${ev.id}`, icon: "grade", text: `Marks updated - ${ev.obtained_marks}/${ev.max_marks}`, time: fmtRelative(ev.created_at), color: "#6366f1" })
-    );
     if (activeMembers > 1)
       items.push({ id: "team", icon: "group", text: `Team formed (${activeMembers} members)`, time: fmtRelative(project?.created_at), color: "#8b5cf6" });
     return items.slice(0, 7);
@@ -908,11 +897,10 @@ export default function StudentDashboard() {
           </div>
 
           {/* Section 2: KPI Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             <KPICard label="Current Step" value={currentStage} sub="Shared workflow stage" icon="layers" color="#00D2C4" />
             <KPICard label="Next Deadline" value={daysLeft !== null ? `${daysLeft}d` : "-"} sub={nextDeadline ? `Until ${nextDeadline.stage}` : "No active deadline"} icon="schedule" color="#6366f1" />
             <KPICard label="Team Capacity" value={`${activeMembers}/4`} sub={activeMembers >= 4 ? "Full team" : `${4 - activeMembers} slot${4 - activeMembers !== 1 ? "s" : ""} remaining`} icon="group" color="#10b981" />
-            <KPICard label="Review Score" value={reviewScore} sub={evaluations.length > 0 ? `${evaluations.length} review${evaluations.length !== 1 ? "s" : ""}` : "No mentor reviews yet"} icon="grade" color="#f59e0b" />
             <KPICard label="Workflow Status" value={workflowSnapshot.isCompleted ? "Completed" : project?.approved_idea_id ? "In Progress" : "Idea Pending"} sub={workflowSnapshot.isCompleted ? "All review stages completed" : workflowSnapshot.description} icon={workflowSnapshot.isCompleted ? "task_alt" : project?.approved_idea_id ? "alt_route" : "pending"} color={workflowSnapshot.isCompleted ? "#10b981" : project?.approved_idea_id ? "#00D2C4" : "#f59e0b"} />
           </div>
 

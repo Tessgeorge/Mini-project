@@ -791,13 +791,12 @@ function UpcomingDeadlines({ phaseIdx, milestoneDates, reviewDeadlines = [], onN
                   <button
                     type="button"
                     onClick={() => hasDeadline && setActive(isActive ? null : dateKey)}
-                    className={`size-7 rounded-lg text-[11px] font-bold flex items-center justify-center transition-all ${
-                      isToday
+                    className={`size-7 rounded-lg text-[11px] font-bold flex items-center justify-center transition-all ${isToday
                         ? "bg-slate-900 text-white"
                         : hasDeadline
                           ? "cursor-pointer hover:scale-105 font-black"
                           : "text-slate-500 hover:bg-slate-50"
-                    }`}
+                      }`}
                     style={hasDeadline ? {
                       backgroundColor: "rgba(0,210,196,0.15)",
                       color: isPast ? "#94a3b8" : "#00897B",
@@ -1095,8 +1094,8 @@ function TabOverview({ proj, evaluations, members, documents, onAddReview, onNav
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
         {[
           { label: "Members", value: members.length, color: "text-teal-500", bg: "bg-teal-50", border: "border-teal-100" },
-          { label: "Reviews", value: evaluations.length, color: "text-blue-500", bg: "bg-blue-50", border: "border-blue-100" },
-          { label: "Avg Score", value: avg ? avg + "%" : "—", color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-100" },
+          { label: "Progress", value: `${workflowSnapshot.progressPercent || 0}%`, color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-100" },
+          { label: "Submissions", value: documents.length, color: "text-blue-500", bg: "bg-blue-50", border: "border-blue-100" },
           { label: "Current Step", value: workflowSnapshot.label, color: "text-purple-600", bg: "bg-purple-50", border: "border-purple-100" },
         ].map(s => (
           <div key={s.label} className={`${s.bg} ${s.border} rounded-2xl p-4 border shadow-sm`}>
@@ -1681,10 +1680,24 @@ function TabEvaluation({ projId, members, markingEnabled }) {
   return <DynamicRubricEvaluation projectId={projId} members={members} />;
 }
 
-function TabActivity({ evaluations, documents }) {
+function TabActivity({ evaluations, documents, ideas = [] }) {
   const items = [
-    ...evaluations.map(e => ({ emoji: "🎯", time: e.created_at, title: "Evaluation submitted — " + e.phase, sub: "Score: " + (e.score || 0) + "/100", color: "bg-blue-50 border-blue-100", dot: "bg-blue-400" })),
-    ...documents.map(d => ({ emoji: "📄", time: d.uploaded_at, title: "Document uploaded — " + (d.file_name || "file"), sub: "by " + (d.profiles?.full_name || "Team member") + " · " + (d.status || "submitted"), color: "bg-teal-50 border-teal-100", dot: "bg-teal-400" })),
+    ...documents.map(d => ({ 
+      emoji: d.status === 'approved' ? "✅" : d.status === 'rejected' ? "❌" : "📄", 
+      time: d.uploaded_at, 
+      title: (d.status === 'approved' ? "Document Approved" : d.status === 'rejected' ? "Document Rejected" : "Document Uploaded") + " — " + (d.file_name || "file"), 
+      sub: "by " + (d.profiles?.full_name || "Team member") + (d.feedback ? ` · Feedback: ${d.feedback}` : ""), 
+      color: d.status === 'approved' ? "bg-emerald-50 border-emerald-100" : d.status === "rejected" ? "bg-red-50 border-red-100" : "bg-teal-50 border-teal-100", 
+      dot: d.status === 'approved' ? "bg-emerald-400" : d.status === "rejected" ? "bg-red-400" : "bg-teal-400" 
+    })),
+    ...ideas.map((idea) => ({
+      emoji: idea.status === 'approved' ? "💡" : idea.status === 'rejected' ? "🚫" : "📝",
+      time: idea.updated_at || idea.created_at,
+      title: "Abstract/Idea " + (idea.status === 'approved' ? "Approved" : idea.status === 'rejected' ? "Rejected" : "Submitted") + " — " + (idea.title || "Untitled"),
+      sub: "Status: " + (idea.status || "pending"),
+      color: idea.status === 'approved' ? "bg-indigo-50 border-indigo-100" : idea.status === "rejected" ? "bg-red-50 border-red-100" : "bg-gray-50 border-gray-100",
+      dot: idea.status === 'approved' ? "bg-indigo-400" : idea.status === "rejected" ? "bg-red-400" : "bg-gray-400"
+    })),
   ].sort((a, b) => new Date(b.time) - new Date(a.time));
 
   return (
@@ -1728,6 +1741,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack, onNa
   const [tab, setTab] = useState("overview");
   const [evaluations, setEvaluations] = useState([]);
   const [documents, setDocuments] = useState([]);
+  const [ideas, setIdeas] = useState([]);
   const [milestoneDates, setMilestoneDates] = useState([]);
   const [reviewDeadlines, setReviewDeadlines] = useState([]);
   const [showReview, setShowReview] = useState(false);
@@ -1778,7 +1792,8 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack, onNa
           .not("deadline", "is", null)
           .order("deadline", { ascending: true })
         : Promise.resolve({ data: [] }),
-    ]).then(([ev, doc, ms, stages]) => {
+      supabase.from("project_ideas").select("id,title,status,created_at,updated_at").eq("project_id", proj.id),
+    ]).then(([ev, doc, ms, stages, idRes]) => {
       const normalizedEvaluations = (ev.data || [])
         .map(normalizeTeamEvaluationRow)
         .sort((a, b) => new Date(b?.created_at || 0) - new Date(a?.created_at || 0));
@@ -1789,6 +1804,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack, onNa
       (ms.data || []).forEach(r => { dates[r.phase_index] = r.due_date; });
       setMilestoneDates(dates);
       setReviewDeadlines(mapClassReviewDeadlines(stages.data || []));
+      setIdeas(idRes?.data || []);
       setLoading(false);
     });
   }, [proj.batch, proj.class_id, proj.class_name, proj.id]);
@@ -1964,10 +1980,10 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack, onNa
             <div className="flex items-center gap-3 min-w-[200px]">
               <span className="text-xs text-slate-400 whitespace-nowrap">Progress</span>
               <div className="flex-1 h-3 bg-white/10 border border-white/10 rounded-full overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-teal-300 via-cyan-400 to-blue-500 rounded-full transition-all duration-1000 ease-out" style={{ width: pct + "%" }} />
+                <div className="h-full bg-gradient-to-r from-teal-300 via-cyan-400 to-blue-500 rounded-full transition-all duration-1000 ease-out" style={{ width: pct + "%" }} />
+              </div>
+              <span className="text-teal-300 font-bold text-xs whitespace-nowrap">{pct}%</span>
             </div>
-            <span className="text-teal-300 font-bold text-xs whitespace-nowrap">{pct}%</span>
-          </div>
           </div>}
 
           {/* Inner tabs */}
@@ -2009,7 +2025,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack, onNa
             />
           )}
           {tab === "evaluation" && <TabEvaluation projId={proj.id} mentorId={mentorId} mentorName={mentorName} members={members} evaluations={evaluations} setEvaluations={setEvaluations} markingEnabled={markingEnabled} />}
-          {tab === "activity" && <TabActivity evaluations={evaluations} documents={documents} />}
+          {tab === "activity" && <TabActivity evaluations={evaluations} documents={documents} ideas={ideas} />}
         </>
       )}
       {showReview && <ReviewModal proj={proj} onClose={() => setShowReview(false)} onSubmit={submitReview} />}
