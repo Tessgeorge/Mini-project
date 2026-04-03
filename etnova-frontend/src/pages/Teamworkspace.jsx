@@ -2022,6 +2022,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack, onNa
               members={members}
               mentorName={mentorName}
               projectTitle={proj?.approved_idea?.title || "Team Discussion"}
+              initialProject={proj}
             />
           )}
           {tab === "evaluation" && <TabEvaluation projId={proj.id} mentorId={mentorId} mentorName={mentorName} members={members} evaluations={evaluations} setEvaluations={setEvaluations} markingEnabled={markingEnabled} />}

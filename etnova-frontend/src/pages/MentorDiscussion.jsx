@@ -6,6 +6,7 @@ export default function MentorDiscussion({
   members = [],
   mentorName = "Mentor",
   projectTitle = "Team Project",
+  initialProject = null,
 }) {
   const chatShellClass = "h-[calc(100vh-250px)] min-h-[560px] min-h-0";
 
@@ -24,6 +25,7 @@ export default function MentorDiscussion({
         userId={mentorId}
         userRole="mentor"
         userName={mentorName}
+        initialProject={initialProject}
         initialMembers={members}
         initialTitle={projectTitle}
         embedded

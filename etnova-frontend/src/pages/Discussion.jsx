@@ -415,23 +415,13 @@ export default function Discussion({
     throw new Error("Failed to load messages.");
   }, [normalizeMessage]);
 
-  /* â”€â”€ Load messages â”€â”€ */
-  const loadMessages = useCallback(async (projectId, { reset = false } = {}) => {
-    const currentPage = reset ? 0 : page;
-    const rows = await fetchMessagesPage(projectId, currentPage);
-
-    setMessages((prev) => {
-      if (reset) return rows;
-      const existing = new Set(prev.map((m) => m.id));
-      const merged = [...rows.filter((m) => !existing.has(m.id)), ...prev];
-      merged.sort((a, b) => toMs(a.created_at) - toMs(b.created_at));
-      return merged;
-    });
-
-    if (reset) setPage(0);
+  const resetMessages = useCallback(async (projectId) => {
+    const rows = await fetchMessagesPage(projectId, 0);
+    setMessages(rows);
+    setPage(0);
     setHasMore(rows.length === PAGE_SIZE);
     return rows;
-  }, [fetchMessagesPage, page]);
+  }, [fetchMessagesPage]);
 
   /* â”€â”€ Init â”€â”€ */
   useEffect(() => {
@@ -495,7 +485,7 @@ export default function Discussion({
           coordinator: detail?.coordinator || null,
         });
         await Promise.all([
-          loadMessages(resolvedProjectId, { reset: true }),
+          resetMessages(resolvedProjectId),
           loadReadState(resolvedProjectId, p.id),
           fetchReadStateForParticipants(resolvedProjectId),
         ]);
@@ -576,17 +566,54 @@ export default function Discussion({
       if (typingTimeout.current) clearTimeout(typingTimeout.current);
       setOnlineUserIds({});
     };
-  }, [externalProjectId, externalUserId, externalUserName, externalUserRole, fetchReadStateForParticipants, initialMembers, initialProject, initialTitle, loadMessages, loadReadState, removeRealtimeMessage, syncOnlinePresence, upsertRealtimeMessage]);
+  }, [externalProjectId, externalUserId, externalUserName, externalUserRole, fetchReadStateForParticipants, loadReadState, removeRealtimeMessage, resetMessages, syncOnlinePresence, upsertRealtimeMessage]);
+
+  useEffect(() => {
+    if (!externalProjectId) return;
+
+    setProject((prev) => {
+      if (!prev || prev.id !== externalProjectId) return prev;
+
+      const nextMembers = Array.isArray(initialProject?.team_members) && initialProject.team_members.length > 0
+        ? initialProject.team_members
+        : Array.isArray(initialMembers) && initialMembers.length > 0
+          ? initialMembers
+          : prev.team_members || [];
+      const nextTitle = initialProject?.approved_idea?.title || initialTitle || prev.title || "Team Discussion";
+      const nextGuide = initialProject?.guide ?? prev.guide ?? null;
+      const nextMentor = initialProject?.mentor ?? prev.mentor ?? null;
+      const nextCoordinator = initialProject?.coordinator ?? prev.coordinator ?? null;
+
+      if (
+        prev.title === nextTitle
+        && prev.team_members === nextMembers
+        && prev.guide === nextGuide
+        && prev.mentor === nextMentor
+        && prev.coordinator === nextCoordinator
+      ) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        title: nextTitle,
+        team_members: nextMembers,
+        guide: nextGuide,
+        mentor: nextMentor,
+        coordinator: nextCoordinator,
+      };
+    });
+  }, [externalProjectId, initialMembers, initialProject, initialTitle]);
 
   // Fallback sync when realtime channel is unavailable.
   useEffect(() => {
     if (!project?.id) return undefined;
     const timer = setInterval(() => {
       if (channelStatusRef.current === "SUBSCRIBED") return;
-      loadMessages(project.id, { reset: true }).catch(() => {});
+      resetMessages(project.id).catch(() => {});
     }, 2000);
     return () => clearInterval(timer);
-  }, [loadMessages, project?.id]);
+  }, [project?.id, resetMessages]);
 
   const loadOlderMessages = useCallback(async () => {
     if (!project?.id || loadingMore || !hasMore) return;
