@@ -12,6 +12,11 @@ const AuthContext = createContext({
 
 const ROLE_CACHE_KEY = 'etnova_role_cache'
 
+function isSessionError(error) {
+  const message = String(error?.message || '')
+  return message === 'Not authenticated' || message === 'Session expired. Please sign in again.'
+}
+
 async function fetchUserRole() {
   const data = await apiRequest('/profile')
   return data?.role?.toLowerCase() ?? null
@@ -126,12 +131,19 @@ export function AuthProvider({ children }) {
           writeCachedRole(nextSession.user.id, nextRole)
         }
       } catch (error) {
-        if (error?.message !== 'Not authenticated' && error?.message !== 'Session expired. Please sign in again.') {
+        if (!isSessionError(error)) {
           console.error('Failed to load user role:', error)
         }
         if (isMounted && requestId === activeRequestId) {
-          setRole(null)
-          clearCachedRole()
+          const fallbackRole = cachedRole || roleRef.current || readCachedRole(nextSession.user.id)
+
+          if (isSessionError(error)) {
+            setRole(null)
+            clearCachedRole()
+          } else if (fallbackRole) {
+            setRole(fallbackRole)
+            writeCachedRole(nextSession.user.id, fallbackRole)
+          }
         }
       } finally {
         if (isMounted && requestId === activeRequestId) {

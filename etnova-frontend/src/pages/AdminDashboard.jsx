@@ -10,6 +10,7 @@ import SectionCard from "../components/admin/SectionCard";
 import PublishPanel from "../components/admin/PublishPanel";
 import AdminProfileSettingsModal from "../components/admin/AdminProfileSettingsModal";
 import ProfileMenu from "../components/ProfileMenu";
+import { subscribeWithDeferredCleanup } from "../utils/realtimeChannel";
 
 const ADMIN_NAME = "Meenakshi";
 const KPI_DATA = [
@@ -248,12 +249,9 @@ export default function AdminDashboard() {
       )
       .on("postgres_changes", { event: "*", schema: "public", table: "classes" }, () => {
         loadAdminDashboardData(selectedClassName, selectedClassId);
-      })
-      .subscribe();
+      });
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return subscribeWithDeferredCleanup(supabase, channel);
   }, [loadAdminDashboardData, selectedClassId, selectedClassName]);
 
   const assignedProjects = useMemo(

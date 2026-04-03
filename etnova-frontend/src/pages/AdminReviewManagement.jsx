@@ -10,6 +10,7 @@ import DeadlineModal from "../components/admin/DeadlineModal";
 import StageStatCard from "../components/admin/StageStatCard";
 import Modal from "../components/Modal";
 import { emitAdminDataUpdated } from "../utils/adminLiveSync";
+import { subscribeWithDeferredCleanup } from "../utils/realtimeChannel";
 
 const ADMIN_NAME = "Meenakshi";
 
@@ -170,8 +171,12 @@ async function fetchProjectCount(classId) {
 export default function AdminReviewManagement() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const searchClassParam = searchParams.get("class") || "";
   const latestRefreshTokenRef = useRef(0);
   const classesRequestRef = useRef(null);
+  const classesRef = useRef([]);
+  const selectedClassNameRef = useRef("");
+  const selectedClassIdRef = useRef("");
 
   const [classes, setClasses] = useState([]);
   const [selectedClassName, setSelectedClassName] = useState("");
@@ -192,9 +197,21 @@ export default function AdminReviewManagement() {
   const [deletingStageId, setDeletingStageId] = useState("");
   const [savingDeleteStage, setSavingDeleteStage] = useState(false);
 
+  useEffect(() => {
+    classesRef.current = classes;
+  }, [classes]);
+
+  useEffect(() => {
+    selectedClassNameRef.current = selectedClassName;
+  }, [selectedClassName]);
+
+  useEffect(() => {
+    selectedClassIdRef.current = selectedClassId;
+  }, [selectedClassId]);
+
   const ensureClassesLoaded = useCallback(async (force = false) => {
-    if (!force && classes.length > 0) {
-      return classes;
+    if (!force && classesRef.current.length > 0) {
+      return classesRef.current;
     }
 
     if (classesRequestRef.current) {
@@ -215,7 +232,16 @@ export default function AdminReviewManagement() {
         id: row.id,
         name: row.class_section || String(row.id),
       }));
-      setClasses(normalized);
+      classesRef.current = normalized;
+      setClasses((current) => {
+        if (
+          current.length === normalized.length
+          && current.every((row, index) => row.id === normalized[index]?.id && row.name === normalized[index]?.name)
+        ) {
+          return current;
+        }
+        return normalized;
+      });
       return normalized;
     })();
 
@@ -228,7 +254,7 @@ export default function AdminReviewManagement() {
         classesRequestRef.current = null;
       }
     }
-  }, [classes]);
+  }, []);
 
   const ensureDefaultStages = useCallback(async (classId, options = {}) => {
     const { silentRls = true } = options;
@@ -495,7 +521,12 @@ export default function AdminReviewManagement() {
     try {
       const fetchedClasses = await ensureClassesLoaded(refreshClasses);
       if (latestRefreshTokenRef.current !== refreshToken) return;
-      const effectiveClassRef = classRef || selectedClassId || selectedClassName || fetchedClasses[0]?.id || fetchedClasses[0]?.name || "";
+      const effectiveClassRef = classRef
+        || selectedClassIdRef.current
+        || selectedClassNameRef.current
+        || fetchedClasses[0]?.id
+        || fetchedClasses[0]?.name
+        || "";
       const classRow = fetchedClasses.find((row) => row.id === effectiveClassRef)
         || fetchedClasses.find((row) => row.name === effectiveClassRef)
         || null;
@@ -504,14 +535,22 @@ export default function AdminReviewManagement() {
 
       if (!effectiveClassName || !effectiveClassId) {
         if (latestRefreshTokenRef.current !== refreshToken) return;
+        selectedClassNameRef.current = "";
+        selectedClassIdRef.current = "";
         setSelectedClassName("");
         setSelectedClassId("");
         setStages([]);
         return;
       }
 
-      if (effectiveClassName !== selectedClassName) setSelectedClassName(effectiveClassName);
-      if (effectiveClassId !== selectedClassId) setSelectedClassId(effectiveClassId);
+      if (effectiveClassName !== selectedClassNameRef.current) {
+        selectedClassNameRef.current = effectiveClassName;
+        setSelectedClassName(effectiveClassName);
+      }
+      if (effectiveClassId !== selectedClassIdRef.current) {
+        selectedClassIdRef.current = effectiveClassId;
+        setSelectedClassId(effectiveClassId);
+      }
 
       const didAutoLock = await autoLockExpiredStages(effectiveClassId);
       const didClearLockedDeadlines = await clearDeadlinesForLockedStages(effectiveClassId);
@@ -530,12 +569,11 @@ export default function AdminReviewManagement() {
     } finally {
       if (!keepLoading && latestRefreshTokenRef.current === refreshToken) setLoading(false);
     }
-  }, [autoLockExpiredStages, clearDeadlinesForLockedStages, ensureClassesLoaded, fetchStages, reconcileStageCompletionFlags, selectedClassId, selectedClassName]);
+  }, [autoLockExpiredStages, clearDeadlinesForLockedStages, ensureClassesLoaded, fetchStages, reconcileStageCompletionFlags]);
 
   useEffect(() => {
-    const classParam = searchParams.get("class");
-    refreshData(classParam || "", { refreshClasses: true });
-  }, [refreshData, searchParams]);
+    refreshData(searchClassParam, { refreshClasses: true });
+  }, [refreshData, searchClassParam]);
 
   useEffect(() => {
     resetDeadlineModal();
@@ -564,8 +602,10 @@ export default function AdminReviewManagement() {
         { event: "*", schema: "public", table: "review_stages" },
         async (payload) => {
           const changedClass = payload.new?.class_id || payload.old?.class_id || "";
-          if (!selectedClassId || changedClass === selectedClassId || !changedClass) {
-            await refreshData(selectedClassId || selectedClassName || "", { keepLoading: true });
+          const activeClassId = selectedClassIdRef.current;
+          const activeClassName = selectedClassNameRef.current;
+          if (!activeClassId || changedClass === activeClassId || !changedClass) {
+            await refreshData(activeClassId || activeClassName || "", { keepLoading: true });
           }
         }
       )
@@ -573,32 +613,28 @@ export default function AdminReviewManagement() {
         "postgres_changes",
         { event: "*", schema: "public", table: "evaluations" },
         async () => {
-          if (!selectedClassId) return;
-          await refreshData(selectedClassId, { keepLoading: true });
+          if (!selectedClassIdRef.current) return;
+          await refreshData(selectedClassIdRef.current, { keepLoading: true });
         }
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "documents" },
         async () => {
-          if (!selectedClassId) return;
-          await refreshData(selectedClassId, { keepLoading: true });
+          if (!selectedClassIdRef.current) return;
+          await refreshData(selectedClassIdRef.current, { keepLoading: true });
         }
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "projects" },
         async () => {
-          if (!selectedClassId) return;
-          await refreshData(selectedClassId, { keepLoading: true });
+          if (!selectedClassIdRef.current) return;
+          await refreshData(selectedClassIdRef.current, { keepLoading: true });
         }
       )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [refreshData, selectedClassId, selectedClassName]);
+    return subscribeWithDeferredCleanup(supabase, channel);
+  }, [refreshData]);
 
   const summary = useMemo(() => {
     const totalStages = stages.length;

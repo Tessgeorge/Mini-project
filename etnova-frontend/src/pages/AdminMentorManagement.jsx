@@ -9,6 +9,7 @@ import TopNavbar from "../components/admin/TopNavbar";
 import MentorStatCard from "../components/admin/MentorStatCard";
 import MentorTable from "../components/admin/MentorTable";
 import EditRoleModal from "../components/admin/EditRoleModal";
+import { subscribeWithDeferredCleanup } from "../utils/realtimeChannel";
 
 const ADMIN_NAME = "Meenakshi";
 
@@ -146,13 +147,14 @@ export default function AdminMentorManagement() {
       .channel("mentor-live")
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => fetchData(true))
       .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, () => fetchData(true))
-      .on("postgres_changes", { event: "*", schema: "public", table: "classes" }, () => fetchData(true))
-      .subscribe();
+      .on("postgres_changes", { event: "*", schema: "public", table: "classes" }, () => fetchData(true));
+
+    const cleanupRealtime = subscribeWithDeferredCleanup(supabase, channel);
 
     return () => {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
-      supabase.removeChannel(channel);
+      cleanupRealtime();
     };
   }, [fetchData]);
 
@@ -304,12 +306,9 @@ export default function AdminMentorManagement() {
     const channel = supabase
       .channel("mentor-workload-live")
       .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, fetchWorkload)
-      .on("postgres_changes", { event: "*", schema: "public", table: "evaluations" }, fetchWorkload)
-      .subscribe();
+      .on("postgres_changes", { event: "*", schema: "public", table: "evaluations" }, fetchWorkload);
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return subscribeWithDeferredCleanup(supabase, channel);
   }, [fetchWorkload, selectedMentorId]);
 
   const handleDeleteMentor = async (mentorId) => {
@@ -461,7 +460,7 @@ export default function AdminMentorManagement() {
       return;
     }
     if (itemId === "review-management") {
-      navigate("/admin/review-stages");
+      navigate("/admin/review-management");
       return;
     }
     if (itemId === "rubrics-management") {
