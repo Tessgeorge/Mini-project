@@ -2,10 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import supabase from "../lib/supabase";
 import { apiRequest } from "../config/apiClient";
+import useAdminProfilePanel from "../hooks/useAdminProfilePanel";
 import AppFrame from "../components/AppFrame";
 import Sidebar from "../components/admin/Sidebar";
 import TopNavbar from "../components/admin/TopNavbar";
 import AllocationSummary from "../components/admin/AllocationSummary";
+import AdminProfileSettingsModal from "../components/admin/AdminProfileSettingsModal";
+import ProfileMenu from "../components/ProfileMenu";
 import { subscribeWithDeferredCleanup } from "../utils/realtimeChannel";
 
 const ADMIN_NAME = "Meenakshi";
@@ -157,6 +160,14 @@ function isMentorProfile(row) {
 
 export default function AdminGuideAllocation() {
   const navigate = useNavigate();
+  const {
+    adminProfile,
+    showProfileMenu,
+    setShowProfileMenu,
+    showProfileSettings,
+    setShowProfileSettings,
+    refreshAdminProfile,
+  } = useAdminProfilePanel();
   const [classes, setClasses] = useState([]);
   const [selectedClassId, setSelectedClassId] = useState("");
   const [mentors, setMentors] = useState([]);
@@ -447,12 +458,35 @@ export default function AdminGuideAllocation() {
       )}
       header={(
         <TopNavbar
-          adminName={ADMIN_NAME}
+          adminName={adminProfile.full_name || ADMIN_NAME}
           academicYearLabel="2026 - S6 Mini Project"
           pageTitle="Guide Allocation"
           onHomeClick={() => navigate("/admin")}
+          onProfileClick={() => setShowProfileMenu((value) => !value)}
         />
       )}
+      headerOverlay={showProfileMenu ? (
+        <div className="fixed top-14 right-2 sm:right-6 md:right-8 z-50">
+          <ProfileMenu
+            profile={adminProfile}
+            isOpen={showProfileMenu}
+            onClose={() => setShowProfileMenu(false)}
+            onLogout={handleSignOut}
+            onEditProfile={() => {
+              setShowProfileMenu(false);
+              setShowProfileSettings(true);
+            }}
+            roleLabel="Administrator"
+            roleIcon="admin_panel_settings"
+            infoItems={[
+              { label: "Full Name", value: adminProfile.full_name || "-" },
+              { label: "Email", value: adminProfile.email || "-" },
+              { label: "Role", value: "Administrator" },
+              { label: "Department", value: adminProfile.department || "-" },
+            ]}
+          />
+        </div>
+      ) : null}
     >
       <div className="space-y-6 p-4 md:p-6 lg:p-8">
         <section className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
@@ -876,6 +910,11 @@ export default function AdminGuideAllocation() {
           </div>
         </section>
       </div>
+      <AdminProfileSettingsModal
+        isOpen={showProfileSettings}
+        onClose={() => setShowProfileSettings(false)}
+        onSuccess={refreshAdminProfile}
+      />
     </AppFrame>
   );
 }

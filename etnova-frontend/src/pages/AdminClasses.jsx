@@ -2,15 +2,26 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import supabase from "../lib/supabase";
 import useAdminAuth from "../hooks/useAdminAuth";
+import useAdminProfilePanel from "../hooks/useAdminProfilePanel";
 import { apiRequest } from "../config/apiClient";
 import { emitAdminDataUpdated } from "../utils/adminLiveSync";
 import AppFrame from "../components/AppFrame";
 import Sidebar from "../components/admin/Sidebar";
 import TopNavbar from "../components/admin/TopNavbar";
+import AdminProfileSettingsModal from "../components/admin/AdminProfileSettingsModal";
+import ProfileMenu from "../components/ProfileMenu";
 
 export default function AdminClasses() {
   useAdminAuth();
   const navigate = useNavigate();
+  const {
+    adminProfile,
+    showProfileMenu,
+    setShowProfileMenu,
+    showProfileSettings,
+    setShowProfileSettings,
+    refreshAdminProfile,
+  } = useAdminProfilePanel();
   const [classes, setClasses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -123,12 +134,35 @@ export default function AdminClasses() {
       sidebar={<Sidebar activeItem="dashboard" onSignOut={handleSignOut} onNavigate={handleNavigate} />}
       header={(
         <TopNavbar
-          adminName="Meenakshi"
+          adminName={adminProfile.full_name || "Admin"}
           academicYearLabel="2026 - S6 Mini Project"
           pageTitle="Classes"
           onHomeClick={() => navigate("/admin")}
+          onProfileClick={() => setShowProfileMenu((value) => !value)}
         />
       )}
+      headerOverlay={showProfileMenu ? (
+        <div className="fixed top-14 right-2 sm:right-6 md:right-8 z-50">
+          <ProfileMenu
+            profile={adminProfile}
+            isOpen={showProfileMenu}
+            onClose={() => setShowProfileMenu(false)}
+            onLogout={handleSignOut}
+            onEditProfile={() => {
+              setShowProfileMenu(false);
+              setShowProfileSettings(true);
+            }}
+            roleLabel="Administrator"
+            roleIcon="admin_panel_settings"
+            infoItems={[
+              { label: "Full Name", value: adminProfile.full_name || "-" },
+              { label: "Email", value: adminProfile.email || "-" },
+              { label: "Role", value: "Administrator" },
+              { label: "Department", value: adminProfile.department || "-" },
+            ]}
+          />
+        </div>
+      ) : null}
     >
       <section className="p-6">
       <div className="max-w-5xl mx-auto bg-white/90 rounded-2xl shadow-sm border border-slate-200/70 p-6 space-y-6">
@@ -198,6 +232,11 @@ export default function AdminClasses() {
         </div>
       </div>
       </section>
+      <AdminProfileSettingsModal
+        isOpen={showProfileSettings}
+        onClose={() => setShowProfileSettings(false)}
+        onSuccess={refreshAdminProfile}
+      />
     </AppFrame>
   );
 }
