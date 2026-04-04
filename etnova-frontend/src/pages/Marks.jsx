@@ -24,10 +24,24 @@ function formatDateTime(value) {
   return parsed.toLocaleDateString("en-IN");
 }
 
-function getFeedbackGroupLabel(item) {
-  if (item?.type === "guide_individual_feedback") return "Guide Feedback";
-  if (item?.title) return String(item.title).replace(/\s+received$/i, "");
-  return "Review Feedback";
+const FINAL_MARKS_TOTAL = 150;
+
+function getGradeFromFinalMarks(finalMarks) {
+  const numericMarks = Number(finalMarks);
+  if (finalMarks == null || Number.isNaN(numericMarks)) return "-";
+
+  const percentage = (numericMarks / FINAL_MARKS_TOTAL) * 100;
+
+  if (percentage >= 90) return "S";
+  if (percentage >= 85) return "A+";
+  if (percentage >= 80) return "A";
+  if (percentage >= 75) return "B+";
+  if (percentage >= 70) return "B";
+  if (percentage >= 65) return "C+";
+  if (percentage >= 60) return "C";
+  if (percentage >= 55) return "D";
+  if (percentage >= 50) return "P";
+  return "F";
 }
 
 function getReviewStageKey(item) {
@@ -205,7 +219,7 @@ export default function Marks() {
           } else {
             setCoordinatorNames(["Coordinator not assigned"]);
           }
-        } catch (err) {
+        } catch {
           setCoordinatorNames(["Coordinator not assigned"]);
         }
       } else {
@@ -222,15 +236,6 @@ export default function Marks() {
     };
   }, []);
 
-  const feedbackGroups = useMemo(() => {
-    return feedbackItems.reduce((acc, item) => {
-      const label = getFeedbackGroupLabel(item);
-      if (!acc[label]) acc[label] = [];
-      acc[label].push(item);
-      return acc;
-    }, {});
-  }, [feedbackItems]);
-
   const reviewFeedbackByStage = useMemo(() => {
     return feedbackItems
       .filter((item) => item.type === "review_individual_feedback")
@@ -243,14 +248,12 @@ export default function Marks() {
       }, {});
   }, [feedbackItems]);
 
-  useEffect(() => {
+  const displayFeedbackStage = useMemo(() => {
     const hasCurrentStageItems = (reviewFeedbackByStage[activeFeedbackStage] || []).length > 0;
-    if (hasCurrentStageItems) return;
+    if (hasCurrentStageItems) return activeFeedbackStage;
 
     const firstAvailable = REVIEW_STAGE_TABS.find((stage) => (reviewFeedbackByStage[stage.key] || []).length > 0);
-    if (firstAvailable) {
-      setActiveFeedbackStage(firstAvailable.key);
-    }
+    return firstAvailable?.key || activeFeedbackStage;
   }, [activeFeedbackStage, reviewFeedbackByStage]);
 
   const resultPublished = Boolean(result);
@@ -261,12 +264,6 @@ export default function Marks() {
     : adminPublished
       ? "Published"
       : "Internal result published";
-  const publishedCount = [
-    resultPublished ? 1 : 0,
-    adminPublished ? 1 : 0,
-    adminPublished ? 1 : 0,
-  ].reduce((sum, value) => sum + value, 0);
-  
   // Map database status to display status
   let statusLabel = "Pending";
   if (result?.is_published === true) {
@@ -283,6 +280,7 @@ export default function Marks() {
     : internalOnly
       ? "Coordinator has published your internal marks. External and final marks will appear after publishes the final result."
       : "Your internal, external, and final marks are published and visible only to you.";
+  const gradeLabel = adminPublished ? getGradeFromFinalMarks(result?.final_marks) : "Pending";
 
   return (
     <div className="min-h-full md:min-h-screen px-4 sm:px-6 py-5 sm:py-7">
@@ -356,13 +354,14 @@ export default function Marks() {
               <div className="mt-6 space-y-5">
                 <div className="rounded-[1.75rem] border border-slate-200 bg-[linear-gradient(180deg,#ffffff,rgba(248,250,252,0.96))] p-5 shadow-sm">
                   <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-                    <div className="grid grid-cols-4 bg-[#0f766e] px-4 py-3 text-xs font-bold uppercase tracking-[0.18em] text-white">
+                    <div className="grid grid-cols-5 bg-[#0f766e] px-4 py-3 text-xs font-bold uppercase tracking-[0.18em] text-white">
                       <div>Project</div>
                       <div>Internal</div>
                       <div>External</div>
                       <div>Final</div>
+                      <div>Grade</div>
                     </div>
-                    <div className="grid grid-cols-4 items-center px-4 py-4 text-sm text-slate-700">
+                    <div className="grid grid-cols-5 items-center px-4 py-4 text-sm text-slate-700">
                       <div className="font-black text-slate-900">{projectName || "Current Project"}</div>
                       <div className="font-bold text-teal-700">{formatScore(result.cie_total, 75)}</div>
                       <div className="font-bold text-amber-700">
@@ -371,6 +370,7 @@ export default function Marks() {
                       <div className="font-bold text-slate-900">
                         {adminPublished ? formatScore(result.final_marks, 150) : "Pending"}
                       </div>
+                      <div className="font-bold text-sky-700">{gradeLabel}</div>
                     </div>
                   </div>
 
@@ -434,7 +434,7 @@ export default function Marks() {
                   <div className="mt-4 flex flex-wrap gap-3">
                     {REVIEW_STAGE_TABS.map((stage) => {
                       const itemCount = (reviewFeedbackByStage[stage.key] || []).length;
-                      const isActive = activeFeedbackStage === stage.key;
+                      const isActive = displayFeedbackStage === stage.key;
                       return (
                         <button
                           key={stage.key}
@@ -461,15 +461,15 @@ export default function Marks() {
                   </div>
                 </div>
 
-                {(reviewFeedbackByStage[activeFeedbackStage] || []).length === 0 ? (
+                {(reviewFeedbackByStage[displayFeedbackStage] || []).length === 0 ? (
                   <EmptyBlock
-                    title={`No ${REVIEW_STAGE_TABS.find((stage) => stage.key === activeFeedbackStage)?.label || "Review"} Feedback`}
+                    title={`No ${REVIEW_STAGE_TABS.find((stage) => stage.key === displayFeedbackStage)?.label || "Review"} Feedback`}
                     body="No reviewer feedback has been shared for this review stage yet."
                   />
                 ) : (
                   <div className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-[linear-gradient(180deg,#ffffff,rgba(248,250,252,0.96))] shadow-sm">
                     <div className="space-y-3 p-5">
-                      {(reviewFeedbackByStage[activeFeedbackStage] || []).map((item) => (
+                      {(reviewFeedbackByStage[displayFeedbackStage] || []).map((item) => (
                         <div
                           key={item.id}
                           className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm transition-shadow hover:shadow-md"

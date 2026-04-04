@@ -238,7 +238,9 @@ export const getCoordinatorResultsBreakdown = async (req, res) => {
       return res.status(403).json({ message: 'Coordinator class scope not found.' });
     }
 
-    const result = await getCoordinatorFinalResults(classId);
+    const result = await getCoordinatorFinalResults(classId, {
+      projectId: req.query?.project_id || null,
+    });
     return res.json(result);
   } catch (error) {
     return handleControllerError(res, error);

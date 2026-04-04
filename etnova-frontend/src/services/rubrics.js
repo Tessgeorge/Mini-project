@@ -94,12 +94,15 @@ export async function updateProjectRubricEntryLock(projectId, stage, locked, rev
   });
 }
 
-export async function fetchCoordinatorResultsBreakdown() {
-  return apiRequest("/coordinator/final-results/breakdown");
+export async function fetchCoordinatorResultsBreakdown(projectId = null) {
+  const params = new URLSearchParams();
+  if (projectId) params.set("project_id", projectId);
+  const query = params.toString();
+  return apiRequest(`/coordinator/final-results/breakdown${query ? `?${query}` : ""}`, { skipCache: true });
 }
 
 export async function fetchCoordinatorInternalMarks() {
-  return apiRequest("/coordinator/internal-marks");
+  return apiRequest("/coordinator/internal-marks", { skipCache: true });
 }
 
 export async function saveCoordinatorInternalMarks(entries) {

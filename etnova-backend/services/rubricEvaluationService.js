@@ -1327,14 +1327,23 @@ const getSimpleStageBreakdownForClassProjects = async ({ stage, projectIds }) =>
   return map;
 };
 
-export const getCoordinatorFinalResults = async (classId) => {
+export const getCoordinatorFinalResults = async (classId, options = {}) => {
+  const requestedProjectId = options?.projectId || null;
+  const includeDetailedBreakdown = Boolean(requestedProjectId);
+
   await recalculateClassFinalResults(classId);
 
+  let projectQuery = supabase
+    .from('projects')
+    .select('id, title')
+    .eq('class_id', classId);
+
+  if (requestedProjectId) {
+    projectQuery = projectQuery.eq('id', requestedProjectId);
+  }
+
   const [{ data: projects, error: projectError }, { data: classProfiles, error: classProfileError }] = await Promise.all([
-    supabase
-      .from('projects')
-      .select('id, title')
-      .eq('class_id', classId),
+    projectQuery,
     supabase
       .from('profiles')
       .select('id, full_name, roll_number')
@@ -1372,7 +1381,7 @@ export const getCoordinatorFinalResults = async (classId) => {
 
   const profiles = classProfiles && classProfiles.length === uniqueStudentIds.length
     ? classProfiles
-    : (() => { return null; })();
+    : null;
 
   let resolvedProfiles = profiles;
   if (!resolvedProfiles) {
@@ -1394,11 +1403,17 @@ export const getCoordinatorFinalResults = async (classId) => {
 
   const profileMap = new Map((resolvedProfiles || []).map((row) => [row.id, row]));
   const finalMap = new Map((finalRows || []).map((row) => [row.student_id, row]));
-  const [reviewRoundsMap, guideMap, eseMap] = await Promise.all([
-    getReviewRoundBreakdownForClassProjects({ projectIds }),
-    getSimpleStageBreakdownForClassProjects({ stage: 'guide', projectIds }),
-    getSimpleStageBreakdownForClassProjects({ stage: 'ese', projectIds }),
-  ]);
+  let reviewRoundsMap = {};
+  let guideMap = {};
+  let eseMap = {};
+
+  if (includeDetailedBreakdown) {
+    [reviewRoundsMap, guideMap, eseMap] = await Promise.all([
+      getReviewRoundBreakdownForClassProjects({ projectIds }),
+      getSimpleStageBreakdownForClassProjects({ stage: 'guide', projectIds }),
+      getSimpleStageBreakdownForClassProjects({ stage: 'ese', projectIds }),
+    ]);
+  }
 
   return uniqueStudentIds.map((studentId) => {
     const profile = profileMap.get(studentId) || {};
