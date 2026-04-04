@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AppFrame from "../components/AppFrame";
 import Sidebar from "../components/admin/Sidebar";
 import TopNavbar from "../components/admin/TopNavbar";
+import useAdminProfilePanel from "../hooks/useAdminProfilePanel";
 import {
   RUBRIC_STAGE_OPTIONS,
   fetchAdminClasses,
@@ -15,6 +16,8 @@ import {
 } from "../services/rubrics";
 import supabase from "../config/supabaseClient";
 import Modal from "../components/Modal";
+import AdminProfileSettingsModal from "../components/admin/AdminProfileSettingsModal";
+import ProfileMenu from "../components/ProfileMenu";
 
 const ADMIN_RUBRIC_STAGE_OPTIONS = RUBRIC_STAGE_OPTIONS.filter((item) => item.value !== "guide");
 const ADMIN_REVIEW_RUBRIC_OPTIONS = [
@@ -83,6 +86,15 @@ function getGradeFromFinalMarks(finalMarks) {
 
 export default function AdminRubrics() {
   const navigate = useNavigate();
+  const finalResultsRef = useRef(null);
+  const {
+    adminProfile,
+    showProfileMenu,
+    setShowProfileMenu,
+    showProfileSettings,
+    setShowProfileSettings,
+    refreshAdminProfile,
+  } = useAdminProfilePanel();
   const [stage, setStage] = useState(ADMIN_RUBRIC_STAGE_OPTIONS[0].value);
   const [reviewRubricMode, setReviewRubricMode] = useState(ADMIN_REVIEW_RUBRIC_OPTIONS[0].value);
   const [rubrics, setRubrics] = useState([]);
@@ -134,6 +146,17 @@ export default function AdminRubrics() {
   useEffect(() => {
     loadData(stage, reviewRubricMode);
   }, [loadData, reviewRubricMode, stage]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.location.hash !== "#final-results") return;
+
+    const timer = window.setTimeout(() => {
+      finalResultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 150);
+
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const activeTotal = useMemo(
     () => rubrics.filter((item) => item.is_active !== false).reduce((sum, item) => sum + Number(item.max_marks || 0), 0),
@@ -303,7 +326,29 @@ export default function AdminRubrics() {
   return (
     <AppFrame
       sidebar={<Sidebar activeItem="rubrics-management" onSignOut={handleSignOut} onNavigate={handleNavigate} />}
-      header={<TopNavbar adminName="Meenakshi" academicYearLabel="2026 - S6 Mini Project" pageTitle="Rubrics Management" onHomeClick={() => navigate("/admin")} />}
+      header={<TopNavbar adminName={adminProfile.full_name || "Admin"} academicYearLabel="2026 - S6 Mini Project" pageTitle="Rubrics Management" onHomeClick={() => navigate("/admin")} onProfileClick={() => setShowProfileMenu((value) => !value)} />}
+      headerOverlay={showProfileMenu ? (
+        <div className="fixed top-14 right-2 sm:right-6 md:right-8 z-50">
+          <ProfileMenu
+            profile={adminProfile}
+            isOpen={showProfileMenu}
+            onClose={() => setShowProfileMenu(false)}
+            onLogout={handleSignOut}
+            onEditProfile={() => {
+              setShowProfileMenu(false);
+              setShowProfileSettings(true);
+            }}
+            roleLabel="Administrator"
+            roleIcon="admin_panel_settings"
+            infoItems={[
+              { label: "Full Name", value: adminProfile.full_name || "-" },
+              { label: "Email", value: adminProfile.email || "-" },
+              { label: "Role", value: "Administrator" },
+              { label: "Department", value: adminProfile.department || "-" },
+            ]}
+          />
+        </div>
+      ) : null}
     >
       <div className="p-4 md:p-6 lg:p-8 space-y-6">
         <section className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
@@ -364,7 +409,11 @@ export default function AdminRubrics() {
         {error ? <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
         {notice ? <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div> : null}
 
-        <section className="bg-white/90 rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+        <section
+          id="final-results"
+          ref={finalResultsRef}
+          className="bg-white/90 rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden"
+        >
           <div className="px-6 py-4 border-b border-slate-200/70">
             <h2 className="text-lg font-semibold text-slate-800">{rubricHeading}</h2>
             <p className="mt-1 text-sm text-slate-500">
@@ -553,6 +602,11 @@ export default function AdminRubrics() {
           </div>
         </div>
       </Modal>
+      <AdminProfileSettingsModal
+        isOpen={showProfileSettings}
+        onClose={() => setShowProfileSettings(false)}
+        onSuccess={refreshAdminProfile}
+      />
     </AppFrame>
   );
 }

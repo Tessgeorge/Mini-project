@@ -1,7 +1,8 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useMemo, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import supabase, { setAuthPersistence } from '../config/supabaseClient'
 import { apiRequest } from '../config/apiClient'
+import { resolveAuthEmail } from '../utils/authEmailResolution'
 
 const ACCENT_COLOR = '#00D2C4'
 
@@ -13,12 +14,20 @@ const ROLE_ROUTES = {
 
 export default function SignIn() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [rememberMe, setRememberMe] = useState(false)
   const [authError, setAuthError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const authNotice = useMemo(() => {
+    const params = new URLSearchParams(location.search)
+    if (params.get('reset') === 'success') {
+      return 'Password updated successfully. Please sign in with your new password.'
+    }
+    return ''
+  }, [location.search])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -27,11 +36,12 @@ export default function SignIn() {
 
     try {
       setAuthPersistence(rememberMe)
+      const resolvedEmail = await resolveAuthEmail(email)
 
       const {
         data: authData,
         error: signInError,
-      } = await supabase.auth.signInWithPassword({ email, password })
+      } = await supabase.auth.signInWithPassword({ email: resolvedEmail.authEmail, password })
 
       if (signInError) {
         throw signInError
@@ -44,6 +54,20 @@ export default function SignIn() {
       }
 
       const profile = await apiRequest('/profile')
+
+      if (profile?.account_status === 'invited') {
+        try {
+          await apiRequest('/profile', {
+            method: 'PUT',
+            body: {
+              account_status: 'active',
+              is_active: true,
+            },
+          })
+        } catch (activationError) {
+          console.error('Failed to activate invited account:', activationError)
+        }
+      }
 
       const normalizedRole = profile?.role?.toLowerCase()
       const destination = ROLE_ROUTES[normalizedRole]
@@ -150,6 +174,12 @@ export default function SignIn() {
             </div>
           )}
 
+          {authNotice && !authError && (
+            <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700" role="status" aria-live="polite">
+              {authNotice}
+            </div>
+          )}
+
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
@@ -179,9 +209,9 @@ export default function SignIn() {
                 <label htmlFor="password" className="text-sm font-semibold text-ink">
                   Password
                 </label>
-                <a href="#" className="text-sm font-medium text-teal-600 hover:underline">
+                <Link to="/forgot-password" className="text-sm font-medium text-teal-600 hover:underline">
                   Forgot password?
-                </a>
+                </Link>
               </div>
               <div className="relative">
                 <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">

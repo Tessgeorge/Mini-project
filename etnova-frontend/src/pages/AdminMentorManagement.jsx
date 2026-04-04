@@ -3,15 +3,19 @@ import { useNavigate } from "react-router-dom";
 import supabase from "../lib/supabase";
 import { apiRequest } from "../config/apiClient";
 import useAdminAuth from "../hooks/useAdminAuth";
+import useAdminProfilePanel from "../hooks/useAdminProfilePanel";
 import AppFrame from "../components/AppFrame";
 import Sidebar from "../components/admin/Sidebar";
 import TopNavbar from "../components/admin/TopNavbar";
 import MentorStatCard from "../components/admin/MentorStatCard";
 import MentorTable from "../components/admin/MentorTable";
 import EditRoleModal from "../components/admin/EditRoleModal";
+import AdminProfileSettingsModal from "../components/admin/AdminProfileSettingsModal";
+import ProfileMenu from "../components/ProfileMenu";
 import { subscribeWithDeferredCleanup } from "../utils/realtimeChannel";
 
 const ADMIN_NAME = "Meenakshi";
+const IMPORT_PREVIEW_STORAGE_KEY = "etnova_admin_mentor_import_preview";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isUuid = (value) => typeof value === "string" && UUID_REGEX.test(value);
@@ -50,9 +54,47 @@ async function fetchMentorEvaluationsByMentorId(mentorId) {
   return [];
 }
 
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Failed to read file."));
+    reader.readAsText(file);
+  });
+}
+
+function readFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Failed to read file."));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+
+  return btoa(binary);
+}
+
 export default function AdminMentorManagement() {
   useAdminAuth();
   const navigate = useNavigate();
+  const {
+    adminProfile,
+    showProfileMenu,
+    setShowProfileMenu,
+    showProfileSettings,
+    setShowProfileSettings,
+    refreshAdminProfile,
+  } = useAdminProfilePanel();
   const [mentors, setMentors] = useState([]);
   const [projects, setProjects] = useState([]);
   const [mentorRows, setMentorRows] = useState([]);
@@ -64,6 +106,23 @@ export default function AdminMentorManagement() {
   const [editingClassId, setEditingClassId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [importFileName, setImportFileName] = useState("");
+  const [importNotice, setImportNotice] = useState("");
+  const [importSkipped, setImportSkipped] = useState([]);
+  const [importPreview, setImportPreview] = useState([]);
+  const [importMeta, setImportMeta] = useState({
+    extractedCount: 0,
+    mentorCount: 0,
+    adminCount: 0,
+    validMentorCount: 0,
+    createCount: 0,
+    updateCount: 0,
+    skipCount: 0,
+  });
+  const [showImportPreview, setShowImportPreview] = useState(true);
+  const [extractingImport, setExtractingImport] = useState(false);
+  const [pendingImportRows, setPendingImportRows] = useState([]);
+  const [confirmingImport, setConfirmingImport] = useState(false);
   const [selectedMentorId, setSelectedMentorId] = useState("");
   const [workloadOpen, setWorkloadOpen] = useState(true);
   const [workloadLoading, setWorkloadLoading] = useState(false);
@@ -98,6 +157,44 @@ export default function AdminMentorManagement() {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(IMPORT_PREVIEW_STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      setImportFileName(saved?.importFileName || "");
+      setImportNotice(saved?.importNotice || "");
+      setImportSkipped(Array.isArray(saved?.importSkipped) ? saved.importSkipped : []);
+      setImportPreview(Array.isArray(saved?.importPreview) ? saved.importPreview : []);
+      setPendingImportRows(Array.isArray(saved?.pendingImportRows) ? saved.pendingImportRows : []);
+      setImportMeta(saved?.importMeta || {
+        extractedCount: 0,
+        mentorCount: 0,
+        adminCount: 0,
+        validMentorCount: 0,
+        createCount: 0,
+        updateCount: 0,
+        skipCount: 0,
+      });
+      setShowImportPreview(saved?.showImportPreview !== false);
+    } catch {
+      window.localStorage.removeItem(IMPORT_PREVIEW_STORAGE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    const payload = {
+      importFileName,
+      importNotice,
+      importSkipped,
+      importPreview,
+      pendingImportRows,
+      importMeta,
+      showImportPreview,
+    };
+    window.localStorage.setItem(IMPORT_PREVIEW_STORAGE_KEY, JSON.stringify(payload));
+  }, [importFileName, importNotice, importSkipped, importPreview, pendingImportRows, importMeta, showImportPreview]);
 
   useEffect(() => {
     const workload = new Map();
@@ -326,6 +423,136 @@ export default function AdminMentorManagement() {
     }
   };
 
+  const handleImportFileChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setError("");
+    setImportNotice("");
+    setImportSkipped([]);
+    setPendingImportRows([]);
+    setExtractingImport(true);
+
+    try {
+      const lowerFileName = file.name.toLowerCase();
+      const isBinaryUpload =
+        file.type.includes("pdf")
+        || file.type.includes("spreadsheet")
+        || file.type.includes("excel")
+        || lowerFileName.endsWith(".pdf")
+        || lowerFileName.endsWith(".xlsx")
+        || lowerFileName.endsWith(".xls")
+        || lowerFileName.endsWith(".csv");
+      const payload = {
+        fileName: file.name,
+        mimeType: file.type,
+      };
+
+      if (isBinaryUpload) {
+        const fileBuffer = await readFileAsArrayBuffer(file);
+        payload.fileBase64 = arrayBufferToBase64(fileBuffer);
+      } else {
+        payload.text = await readFileAsText(file);
+      }
+
+      const data = await apiRequest("/admin/mentor-management-import/extract", {
+        method: "POST",
+        body: payload,
+      });
+
+      const extractedPeople = data?.people || [];
+      const validMentors = extractedPeople.filter((person) => person.role === "mentor" && person.full_name && person.email);
+
+      setImportPreview(extractedPeople);
+      setPendingImportRows(extractedPeople);
+      setImportMeta(data?.meta || {
+        extractedCount: extractedPeople.length,
+        mentorCount: extractedPeople.filter((person) => person.role === "mentor").length,
+        adminCount: extractedPeople.filter((person) => person.role === "admin").length,
+        validMentorCount: validMentors.length,
+        createCount: extractedPeople.filter((person) => person.import_action === "create").length,
+        updateCount: extractedPeople.filter((person) => person.import_action === "update").length,
+        skipCount: extractedPeople.filter((person) => person.import_action === "skip").length,
+      });
+      setShowImportPreview(true);
+
+      if (extractedPeople.length === 0) {
+        setImportFileName(file.name);
+        setImportNotice(`No people could be extracted from ${file.name}.`);
+        return;
+      }
+
+      setImportFileName(file.name);
+      setImportNotice(
+        [
+          `Preview ready for ${file.name}.`,
+          `Extracted ${data?.meta?.extractedCount || 0} people.`,
+          `Mapped ${validMentors.length} valid mentor row${validMentors.length === 1 ? "" : "s"} into Mentor Management.`,
+          "Review the rows below and confirm import to apply changes.",
+        ].join(" ")
+      );
+    } catch (err) {
+      setImportFileName(file.name);
+      setError(err.message || "Failed to process uploaded file.");
+    } finally {
+      setExtractingImport(false);
+      event.target.value = "";
+    }
+  };
+
+  const handleCancelImportPreview = () => {
+    setImportFileName("");
+    setImportNotice("");
+    setImportSkipped([]);
+    setImportPreview([]);
+    setPendingImportRows([]);
+    setImportMeta({
+      extractedCount: 0,
+      mentorCount: 0,
+      adminCount: 0,
+      validMentorCount: 0,
+      createCount: 0,
+      updateCount: 0,
+      skipCount: 0,
+    });
+    setShowImportPreview(true);
+  };
+
+  const handleConfirmImport = async () => {
+    if (pendingImportRows.length === 0) return;
+
+    setError("");
+    setImportSkipped([]);
+    setConfirmingImport(true);
+
+    try {
+      const applyResult = await apiRequest("/admin/mentor-management-import/apply", {
+        method: "POST",
+        body: {
+          people: pendingImportRows,
+          fileName: importFileName,
+        },
+      });
+
+      setImportNotice(
+        [
+          `Processed ${importFileName || "uploaded file"}.`,
+          `Created ${applyResult?.summary?.created || 0}, updated ${applyResult?.summary?.updated || 0}, skipped ${applyResult?.summary?.skipped || 0}.`,
+          applyResult?.summary?.invited
+            ? `Password setup email sent for ${applyResult.summary.invited} new account${applyResult.summary.invited === 1 ? "" : "s"}.`
+            : null,
+        ].filter(Boolean).join(" ")
+      );
+      setImportSkipped(applyResult?.skipped || []);
+      setPendingImportRows([]);
+      await fetchData(true);
+    } catch (err) {
+      setError(err.message || "Failed to apply mentor import.");
+    } finally {
+      setConfirmingImport(false);
+    }
+  };
+
   const handleEditRoles = (mentor) => {
     setEditingMentor(mentor);
     setEditingRoles(mentor.roles || []);
@@ -510,12 +737,35 @@ export default function AdminMentorManagement() {
       )}
       header={(
         <TopNavbar
-          adminName={ADMIN_NAME}
+          adminName={adminProfile.full_name || ADMIN_NAME}
           academicYearLabel="2026 - S6 Mini Project"
           pageTitle="Mentor Management"
           onHomeClick={() => navigate("/admin")}
+          onProfileClick={() => setShowProfileMenu((value) => !value)}
         />
       )}
+      headerOverlay={showProfileMenu ? (
+        <div className="fixed top-14 right-2 sm:right-6 md:right-8 z-50">
+          <ProfileMenu
+            profile={adminProfile}
+            isOpen={showProfileMenu}
+            onClose={() => setShowProfileMenu(false)}
+            onLogout={handleSignOut}
+            onEditProfile={() => {
+              setShowProfileMenu(false);
+              setShowProfileSettings(true);
+            }}
+            roleLabel="Administrator"
+            roleIcon="admin_panel_settings"
+            infoItems={[
+              { label: "Full Name", value: adminProfile.full_name || "-" },
+              { label: "Email", value: adminProfile.email || "-" },
+              { label: "Role", value: "Administrator" },
+              { label: "Department", value: adminProfile.department || "-" },
+            ]}
+          />
+        </div>
+      ) : null}
     >
       <div className="p-4 md:p-6 lg:p-8 space-y-6">
           <section className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
@@ -549,6 +799,178 @@ export default function AdminMentorManagement() {
             <MentorStatCard title="Total Guides" value={stats.totalGuides} icon="guide" borderClass="border-t-cyan-500" />
             <MentorStatCard title="Total Coordinators" value={stats.totalCoordinators} icon="coordinator" borderClass="border-t-violet-500" />
           </section>
+
+          <section className="bg-white/90 rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+            <div className="px-6 py-5 border-b border-slate-200/70 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-800">Import Mentor File</h2>
+                <p className="text-sm text-slate-500 mt-1">
+                  Upload a mentor file to update the list automatically.
+                </p>
+              </div>
+              <label className="inline-flex items-center justify-center rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-700 transition-colors cursor-pointer">
+                <input
+                  type="file"
+                  accept=".txt,.json,.pdf,.md,.xlsx,.xls,.csv"
+                  className="hidden"
+                  onChange={handleImportFileChange}
+                  disabled={extractingImport}
+                />
+                {extractingImport ? "Processing..." : "Upload File"}
+              </label>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {importFileName ? (
+                <p className="text-sm text-slate-600">
+                  Source file: <span className="font-semibold text-slate-800">{importFileName}</span>
+                </p>
+              ) : null}
+
+              {importNotice && importPreview.length === 0 ? (
+                <div className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-800">
+                  {importNotice}
+                </div>
+              ) : null}
+
+              {importSkipped.length > 0 ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                  <h3 className="text-sm font-semibold text-amber-900">Skipped Rows</h3>
+                  <div className="mt-2 space-y-2">
+                    {importSkipped.map((item, index) => (
+                      <p key={`${item.email || item.full_name || "skip"}-${index}`} className="text-xs text-amber-800">
+                        {(item.full_name || item.email || "Unknown row")} - {item.reason}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          {importPreview.length > 0 ? (
+            <section className="bg-white/90 rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+              <div className="px-6 py-5 border-b border-slate-200/70 flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-800">Uploaded File Preview</h2>
+                  <p className="text-sm text-slate-500 mt-1">
+                    Preview of the extracted rows from {importFileName || "the uploaded file"} after mapping.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowImportPreview((prev) => !prev)}
+                  className="shrink-0 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                >
+                  {showImportPreview ? "Hide" : "Show"}
+                </button>
+              </div>
+
+              {showImportPreview ? (
+              <div className="p-6 space-y-5">
+                {pendingImportRows.length > 0 ? (
+                  <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-cyan-900">Preview ready</p>
+                      <p className="text-sm text-cyan-800 mt-1">
+                        Nothing has been imported yet. Confirm to create or update mentor accounts from these rows.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={handleCancelImportPreview}
+                        disabled={confirmingImport}
+                        className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleConfirmImport}
+                        disabled={confirmingImport || extractingImport}
+                        className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {confirmingImport ? "Importing..." : "Confirm Import"}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-4">
+                  {[
+                    { label: "Extracted", value: importMeta.extractedCount },
+                    { label: "Mentors", value: importMeta.mentorCount },
+                    { label: "Admins", value: importMeta.adminCount },
+                    { label: "Valid Mentor Imports", value: importMeta.validMentorCount },
+                    { label: "Create", value: importMeta.createCount || 0 },
+                    { label: "Update", value: importMeta.updateCount || 0 },
+                    { label: "Skip", value: importMeta.skipCount || 0 },
+                  ].map((item) => (
+                    <div key={item.label} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{item.label}</p>
+                      <p className="mt-2 text-2xl font-semibold text-slate-800">{item.value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full min-w-[1080px] text-sm">
+                    <thead className="bg-slate-100/80 text-slate-600">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-semibold">Name</th>
+                        <th className="px-4 py-3 text-left font-semibold">Email</th>
+                        <th className="px-4 py-3 text-left font-semibold">Employee ID</th>
+                        <th className="px-4 py-3 text-left font-semibold">Department</th>
+                        <th className="px-4 py-3 text-left font-semibold">Specialization</th>
+                        <th className="px-4 py-3 text-left font-semibold">Role</th>
+                        <th className="px-4 py-3 text-left font-semibold">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {importPreview.map((person, index) => (
+                        <tr key={`${person.email || person.full_name || "preview"}-${index}`} className="bg-white">
+                          <td className="px-4 py-3 text-slate-800 font-medium">{person.full_name || "-"}</td>
+                          <td className="px-4 py-3 text-slate-600">{person.email || "-"}</td>
+                          <td className="px-4 py-3 text-slate-600">{person.employee_id || "-"}</td>
+                          <td className="px-4 py-3 text-slate-600">{person.department || "-"}</td>
+                          <td className="px-4 py-3 text-slate-600">{person.specialization?.join(", ") || "-"}</td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                              person.role === "admin"
+                                ? "bg-amber-100 text-amber-800"
+                                : "bg-emerald-100 text-emerald-700"
+                            }`}>
+                              {person.role}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-col gap-1">
+                              <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                person.import_action === "create"
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : person.import_action === "update"
+                                    ? "bg-sky-100 text-sky-700"
+                                    : "bg-rose-100 text-rose-700"
+                              }`}>
+                                {(person.import_action || "skip").toUpperCase()}
+                              </span>
+                              <span className="text-xs text-slate-500">{person.import_reason || "-"}</span>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              ) : (
+                <div className="px-6 py-4 text-sm text-slate-500">
+                  Preview hidden. Click <span className="font-semibold text-slate-700">Show</span> to view the uploaded rows again.
+                </div>
+              )}
+            </section>
+          ) : null}
 
           {loading ? (
             <div className="flex items-center gap-3 text-sm text-slate-600">
@@ -641,6 +1063,11 @@ export default function AdminMentorManagement() {
           setEditingClassId("");
         }}
         onSave={handleSaveRoles}
+      />
+      <AdminProfileSettingsModal
+        isOpen={showProfileSettings}
+        onClose={() => setShowProfileSettings(false)}
+        onSuccess={refreshAdminProfile}
       />
     </AppFrame>
   );

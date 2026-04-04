@@ -41,8 +41,6 @@ const Icon = {
 };
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-const scoreClr = s => s >= 90 ? "text-emerald-600" : s >= 70 ? "text-amber-500" : "text-red-500";
-
 let mentorEvalFilterStrategy = null;
 let mentorEvalInsertStrategy = null;
 const mentorEvaluationInflight = new Map();
@@ -969,8 +967,6 @@ function OverviewTab({
 
   const pendingTeams = projects.filter((proj) => !evaluations.some((ev) => ev.project_id === proj.id));
   const handleSubmitReview = async (data) => { await onSubmitReview(data); setReviewProject(null); };
-  const avgScore = evaluations.length
-    ? Math.round(evaluations.reduce((s, e) => s + Number(e.score), 0) / evaluations.length) : 0;
   const reviewerStageLabels = allowedReviewStages.map(formatReviewStageLabel);
   const reviewerSummary = showEvaluationPanel
     ? `${reviewProjects.length} team${reviewProjects.length !== 1 ? "s" : ""} available`
@@ -1238,25 +1234,34 @@ function OverviewTab({
 
 // ─── TEAMS TAB ──────────────────────────────────────────────────────────────
 function TeamsTab({ projects, evaluations, loading, mentorId, mentorName, onNavigateHome }) {
-  const [sel, setSel] = useState(null);
+  const [sel, setSel] = useState(() => getStoredMentorSelectedTeamId());
+  const selectedProject = projects.find((project) => project.id === sel) || null;
 
   useEffect(() => {
-    if (loading || !sel) return;
-    const stillExists = projects.some((project) => project.id === sel);
-    if (!stillExists) {
-      setSel(null);
+    if (!sel) {
+      try {
+        window.sessionStorage.removeItem(MENTOR_SELECTED_TEAM_STORAGE_KEY);
+      } catch {
+        // Ignore session storage access failures.
+      }
+      return;
     }
-  }, [loading, projects, sel]);
+
+    try {
+      window.sessionStorage.setItem(MENTOR_SELECTED_TEAM_STORAGE_KEY, sel);
+    } catch {
+      // Ignore session storage access failures.
+    }
+  }, [sel]);
 
   if (loading) return <Spinner />;
 
-  if (sel) {
-    const proj = projects.find(p => p.id === sel);
+  if (selectedProject) {
     return (
       <Suspense fallback={<TabPanelLoader label="Loading team workspace..." />}>
         <TeamWorkspace
-          key={proj?.id || sel}
-          proj={proj}
+          key={selectedProject.id}
+          proj={selectedProject}
           mentorId={mentorId}
           mentorName={mentorName}
           onNavigateHome={onNavigateHome}
@@ -1352,20 +1357,24 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
   const [search, setSearch] = useState("");
   const [batchFilter, setBatchFilter] = useState("all");
   const selectedProject = projects.find((project) => project.id === selectedProjectId) || null;
+  const persistedReviewProjectId = selectedProject ? selectedProjectId : null;
 
   useEffect(() => {
-    if (!selectedProjectId) {
-      try { window.sessionStorage.removeItem(MENTOR_SELECTED_REVIEW_PROJECT_STORAGE_KEY); } catch {}
+    if (!persistedReviewProjectId) {
+      try {
+        window.sessionStorage.removeItem(MENTOR_SELECTED_REVIEW_PROJECT_STORAGE_KEY);
+      } catch {
+        // Ignore session storage access failures.
+      }
       return;
     }
-    try { window.sessionStorage.setItem(MENTOR_SELECTED_REVIEW_PROJECT_STORAGE_KEY, selectedProjectId); } catch {}
-  }, [selectedProjectId]);
 
-  useEffect(() => {
-    if (loading || !selectedProjectId) return;
-    const stillExists = projects.some((project) => project.id === selectedProjectId);
-    if (!stillExists) setSelectedProjectId(null);
-  }, [loading, projects, selectedProjectId]);
+    try {
+      window.sessionStorage.setItem(MENTOR_SELECTED_REVIEW_PROJECT_STORAGE_KEY, persistedReviewProjectId);
+    } catch {
+      // Ignore session storage access failures.
+    }
+  }, [persistedReviewProjectId]);
 
   const className = projects.length > 0
     ? (projects[0].class_name || projects[0].classes?.class_section || "Assigned Class")
@@ -1654,22 +1663,29 @@ export default function MentorDashboard() {
       } else {
         window.sessionStorage.removeItem(MENTOR_ACTIVE_TAB_STORAGE_KEY);
       }
-    } catch {}
+    } catch {
+      // Ignore session storage access failures.
+    }
   }, [active]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    try { window.sessionStorage.removeItem(MENTOR_SELECTED_TEAM_STORAGE_KEY); } catch {}
+    try {
+      window.sessionStorage.removeItem(MENTOR_SELECTED_TEAM_STORAGE_KEY);
+    } catch {
+      // Ignore session storage access failures.
+    }
   }, [active]);
 
   const loadCoordinatorClassData = useCallback(async (classId) => {
     return withInflight(coordinatorClassDataInflight, classId, async () => {
-      const [{ data: classRow }, { data: classProjects }, { data: reviewStageRows, error: reviewStageError }] = await Promise.all([
+      const [{ data: classRow }, { data: classProjects }, { data: reviewStageRows, error: reviewStageError }, { data: classStudentProfiles }] = await Promise.all([
         supabase.from("classes").select("id, class_section").eq("id", classId).single(),
         supabase.from("projects").select("id, title, guide_id, status, approved_idea_id").eq("class_id", classId),
         supabase.from("review_stages")
           .select("id, stage_name, deadline, coordinator_deadline, stage_order, is_active, is_completed, is_locked, student_deadline_set_by_coordinator")
           .eq("class_id", classId).order("stage_order", { ascending: true }),
+        supabase.from("profiles").select("id").eq("role", "student").eq("class_id", classId),
       ]);
 
       const projectsInClass = classProjects || [];
@@ -1685,31 +1701,34 @@ export default function MentorDashboard() {
           : Promise.resolve({ data: [] }),
       ]);
 
-      const members = membersRes.data || [];
-      const classEvals = evalRes.data || [];
-      const guides = guidesRes.data || [];
-      const documents = docsRes.data || [];
-      const guideMap = new Map(guides.map(g => [g.id, g.full_name || "Unassigned"]));
-      const memberCountByProject = members.reduce((acc, item) => { acc[item.project_id] = (acc[item.project_id] || 0) + 1; return acc; }, {});
-      const totalStudents = new Set(members.map((item) => item.student_id).filter(Boolean)).size;
-      const studentsByProject = members.reduce((acc, item) => {
-        if (!item?.project_id || !item?.student_id) return acc;
-        if (!acc[item.project_id]) acc[item.project_id] = new Set();
-        acc[item.project_id].add(item.student_id);
-        return acc;
-      }, {});
-      const evalByProject = classEvals.reduce((acc, item) => {
-        if (!acc[item.project_id]) acc[item.project_id] = [];
-        const normalizedScore = Number(item.score ?? item.obtained_marks);
-        acc[item.project_id].push(Number.isNaN(normalizedScore) ? 0 : normalizedScore);
-        return acc;
-      }, {});
-      const latestDocumentByProjectType = documents.reduce((acc, item) => {
-        if (!item?.project_id || !item?.document_type) return acc;
-        const key = `${item.project_id}:${String(item.document_type).trim().toLowerCase()}`;
-        if (!acc[key]) acc[key] = item;
-        return acc;
-      }, {});
+    const members = membersRes.data || [];
+    const classEvals = evalRes.data || [];
+    const guides = guidesRes.data || [];
+    const documents = docsRes.data || [];
+    const guideMap = new Map(guides.map(g => [g.id, g.full_name || "Unassigned"]));
+    const memberCountByProject = members.reduce((acc, item) => { acc[item.project_id] = (acc[item.project_id] || 0) + 1; return acc; }, {});
+    const classStudentIds = new Set((classStudentProfiles || []).map((item) => item.id).filter(Boolean));
+    const teamStudentIds = new Set(members.map((item) => item.student_id).filter(Boolean));
+    const totalStudents = classStudentIds.size;
+    const studentsWithoutTeamCount = [...classStudentIds].filter((studentId) => !teamStudentIds.has(studentId)).length;
+    const studentsByProject = members.reduce((acc, item) => {
+      if (!item?.project_id || !item?.student_id) return acc;
+      if (!acc[item.project_id]) acc[item.project_id] = new Set();
+      acc[item.project_id].add(item.student_id);
+      return acc;
+    }, {});
+    const evalByProject = classEvals.reduce((acc, item) => {
+      if (!acc[item.project_id]) acc[item.project_id] = [];
+      const normalizedScore = Number(item.score ?? item.obtained_marks);
+      acc[item.project_id].push(Number.isNaN(normalizedScore) ? 0 : normalizedScore);
+      return acc;
+    }, {});
+    const latestDocumentByProjectType = documents.reduce((acc, item) => {
+      if (!item?.project_id || !item?.document_type) return acc;
+      const key = `${item.project_id}:${String(item.document_type).trim().toLowerCase()}`;
+      if (!acc[key]) acc[key] = item;
+      return acc;
+    }, {});
 
       let reviewMarks = [];
       if (projectIds.length) {
@@ -1760,15 +1779,16 @@ export default function MentorDashboard() {
       });
 
       const evaluatedCount = projectRows.filter(item => item.evaluationCount > 0).length;
-      const allScores = classEvals.map(item => Number(item.score ?? item.obtained_marks)).filter(s => !Number.isNaN(s));
-      const classAverageScore = allScores.length ? allScores.reduce((sum, s) => sum + s, 0) / allScores.length : null;
+      const teamsWithLessThanTwoMembers = projectRows.filter((item) => Number(item.teamSize || 0) < 2).length;
 
       return {
         classId, classTitle: classRow?.class_section || "Untitled Class",
         totalProjects: projectRows.length, evaluatedProjects: evaluatedCount,
         totalStudents,
         pendingEvaluations: projectRows.length - evaluatedCount,
-        classAverageScore, stageProgress, projects: projectRows,
+        teamsWithLessThanTwoMembers,
+        studentsWithoutTeamCount,
+        stageProgress, projects: projectRows,
         reviewStages: sortReviewStages(reviewStageRows || []),
         deadlineLoadError: reviewStageError
           ? (/coordinator_deadline/i.test(String(reviewStageError.message || ""))
@@ -1939,7 +1959,7 @@ export default function MentorDashboard() {
 
         const coordinatorResolution = resolveCoordinatorClassId(profile, projData);
         if (coordinatorResolution.classId) {
-          if (!myClassData) setMyClassLoading(true);
+          setMyClassLoading(true);
           const freshData = await loadCoordinatorClassData(coordinatorResolution.classId);
           setMyClassData(freshData);
           setMyClassLoading(false);
@@ -2104,6 +2124,10 @@ export default function MentorDashboard() {
               classData={myClassData}
               loading={myClassLoading}
               onSaveStudentDeadline={handleSaveStudentDeadline}
+              onStudentImportComplete={async () => {
+                if (!coordinatorClassId) return;
+                setMyClassData(await loadCoordinatorClassData(coordinatorClassId));
+              }}
               activeSubPage={active.replace("my-class-", "")}
               onNavigate={(sub) => setActive("my-class-" + sub)}
             />

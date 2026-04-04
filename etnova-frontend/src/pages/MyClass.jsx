@@ -53,6 +53,36 @@ function toDateInputValue(v) { return v ? v.slice(0, 10) : ""; }
 function toTimeInputValue(v) { return v ? (v.slice(11, 16) || "") : ""; }
 function buildDeadlineIso(d, t) { return d && t ? `${d}T${t}:00` : ""; }
 
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Failed to read file."));
+    reader.readAsText(file);
+  });
+}
+
+function readFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Failed to read file."));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+
+  return btoa(binary);
+}
+
 function sortReviewStages(rows) {
   const grouped = new Map();
   for (const row of rows || []) {
@@ -191,12 +221,27 @@ const INNER_TABS = [
 ];
 
 // ─── TAB 1: Overview ─────────────────────────────────────────────────────────
-function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadline, onNavigate }) {
+function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadline, onNavigate, onStudentImportComplete }) {
   const [deadlineDrafts, setDeadlineDrafts] = useState({});
   const [editingIds, setEditingIds] = useState({});
   const [savingId, setSavingId] = useState("");
   const [dlError, setDlError] = useState("");
   const [dlNotice, setDlNotice] = useState("");
+  const [studentImportFileName, setStudentImportFileName] = useState("");
+  const [studentImportNotice, setStudentImportNotice] = useState("");
+  const [studentImportError, setStudentImportError] = useState("");
+  const [studentImportPreview, setStudentImportPreview] = useState([]);
+  const [studentImportMeta, setStudentImportMeta] = useState({
+    extractedCount: 0,
+    validStudentCount: 0,
+    createCount: 0,
+    updateCount: 0,
+    skipCount: 0,
+  });
+  const [studentImportSkipped, setStudentImportSkipped] = useState([]);
+  const [uploadingStudents, setUploadingStudents] = useState(false);
+  const [pendingStudentImportRows, setPendingStudentImportRows] = useState([]);
+  const [confirmingStudents, setConfirmingStudents] = useState(false);
   // Local overrides so saved deadline shows instantly without waiting for classData refresh
   const [savedDeadlines, setSavedDeadlines] = useState({});
 
@@ -228,19 +273,145 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
   );
 
   const {
+    classId,
     classTitle,
     totalProjects,
     totalStudents = Array.isArray(classData?.projects)
       ? classData.projects.reduce((sum, project) => sum + Number(project?.teamSize || 0), 0)
       : 0,
-    evaluatedProjects,
-    pendingEvaluations,
-    classAverageScore,
+    pendingEvaluations = 0,
+    teamsWithLessThanTwoMembers = 0,
+    studentsWithoutTeamCount = 0,
     projects = [],
     reviewStages = [],
     deadlineLoadError = "",
     stageProgress = {}
   } = classData;
+
+  const handleStudentImportFileChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setStudentImportFileName(file.name);
+    setStudentImportNotice("");
+    setStudentImportError("");
+    setStudentImportSkipped([]);
+    setPendingStudentImportRows([]);
+    setUploadingStudents(true);
+
+    try {
+      const lowerFileName = file.name.toLowerCase();
+      const isBinaryUpload =
+        file.type.includes("pdf")
+        || file.type.includes("spreadsheet")
+        || file.type.includes("excel")
+        || lowerFileName.endsWith(".pdf")
+        || lowerFileName.endsWith(".xlsx")
+        || lowerFileName.endsWith(".xls")
+        || lowerFileName.endsWith(".csv");
+
+      const payload = {
+        fileName: file.name,
+        mimeType: file.type,
+      };
+
+      if (isBinaryUpload) {
+        const fileBuffer = await readFileAsArrayBuffer(file);
+        payload.fileBase64 = arrayBufferToBase64(fileBuffer);
+      } else {
+        payload.text = await readFileAsText(file);
+      }
+
+      const extractResult = await apiRequest("/coordinator/student-import/extract", {
+        method: "POST",
+        body: payload,
+      });
+
+      const extractedStudents = extractResult?.students || [];
+      const validStudents = extractedStudents.filter((student) => student.full_name && student.email);
+
+      setStudentImportPreview(extractedStudents);
+      setPendingStudentImportRows(extractedStudents);
+      setStudentImportMeta(extractResult?.meta || {
+        extractedCount: extractedStudents.length,
+        validStudentCount: validStudents.length,
+        createCount: extractedStudents.filter((student) => student.import_action === "create").length,
+        updateCount: extractedStudents.filter((student) => student.import_action === "update").length,
+        skipCount: extractedStudents.filter((student) => student.import_action === "skip").length,
+      });
+
+      if (extractedStudents.length === 0) {
+        setStudentImportNotice(`No student rows could be extracted from ${file.name}.`);
+        return;
+      }
+      setStudentImportNotice(
+        [
+          `Preview ready for ${file.name}.`,
+          `Extracted ${extractResult?.meta?.extractedCount || extractedStudents.length} student row${(extractResult?.meta?.extractedCount || extractedStudents.length) === 1 ? "" : "s"}.`,
+          "Review the rows below and confirm import to apply changes.",
+        ].join(" ")
+      );
+    } catch (error) {
+      setStudentImportError(error.message || "Failed to process uploaded student file.");
+    } finally {
+      setUploadingStudents(false);
+      event.target.value = "";
+    }
+  };
+
+  const handleCancelStudentImportPreview = () => {
+    setStudentImportFileName("");
+    setStudentImportNotice("");
+    setStudentImportError("");
+    setStudentImportPreview([]);
+    setStudentImportMeta({
+      extractedCount: 0,
+      validStudentCount: 0,
+      createCount: 0,
+      updateCount: 0,
+      skipCount: 0,
+    });
+    setStudentImportSkipped([]);
+    setPendingStudentImportRows([]);
+  };
+
+  const handleConfirmStudentImport = async () => {
+    if (pendingStudentImportRows.length === 0) return;
+
+    setStudentImportError("");
+    setStudentImportSkipped([]);
+    setConfirmingStudents(true);
+
+    try {
+      const applyResult = await apiRequest("/coordinator/student-import/apply", {
+        method: "POST",
+        body: {
+          students: pendingStudentImportRows,
+          fileName: studentImportFileName,
+        },
+      });
+
+      setStudentImportSkipped(applyResult?.skipped || []);
+      setStudentImportNotice(
+        [
+          `Processed ${studentImportFileName || "uploaded file"}.`,
+          `Created ${applyResult?.summary?.created || 0}, updated ${applyResult?.summary?.updated || 0}, skipped ${applyResult?.summary?.skipped || 0}.`,
+          applyResult?.summary?.invited
+            ? `Password setup email sent for ${applyResult.summary.invited} new account${applyResult.summary.invited === 1 ? "" : "s"}.`
+            : null,
+        ].filter(Boolean).join(" ")
+      );
+      setPendingStudentImportRows([]);
+
+      if (typeof onStudentImportComplete === "function") {
+        await onStudentImportComplete();
+      }
+    } catch (error) {
+      setStudentImportError(error.message || "Failed to apply student import.");
+    } finally {
+      setConfirmingStudents(false);
+    }
+  };
 
   const handleDraftChange = (id, key, val) => {
     setDeadlineDrafts(p => ({ ...p, [id]: { date: p[id]?.date || "", time: p[id]?.time || "", [key]: val } }));
@@ -335,9 +506,9 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
         {[
           { label: "Total Teams", value: totalProjects, icon: "groups", color: "#00D2C4" },
-          { label: "Evaluated", value: evaluatedProjects, icon: "verified", color: "#10b981" },
-          { label: "Pending", value: pendingEvaluations, icon: "pending", color: "#f59e0b" },
-          { label: "Class Avg Score", value: classAverageScore != null ? `${formatClassScore(classAverageScore)}/100` : "—", icon: "grade", color: "#6366f1" },
+          { label: "Teams Below 2", value: teamsWithLessThanTwoMembers, icon: "group_remove", color: "#f59e0b" },
+          { label: "Total Students", value: totalStudents, icon: "school", color: "#10b981" },
+          { label: "Students Not In Teams", value: studentsWithoutTeamCount, icon: "person_off", color: "#6366f1" },
         ].map(k => (
           <Card key={k.label}>
             <div className="px-5 py-4 flex items-center gap-4">
@@ -353,6 +524,137 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
           </Card>
         ))}
       </div>
+
+      <Card>
+        <div className="px-5 py-4 border-b border-gray-100 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div>
+            <p className="text-sm font-bold text-slate-800">Import Student File</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Upload a student file to update this class list automatically.
+            </p>
+          </div>
+          <label className="inline-flex items-center justify-center rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-teal-700 transition-colors cursor-pointer">
+            <input
+              type="file"
+              accept=".txt,.json,.pdf,.md,.xlsx,.xls,.csv"
+              className="hidden"
+              onChange={handleStudentImportFileChange}
+              disabled={uploadingStudents}
+            />
+            {uploadingStudents ? "Processing..." : "Upload Student File"}
+          </label>
+        </div>
+        <div className="px-5 py-4 space-y-3">
+          {studentImportFileName ? (
+            <div className="text-sm text-slate-500">
+              File: <span className="font-semibold text-slate-700">{studentImportFileName}</span>
+            </div>
+          ) : null}
+          {studentImportError ? (
+            <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <span className="material-symbols-outlined text-base mt-0.5">error</span>
+              {studentImportError}
+            </div>
+          ) : null}
+          {studentImportNotice && studentImportPreview.length === 0 ? (
+            <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              <span className="material-symbols-outlined text-base mt-0.5">check_circle</span>
+              {studentImportNotice}
+            </div>
+          ) : null}
+          {studentImportPreview.length > 0 ? (
+            <div className="rounded-xl border border-slate-100 overflow-hidden">
+              <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm font-bold text-slate-700">Uploaded Students</p>
+                <div className="text-xs text-slate-500">
+                  Extracted: <span className="font-bold text-slate-700">{studentImportMeta.extractedCount || studentImportPreview.length}</span>
+                  {" · "}
+                  Valid: <span className="font-bold text-slate-700">{studentImportMeta.validStudentCount || 0}</span>
+                </div>
+              </div>
+              {pendingStudentImportRows.length > 0 ? (
+                <div className="px-4 py-4 border-b border-cyan-100 bg-cyan-50 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-cyan-900">Preview ready</p>
+                    <p className="text-sm text-cyan-800 mt-1">
+                      Nothing has been imported yet. Confirm to add or update students for this class.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleCancelStudentImportPreview}
+                      disabled={confirmingStudents}
+                      className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmStudentImport}
+                      disabled={uploadingStudents || confirmingStudents}
+                      className="inline-flex items-center rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {confirmingStudents ? "Importing..." : "Confirm Import"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-white">
+                    <tr className="border-b border-slate-100">
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-400">Name</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-400">Email</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-400">Class</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-400">Roll Number</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-400">Department</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-400">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {studentImportPreview.map((student, index) => (
+                      <tr key={`${student.email || student.full_name || "student"}-${index}`}>
+                        <td className="px-4 py-3 font-semibold text-slate-800">{student.full_name || "-"}</td>
+                        <td className="px-4 py-3 text-slate-600">{student.email || "-"}</td>
+                        <td className="px-4 py-3 text-slate-600">{student.resolved_class_section || student.class_section || classTitle || "-"}</td>
+                        <td className="px-4 py-3 text-slate-600">{student.roll_number || "-"}</td>
+                        <td className="px-4 py-3 text-slate-600">{student.department || "-"}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-col gap-1">
+                            <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${
+                              student.import_action === "create"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : student.import_action === "update"
+                                  ? "bg-sky-100 text-sky-700"
+                                  : "bg-rose-100 text-rose-700"
+                            }`}>
+                              {(student.import_action || "skip").toUpperCase()}
+                            </span>
+                            <span className="text-xs text-slate-500">{student.import_reason || "-"}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
+          {studentImportSkipped.length > 0 ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <p className="text-sm font-semibold text-amber-800">Skipped Rows</p>
+              <div className="mt-2 space-y-1 text-sm text-amber-700">
+                {studentImportSkipped.map((item, index) => (
+                  <p key={`${item.email || item.full_name || "skip"}-${index}`}>
+                    {(item.full_name || item.email || "Student row")}: {item.reason || "Skipped"}
+                  </p>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </Card>
 
       {/* Review Deadlines */}
       <Card>
@@ -1843,7 +2145,7 @@ function TabReviews({ classId }) {
 
 // ─── MAIN EXPORT ──────────────────────────────────────────────────────────────
 // activeSubPage is driven by the sidebar — values: "overview" | "teams" | "submissions" | "reviews"
-export default function MyClass({ classData, loading, onSaveStudentDeadline, activeSubPage = "overview", onNavigate }) {
+export default function MyClass({ classData, loading, onSaveStudentDeadline, onStudentImportComplete, activeSubPage = "overview", onNavigate }) {
   const [coordinators, setCoordinators] = useState([]);
 
   useEffect(() => {
@@ -1912,7 +2214,7 @@ export default function MyClass({ classData, loading, onSaveStudentDeadline, act
         </div>
       )}
       {/* Content — sub-page is controlled by sidebar */}
-      {activeSubPage === "overview" && <TabOverview classData={classData} coordinators={coordinators} loading={loading} onSaveStudentDeadline={onSaveStudentDeadline} onNavigate={onNavigate} />}
+      {activeSubPage === "overview" && <TabOverview classData={classData} coordinators={coordinators} loading={loading} onSaveStudentDeadline={onSaveStudentDeadline} onNavigate={onNavigate} onStudentImportComplete={onStudentImportComplete} />}
       {activeSubPage === "teams" && classId && <TabTeams classId={classId} />}
       {activeSubPage === "submissions" && classId && <TabSubmissions classId={classId} />}
       {activeSubPage === "reviews" && classId && <TabReviews classId={classId} />}

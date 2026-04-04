@@ -83,6 +83,60 @@ async function fetchJson(url, fetchOptions, headers) {
   })
 }
 
+async function fetchWithFallback(url, fetchOptions, headers) {
+  try {
+    return await fetchJson(url, fetchOptions, headers)
+  } catch (primaryError) {
+    if (API_FALLBACK_BASE_URL && !url.startsWith(API_FALLBACK_BASE_URL) && url.startsWith(API_BASE_URL)) {
+      const fallbackUrl = `${API_FALLBACK_BASE_URL}${url.slice(API_BASE_URL.length)}`
+      try {
+        return await fetchJson(fallbackUrl, fetchOptions, headers)
+      } catch {
+        throw new Error(`API unreachable at ${API_BASE_URL} or ${API_FALLBACK_BASE_URL}. Start backend with "npm run dev" in etnova-backend and verify VITE_API_URL.`)
+      }
+    }
+
+    if (API_FALLBACK_BASE_URL && !url.startsWith('http')) {
+      const fallbackUrl = `${API_FALLBACK_BASE_URL}${url}`
+      try {
+        return await fetchJson(fallbackUrl, fetchOptions, headers)
+      } catch {
+        throw new Error(`API unreachable at ${API_BASE_URL} or ${API_FALLBACK_BASE_URL}. Start backend with "npm run dev" in etnova-backend and verify VITE_API_URL.`)
+      }
+    }
+
+    throw primaryError
+  }
+}
+
+export async function publicApiRequest(path, options = {}) {
+  const url = path.startsWith('http') ? path : `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
+  const {
+    headers: customHeaders = {},
+    ...fetchOptions
+  } = options
+
+  const headers = {
+    ...(fetchOptions.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+    ...customHeaders,
+  }
+
+  const response = await fetchWithFallback(url, fetchOptions, headers)
+
+  if (response.status === 204) {
+    return null
+  }
+
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const error = new Error(data?.message || `Request failed (${response.status})`)
+    error.status = response.status
+    throw error
+  }
+
+  return data
+}
+
 export async function apiRequest(path, options = {}) {
   const url = path.startsWith('http') ? path : `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
   const {
@@ -112,21 +166,7 @@ export async function apiRequest(path, options = {}) {
       ...customHeaders,
     }
 
-    let response
-    try {
-      response = await fetchJson(url, fetchOptions, headers)
-    } catch (primaryError) {
-      if (API_FALLBACK_BASE_URL && !path.startsWith('http')) {
-        const fallbackUrl = `${API_FALLBACK_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
-        try {
-          response = await fetchJson(fallbackUrl, fetchOptions, headers)
-        } catch {
-          throw new Error(`API unreachable at ${API_BASE_URL} or ${API_FALLBACK_BASE_URL}. Start backend with "npm run dev" in etnova-backend and verify VITE_API_URL.`)
-        }
-      } else {
-        throw new Error(`API unreachable at ${API_BASE_URL}. Start backend with "npm run dev" in etnova-backend and verify VITE_API_URL.`)
-      }
-    }
+    const response = await fetchWithFallback(url, fetchOptions, headers)
 
     if (response.status === 204) {
       return null

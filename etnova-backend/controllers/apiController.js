@@ -1,6 +1,904 @@
+import { PDFParse } from 'pdf-parse';
+import * as XLSX from 'xlsx';
 import { supabaseAdmin } from '../config/supabase.js';
 
 const supabase = supabaseAdmin;
+const PEOPLE_IMPORT_OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const IMPORT_ROLE_ADMIN_KEYWORDS = ['admin', 'hod', 'head', 'head of department', 'coordinator'];
+const DEMO_AUTH_EMAIL_MODE = ['1', 'true', 'yes', 'on'].includes(String(process.env.DEMO_AUTH_EMAIL_MODE || '').trim().toLowerCase());
+const DEMO_AUTH_INBOX = String(process.env.DEMO_AUTH_INBOX || '').trim().toLowerCase();
+
+const PEOPLE_IMPORT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    people: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          full_name: { type: ['string', 'null'] },
+          email: { type: ['string', 'null'] },
+          employee_id: { type: ['string', 'null'] },
+          department: { type: ['string', 'null'] },
+          specialization: {
+            type: 'array',
+            items: { type: 'string' },
+          },
+          role: {
+            type: 'string',
+            enum: ['admin', 'mentor'],
+          },
+        },
+        required: ['full_name', 'email', 'employee_id', 'department', 'specialization', 'role'],
+      },
+    },
+  },
+  required: ['people'],
+};
+
+const normalizeDepartmentName = (value) => {
+  const cleaned = normalizeTextField(value, { maxLength: 120 });
+  if (!cleaned) return null;
+
+  const key = cleaned.replace(/[^a-z0-9]/gi, '').toLowerCase();
+  const departmentMap = {
+    cse: 'Computer Science',
+    computerscience: 'Computer Science',
+    computerscienceengineering: 'Computer Science',
+    cs: 'Computer Science',
+    ai: 'Artificial Intelligence',
+    aiml: 'Artificial Intelligence and Machine Learning',
+    artificialintelligence: 'Artificial Intelligence',
+    artificialintelligenceandmachinelearning: 'Artificial Intelligence and Machine Learning',
+    it: 'Information Technology',
+    informationtechnology: 'Information Technology',
+    ece: 'Electronics and Communication Engineering',
+    electronicsandcommunicationengineering: 'Electronics and Communication Engineering',
+    eee: 'Electrical and Electronics Engineering',
+    electricalandelectronicsengineering: 'Electrical and Electronics Engineering',
+    mech: 'Mechanical Engineering',
+    mechanicalengineering: 'Mechanical Engineering',
+    civil: 'Civil Engineering',
+    civilengineering: 'Civil Engineering',
+  };
+
+  return departmentMap[key] || cleaned.replace(/\s+/g, ' ').trim();
+};
+
+const normalizeSpecializationList = (value) => {
+  const rawValues = Array.isArray(value)
+    ? value
+    : String(value || '')
+      .split(/[,;/\n]+/)
+      .map((item) => item.trim());
+
+  return [...new Set(
+    rawValues
+      .map((item) => normalizeTextField(item, { maxLength: 80 }))
+      .filter(Boolean)
+  )].slice(0, 12);
+};
+
+const inferImportedRole = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return 'mentor';
+  return IMPORT_ROLE_ADMIN_KEYWORDS.some((keyword) => normalized.includes(keyword)) ? 'admin' : 'mentor';
+};
+
+const normalizeImportedPerson = (person = {}) => {
+  const specialization = normalizeSpecializationList(person.specialization);
+  return {
+    full_name: normalizeTextField(person.full_name, { maxLength: 150 }),
+    email: normalizeTextField(person.email, { maxLength: 160 })?.toLowerCase() || null,
+    employee_id: normalizeTextField(person.employee_id, { maxLength: 60 }),
+    department: normalizeDepartmentName(person.department),
+    specialization,
+    role: inferImportedRole(person.role),
+  };
+};
+
+const normalizeImportHeaderKey = (value) => String(value || '')
+  .trim()
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, '_')
+  .replace(/^_+|_+$/g, '');
+
+const IMPORT_HEADER_ALIASES = {
+  full_name: ['full_name', 'name', 'mentor_name', 'faculty_name', 'staff_name'],
+  email: ['email', 'email_id', 'mail', 'mail_id'],
+  employee_id: ['employee_id', 'employeeid', 'emp_id', 'staff_id', 'faculty_id', 'id'],
+  department: ['department', 'dept', 'branch'],
+  specialization: ['specialization', 'specialisation', 'skills', 'skill', 'domains', 'domain', 'expertise', 'area_of_interest', 'domain_of_interest'],
+  role: ['role', 'designation', 'title', 'position'],
+};
+
+const STUDENT_IMPORT_HEADER_ALIASES = {
+  full_name: ['full_name', 'name', 'student_name'],
+  email: ['email', 'email_id', 'mail', 'mail_id'],
+  class_section: ['class_section', 'class', 'section', 'batch'],
+  roll_number: ['roll_number', 'rollno', 'roll_no', 'register_number', 'register_no', 'reg_no', 'student_roll_number'],
+  department: ['department', 'dept', 'branch'],
+};
+
+const pickWorkbookField = (row, aliases) => {
+  for (const alias of aliases) {
+    if (row[alias] !== undefined && row[alias] !== null && String(row[alias]).trim()) {
+      return row[alias];
+    }
+  }
+  return null;
+};
+
+const extractPeopleFromWorkbook = (fileBase64) => {
+  const workbookBuffer = Buffer.from(String(fileBase64 || ''), 'base64');
+  const workbook = XLSX.read(workbookBuffer, { type: 'buffer' });
+  const people = [];
+
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+    for (const rawRow of rows) {
+      const normalizedRow = Object.fromEntries(
+        Object.entries(rawRow || {}).map(([key, value]) => [normalizeImportHeaderKey(key), value])
+      );
+
+      const person = normalizeImportedPerson({
+        full_name: pickWorkbookField(normalizedRow, IMPORT_HEADER_ALIASES.full_name),
+        email: pickWorkbookField(normalizedRow, IMPORT_HEADER_ALIASES.email),
+        employee_id: pickWorkbookField(normalizedRow, IMPORT_HEADER_ALIASES.employee_id),
+        department: pickWorkbookField(normalizedRow, IMPORT_HEADER_ALIASES.department),
+        specialization: pickWorkbookField(normalizedRow, IMPORT_HEADER_ALIASES.specialization),
+        role: pickWorkbookField(normalizedRow, IMPORT_HEADER_ALIASES.role),
+      });
+
+      if (
+        person.full_name
+        || person.email
+        || person.employee_id
+        || person.department
+        || person.specialization.length > 0
+      ) {
+        people.push(person);
+      }
+    }
+  }
+
+  return people;
+};
+
+const normalizeImportedStudent = (student = {}) => ({
+  full_name: normalizeTextField(student.full_name, { maxLength: 150 }),
+  email: normalizeTextField(student.email, { maxLength: 160 })?.toLowerCase() || null,
+  class_section: normalizeClassSectionInput(student.class_section),
+  roll_number: normalizeTextField(student.roll_number, { maxLength: 60 }),
+  department: normalizeDepartmentName(student.department),
+});
+
+const extractStudentsFromWorkbook = (fileBase64) => {
+  const workbookBuffer = Buffer.from(String(fileBase64 || ''), 'base64');
+  const workbook = XLSX.read(workbookBuffer, { type: 'buffer' });
+  const students = [];
+
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+    for (const rawRow of rows) {
+      const normalizedRow = Object.fromEntries(
+        Object.entries(rawRow || {}).map(([key, value]) => [normalizeImportHeaderKey(key), value])
+      );
+
+      const student = normalizeImportedStudent({
+        full_name: pickWorkbookField(normalizedRow, STUDENT_IMPORT_HEADER_ALIASES.full_name),
+        email: pickWorkbookField(normalizedRow, STUDENT_IMPORT_HEADER_ALIASES.email),
+        class_section: pickWorkbookField(normalizedRow, STUDENT_IMPORT_HEADER_ALIASES.class_section),
+        roll_number: pickWorkbookField(normalizedRow, STUDENT_IMPORT_HEADER_ALIASES.roll_number),
+        department: pickWorkbookField(normalizedRow, STUDENT_IMPORT_HEADER_ALIASES.department),
+      });
+
+      if (
+        student.full_name
+        || student.email
+        || student.class_section
+        || student.roll_number
+        || student.department
+      ) {
+        students.push(student);
+      }
+    }
+  }
+
+  return students;
+};
+
+const parseStudentsFromJsonPayload = (value) => {
+  if (!value) return [];
+
+  if (Array.isArray(value)) {
+    return value.map(normalizeImportedStudent).filter((student) => (
+      student.full_name || student.email || student.class_section || student.roll_number || student.department
+    ));
+  }
+
+  if (typeof value === 'object') {
+    const nestedRows = Array.isArray(value.students)
+      ? value.students
+      : Array.isArray(value.people)
+        ? value.people
+        : null;
+    if (nestedRows) {
+      return nestedRows.map(normalizeImportedStudent).filter((student) => (
+        student.full_name || student.email || student.class_section || student.roll_number || student.department
+      ));
+    }
+  }
+
+  return [];
+};
+
+const parseDelimitedStudentText = (rawText) => {
+  const text = String(rawText || '').trim();
+  if (!text) return [];
+
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length < 2) return [];
+
+  const separator = lines[0].includes('\t') ? '\t' : ',';
+  if (!lines[0].includes(separator)) return [];
+
+  const headers = lines[0].split(separator).map((value) => normalizeImportHeaderKey(value));
+  const hasRelevantHeader = headers.some((header) => [
+    ...STUDENT_IMPORT_HEADER_ALIASES.full_name,
+    ...STUDENT_IMPORT_HEADER_ALIASES.email,
+    ...STUDENT_IMPORT_HEADER_ALIASES.class_section,
+    ...STUDENT_IMPORT_HEADER_ALIASES.roll_number,
+    ...STUDENT_IMPORT_HEADER_ALIASES.department,
+  ].includes(header));
+
+  if (!hasRelevantHeader) return [];
+
+  return lines.slice(1).map((line) => {
+    const values = line.split(separator);
+    const row = {};
+    headers.forEach((header, index) => {
+      row[header] = values[index] ?? '';
+    });
+    return normalizeImportedStudent({
+      full_name: pickWorkbookField(row, STUDENT_IMPORT_HEADER_ALIASES.full_name),
+      email: pickWorkbookField(row, STUDENT_IMPORT_HEADER_ALIASES.email),
+      class_section: pickWorkbookField(row, STUDENT_IMPORT_HEADER_ALIASES.class_section),
+      roll_number: pickWorkbookField(row, STUDENT_IMPORT_HEADER_ALIASES.roll_number),
+      department: pickWorkbookField(row, STUDENT_IMPORT_HEADER_ALIASES.department),
+    });
+  }).filter((student) => (
+    student.full_name || student.email || student.class_section || student.roll_number || student.department
+  ));
+};
+
+const STUDENT_TEXT_PATTERNS = {
+  full_name: /(?:^|\n)\s*(?:full[_\s-]*name|name)\s*[:\-]\s*(.+)$/im,
+  email: /(?:^|\n)\s*(?:email|email[_\s-]*id|mail)\s*[:\-]\s*(.+)$/im,
+  class_section: /(?:^|\n)\s*(?:class[_\s-]*section|class|section|batch)\s*[:\-]\s*(.+)$/im,
+  roll_number: /(?:^|\n)\s*(?:roll[_\s-]*number|roll[_\s-]*no|register[_\s-]*number|register[_\s-]*no|reg[_\s-]*no)\s*[:\-]\s*(.+)$/im,
+  department: /(?:^|\n)\s*(?:department|dept|branch)\s*[:\-]\s*(.+)$/im,
+};
+
+const fallbackExtractStudentsFromText = (rawText) => {
+  const text = String(rawText || '').trim();
+  if (!text) return [];
+
+  const parsedJson = extractJsonObjectFromText(text);
+  const jsonStudents = parseStudentsFromJsonPayload(parsedJson);
+  if (jsonStudents.length > 0) return jsonStudents;
+
+  const delimitedStudents = parseDelimitedStudentText(text);
+  if (delimitedStudents.length > 0) return delimitedStudents;
+
+  const blocks = text
+    .split(/\n\s*\n+/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  return blocks.map((block) => {
+    const getMatch = (key) => {
+      const match = block.match(STUDENT_TEXT_PATTERNS[key]);
+      return match?.[1] ? match[1].trim() : null;
+    };
+
+    return normalizeImportedStudent({
+      full_name: getMatch('full_name'),
+      email: getMatch('email'),
+      class_section: getMatch('class_section'),
+      roll_number: getMatch('roll_number'),
+      department: getMatch('department'),
+    });
+  }).filter((student) => (
+    student.full_name || student.email || student.class_section || student.roll_number || student.department
+  ));
+};
+
+const parseStructuredStudentsPayload = (value) => {
+  if (!value) return [];
+  const rawPayload = typeof value === 'string' ? extractJsonObjectFromText(value) : value;
+  const rows = Array.isArray(rawPayload)
+    ? rawPayload
+    : Array.isArray(rawPayload?.students)
+      ? rawPayload.students
+      : [];
+
+  return rows.map(normalizeImportedStudent);
+};
+
+const buildStudentImportSummary = (students) => ({
+  extractedCount: students.length,
+  validStudentCount: students.filter((student) => student.full_name && student.email).length,
+});
+
+const extractJsonObjectFromText = (value) => {
+  const source = String(value || '').trim();
+  if (!source) return null;
+
+  const firstBrace = source.indexOf('{');
+  const lastBrace = source.lastIndexOf('}');
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) return null;
+
+  try {
+    return JSON.parse(source.slice(firstBrace, lastBrace + 1));
+  } catch {
+    return null;
+  }
+};
+
+const parseStructuredPeoplePayload = (value) => {
+  if (!value) return [];
+
+  const payload = Array.isArray(value)
+    ? { people: value }
+    : (typeof value === 'object' ? value : extractJsonObjectFromText(value));
+
+  const people = Array.isArray(payload?.people)
+    ? payload.people
+    : Array.isArray(payload)
+      ? payload
+      : [];
+
+  return people.map(normalizeImportedPerson).filter((person) => (
+    person.full_name
+    || person.email
+    || person.employee_id
+    || person.department
+    || person.specialization.length > 0
+  ));
+};
+
+const splitImportRecords = (text) => {
+  const normalized = String(text || '').replace(/\r/g, '').trim();
+  if (!normalized) return [];
+
+  const blocks = normalized
+    .split(/\n\s*\n+/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  if (blocks.length > 1) return blocks;
+
+  return normalized
+    .split(/\n(?=(?:\d+\.\s+)?(?:name|full name|mentor|admin|coordinator|hod|head|email)\b)/i)
+    .map((block) => block.trim())
+    .filter(Boolean);
+};
+
+const HEURISTIC_FIELD_PATTERNS = {
+  full_name: /(?:^|\n)\s*(?:name|full name)\s*[:\-]\s*(.+)$/im,
+  email: /(?:^|\n)\s*email\s*[:\-]\s*([^\s,;]+)/im,
+  employee_id: /(?:^|\n)\s*(?:employee\s*id|employee_id|emp\s*id|staff\s*id|id)\s*[:\-]\s*([A-Za-z0-9/_-]+)/im,
+  department: /(?:^|\n)\s*department\s*[:\-]\s*(.+)$/im,
+  specialization: /(?:^|\n)\s*(?:specialization|specialisation|skills?|domains?|domain of interest|area of interest|expertise)\s*[:\-]\s*(.+)$/im,
+  title: /(?:^|\n)\s*(?:title|role|designation|position)\s*[:\-]\s*(.+)$/im,
+};
+
+const extractHeuristicPerson = (record) => {
+  const getMatch = (key) => {
+    const match = String(record || '').match(HEURISTIC_FIELD_PATTERNS[key]);
+    return match?.[1]?.trim() || null;
+  };
+
+  const fullName = getMatch('full_name');
+  const email = getMatch('email');
+  const employeeId = getMatch('employee_id');
+  const department = getMatch('department');
+  const specialization = getMatch('specialization');
+  const title = getMatch('title');
+
+  if (!fullName && !email && !employeeId) return null;
+
+  return normalizeImportedPerson({
+    full_name: fullName,
+    email,
+    employee_id: employeeId,
+    department,
+    specialization,
+    role: title,
+  });
+};
+
+const fallbackExtractPeopleFromText = (rawText) => {
+  const directJson = parseStructuredPeoplePayload(rawText);
+  if (directJson.length > 0) return directJson;
+
+  return splitImportRecords(rawText)
+    .map(extractHeuristicPerson)
+    .filter(Boolean);
+};
+
+async function extractPeopleWithOpenAI(rawText) {
+  if (!process.env.OPENAI_API_KEY) {
+    return null;
+  }
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: PEOPLE_IMPORT_OPENAI_MODEL,
+        reasoning: { effort: 'low' },
+        input: [
+          {
+            role: 'system',
+            content: [
+              {
+                type: 'input_text',
+                text: [
+                  'You are a highly accurate multi-person data extraction system.',
+                  'Extract all individuals from the provided text and classify each one separately.',
+                  'Return only JSON matching the schema.',
+                  'Fields per person: full_name, email, employee_id, department, specialization, role.',
+                  'Role rule: assign "admin" if title includes admin, hod, head, head of department, or coordinator. Otherwise assign "mentor".',
+                  'Do not merge people. Do not hallucinate. Missing values must be null. specialization must be an array of strings.',
+                  'Normalize department names and clean values.',
+                ].join('\n'),
+              },
+            ],
+          },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'input_text',
+                text: rawText,
+              },
+            ],
+          },
+        ],
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'people_import',
+            strict: true,
+            schema: PEOPLE_IMPORT_SCHEMA,
+          },
+        },
+      }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return null;
+    }
+
+    return parseStructuredPeoplePayload(data?.output_text || data);
+  } catch {
+    return null;
+  }
+}
+
+async function extractTextFromImportPayload({ fileName, mimeType, text, fileBase64 }) {
+  const normalizedMimeType = String(mimeType || '').toLowerCase();
+  const normalizedFileName = String(fileName || '').toLowerCase();
+
+  if (typeof text === 'string' && text.trim()) {
+    return text;
+  }
+
+  if (fileBase64 && (normalizedMimeType.includes('pdf') || normalizedFileName.endsWith('.pdf'))) {
+    const pdfBuffer = Buffer.from(String(fileBase64), 'base64');
+    const parser = new PDFParse({ data: pdfBuffer });
+    try {
+      const parsedPdf = await parser.getText();
+      return String(parsedPdf?.text || '').trim();
+    } finally {
+      await parser.destroy().catch(() => {});
+    }
+  }
+
+  if (
+    fileBase64
+    && (
+      normalizedMimeType.includes('spreadsheet')
+      || normalizedMimeType.includes('excel')
+      || normalizedFileName.endsWith('.xlsx')
+      || normalizedFileName.endsWith('.xls')
+      || normalizedFileName.endsWith('.csv')
+    )
+  ) {
+    const workbookBuffer = Buffer.from(String(fileBase64), 'base64');
+    const workbook = XLSX.read(workbookBuffer, { type: 'buffer' });
+    return workbook.SheetNames
+      .map((sheetName) => {
+        const sheet = workbook.Sheets[sheetName];
+        const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false }).trim();
+        return csv ? `Sheet: ${sheetName}\n${csv}` : '';
+      })
+      .filter(Boolean)
+      .join('\n\n')
+      .trim();
+  }
+
+  if (fileBase64) {
+    return Buffer.from(String(fileBase64), 'base64').toString('utf8').trim();
+  }
+
+  return '';
+}
+
+function buildImportSummary(people) {
+  return {
+    extractedCount: people.length,
+    mentorCount: people.filter((person) => person.role === 'mentor').length,
+    adminCount: people.filter((person) => person.role === 'admin').length,
+    validMentorCount: people.filter((person) => person.role === 'mentor' && person.full_name && person.email).length,
+  };
+}
+
+const countImportActionSummary = (rows = []) => ({
+  createCount: rows.filter((row) => row?.import_action === 'create').length,
+  updateCount: rows.filter((row) => row?.import_action === 'update').length,
+  skipCount: rows.filter((row) => row?.import_action === 'skip').length,
+});
+
+async function buildAdminMentorImportPreview(people, currentAdminProfile) {
+  const emails = [...new Set(
+    (people || [])
+      .map((person) => String(person?.email || '').trim().toLowerCase())
+      .filter(Boolean)
+  )];
+  const authEmails = [...new Set(
+    (people || [])
+      .map((person) => resolveImportedAuthEmail(person?.email))
+      .filter(Boolean)
+  )];
+
+  const [visibleProfileResult, authProfileResult] = await Promise.all([
+    emails.length > 0
+      ? supabase.from('profiles').select('id, email, auth_email, role').in('email', emails)
+      : Promise.resolve({ data: [], error: null }),
+    authEmails.length > 0
+      ? supabase.from('profiles').select('id, email, auth_email, role').in('auth_email', authEmails)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (visibleProfileResult.error) throw visibleProfileResult.error;
+  if (authProfileResult.error) throw authProfileResult.error;
+  const existingProfiles = [
+    ...(visibleProfileResult.data || []),
+    ...(authProfileResult.data || []),
+  ];
+
+  const existingProfileByVisibleEmail = new Map();
+  const existingProfileByAuthEmail = new Map();
+  for (const profile of existingProfiles || []) {
+    const visibleEmail = String(profile.email || '').trim().toLowerCase();
+    const authEmail = String(profile.auth_email || '').trim().toLowerCase();
+    if (visibleEmail) existingProfileByVisibleEmail.set(visibleEmail, profile);
+    if (authEmail) existingProfileByAuthEmail.set(authEmail, profile);
+  }
+  const existingAuthUsersByEmail = await getExistingAuthUsersByEmail(authEmails);
+  const duplicateEmails = new Set(
+    emails.filter((email) => (
+      people.filter((person) => String(person?.email || '').trim().toLowerCase() === email).length > 1
+    ))
+  );
+
+  const rows = (people || []).map((person) => {
+    const emailKey = String(person?.email || '').trim().toLowerCase();
+    const authEmail = resolveImportedAuthEmail(person?.email);
+    const existingProfile = emailKey
+      ? existingProfileByVisibleEmail.get(emailKey) || existingProfileByAuthEmail.get(authEmail) || null
+      : null;
+    const existingAuthUser = authEmail ? existingAuthUsersByEmail.get(authEmail) || null : null;
+    const matchesCurrentAdmin = Boolean(
+      currentAdminProfile?.id
+      && currentAdminProfile.role === 'admin'
+      && (
+        !person.email
+        || !currentAdminProfile.email
+        || emailKey === String(currentAdminProfile.email).toLowerCase()
+      )
+    );
+
+    let import_action = 'skip';
+    let import_reason = '';
+
+    if (!person.full_name) {
+      import_reason = 'Missing full name.';
+    } else if (person.email && duplicateEmails.has(emailKey)) {
+      import_reason = 'Duplicate email inside uploaded file.';
+    } else if (person.role === 'admin' || matchesCurrentAdmin) {
+      if (existingProfile?.id && existingProfile.role === 'admin') {
+        import_action = 'update';
+        import_reason = 'Matches an existing admin profile.';
+      } else if (existingProfile?.id && existingProfile.role !== 'admin') {
+        import_reason = 'Matched account is not an admin profile.';
+      } else if (currentAdminProfile?.id && currentAdminProfile.role === 'admin') {
+        import_action = 'update';
+        import_reason = 'Maps to the current signed-in admin profile.';
+      } else {
+        import_reason = 'No admin profile could be resolved for this row.';
+      }
+    } else if (!person.email) {
+      import_reason = 'Missing email for mentor row.';
+    } else if (existingProfile?.id) {
+      if (existingProfile.role === 'admin') {
+        import_reason = 'Matched account is an admin profile and will not be converted.';
+      } else {
+        import_action = 'update';
+        import_reason = 'Matches an existing non-admin profile.';
+      }
+    } else if (existingAuthUser?.id) {
+      import_action = 'update';
+      import_reason = 'Existing auth account will be linked to a mentor profile.';
+    } else {
+      import_action = 'create';
+      import_reason = 'A new mentor account will be created.';
+    }
+
+    return {
+      ...person,
+      import_action,
+      import_reason,
+    };
+  });
+
+  return {
+    rows,
+    summary: countImportActionSummary(rows),
+  };
+}
+
+async function buildCoordinatorStudentImportPreview(students, coordinatorProfile) {
+  const emails = [...new Set(
+    (students || [])
+      .map((student) => String(student?.email || '').trim().toLowerCase())
+      .filter(Boolean)
+  )];
+  const authEmails = [...new Set(
+    (students || [])
+      .map((student) => resolveImportedAuthEmail(student?.email))
+      .filter(Boolean)
+  )];
+
+  const [visibleProfileResult, authProfileResult] = await Promise.all([
+    emails.length > 0
+      ? supabase.from('profiles').select('id, email, auth_email, role').in('email', emails)
+      : Promise.resolve({ data: [], error: null }),
+    authEmails.length > 0
+      ? supabase.from('profiles').select('id, email, auth_email, role').in('auth_email', authEmails)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (visibleProfileResult.error) throw visibleProfileResult.error;
+  if (authProfileResult.error) throw authProfileResult.error;
+  const existingProfiles = [
+    ...(visibleProfileResult.data || []),
+    ...(authProfileResult.data || []),
+  ];
+
+  const existingProfileByVisibleEmail = new Map();
+  const existingProfileByAuthEmail = new Map();
+  for (const profile of existingProfiles || []) {
+    const visibleEmail = String(profile.email || '').trim().toLowerCase();
+    const authEmail = String(profile.auth_email || '').trim().toLowerCase();
+    if (visibleEmail) existingProfileByVisibleEmail.set(visibleEmail, profile);
+    if (authEmail) existingProfileByAuthEmail.set(authEmail, profile);
+  }
+  const existingAuthUsersByEmail = await getExistingAuthUsersByEmail(authEmails);
+  const duplicateEmails = new Set(
+    emails.filter((email) => (
+      students.filter((student) => String(student?.email || '').trim().toLowerCase() === email).length > 1
+    ))
+  );
+  const coordinatorClassSection = String(coordinatorProfile?.class_section || '').trim();
+
+  const rows = [];
+  for (const student of students || []) {
+    const emailKey = String(student?.email || '').trim().toLowerCase();
+    const authEmail = resolveImportedAuthEmail(student?.email);
+    const existingProfile = emailKey
+      ? existingProfileByVisibleEmail.get(emailKey) || existingProfileByAuthEmail.get(authEmail) || null
+      : null;
+    const existingAuthUser = authEmail ? existingAuthUsersByEmail.get(authEmail) || null : null;
+    const targetClassSection = student.class_section || coordinatorClassSection || null;
+    const targetDepartment = student.department || coordinatorProfile?.department || null;
+    const resolvedClassAssignment = await resolveProfileClassAssignment({
+      classSection: targetClassSection,
+      department: targetDepartment,
+    });
+
+    let import_action = 'skip';
+    let import_reason = '';
+
+    if (!student.full_name || !student.email) {
+      import_reason = 'Missing full name or email.';
+    } else if (duplicateEmails.has(emailKey)) {
+      import_reason = 'Duplicate email inside uploaded file.';
+    } else if (resolvedClassAssignment.class_id && resolvedClassAssignment.class_id !== coordinatorProfile?.class_id) {
+      import_reason = 'Student row belongs to a different class and will be skipped.';
+    } else if (existingProfile?.id) {
+      if (existingProfile.role && existingProfile.role !== 'student') {
+        import_reason = 'Matched account is not a student profile.';
+      } else {
+        import_action = 'update';
+        import_reason = 'Matches an existing student profile.';
+      }
+    } else if (existingAuthUser?.id) {
+      import_action = 'update';
+      import_reason = 'Existing auth account will be linked to a student profile.';
+    } else {
+      import_action = 'create';
+      import_reason = 'A new student account will be created.';
+    }
+
+    rows.push({
+      ...student,
+      resolved_class_section: resolvedClassAssignment.class_section || coordinatorClassSection || null,
+      import_action,
+      import_reason,
+    });
+  }
+
+  return {
+    rows,
+    summary: countImportActionSummary(rows),
+  };
+}
+
+function resolveFrontendBaseUrl(req) {
+  const configured = normalizeTextField(
+    process.env.FRONTEND_URL || process.env.APP_URL || process.env.PUBLIC_APP_URL,
+    { maxLength: 300 },
+  );
+  const requestOrigin = normalizeTextField(req?.get?.('origin') || req?.headers?.origin, { maxLength: 300 });
+  const candidate = requestOrigin || configured || 'http://localhost:5173';
+
+  try {
+    return new URL(candidate).origin;
+  } catch {
+    return 'http://localhost:5173';
+  }
+}
+
+function getPasswordSetupRedirectUrl(req) {
+  return `${resolveFrontendBaseUrl(req)}/reset-password`;
+}
+
+async function getExistingAuthUsersByEmail(emails = []) {
+  const normalizedEmails = [...new Set(
+    (emails || [])
+      .map((email) => String(email || '').trim().toLowerCase())
+      .filter(Boolean)
+  )];
+
+  if (normalizedEmails.length === 0) {
+    return new Map();
+  }
+
+  const authUsersByEmail = new Map();
+  let page = 1;
+  let shouldContinue = true;
+
+  while (shouldContinue) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw error;
+
+    const users = data?.users || [];
+    for (const user of users) {
+      const authEmail = String(user?.email || '').trim().toLowerCase();
+      if (authEmail && normalizedEmails.includes(authEmail)) {
+        authUsersByEmail.set(authEmail, user);
+      }
+    }
+
+    shouldContinue = Boolean(data?.nextPage) && users.length > 0 && authUsersByEmail.size < normalizedEmails.length;
+    page = data?.nextPage || 0;
+  }
+
+  return authUsersByEmail;
+}
+
+function normalizeImportedAuthError(error) {
+  const rawMessage = String(error?.message || '').trim();
+  const lowered = rawMessage.toLowerCase();
+
+  if (lowered.includes('email rate limit exceeded')) {
+    const normalized = new Error('Invite email rate limit reached. Please wait a few minutes and try the import again.');
+    normalized.statusCode = 429;
+    normalized.code = 'email_rate_limit';
+    return normalized;
+  }
+
+  if (error instanceof Error) {
+    return error;
+  }
+
+  const fallback = new Error(rawMessage || 'Failed to create auth user.');
+  if (error?.statusCode) fallback.statusCode = error.statusCode;
+  return fallback;
+}
+
+async function createImportedAuthUser({ authEmail, role, redirectTo }) {
+  const { data, error } = await supabase.auth.admin.inviteUserByEmail(authEmail, {
+    data: { role },
+    redirectTo,
+  });
+
+  if (error) throw normalizeImportedAuthError(error);
+  return data?.user || null;
+}
+
+function getDefaultAcademicYear(date = new Date()) {
+  const month = date.getMonth();
+  const startYear = month >= 5 ? date.getFullYear() : date.getFullYear() - 1;
+  return `${startYear}-${startYear + 1}`;
+}
+
+function resolveAcademicYear(value) {
+  return normalizeTextField(value, { maxLength: 20 }) || getDefaultAcademicYear();
+}
+
+function buildImportedProfileLifecycleFields(academicYear, { accountStatus = 'active' } = {}) {
+  return {
+    account_status: accountStatus,
+    is_active: true,
+    academic_year: resolveAcademicYear(academicYear),
+    joined_via_import: true,
+    last_imported_at: new Date().toISOString(),
+  };
+}
+
+async function writeImportLog({
+  importType,
+  uploadedBy,
+  fileName,
+  academicYear,
+  summary,
+  skipped,
+}) {
+  const payload = {
+    import_type: importType,
+    uploaded_by: uploadedBy || null,
+    file_name: normalizeTextField(fileName, { maxLength: 255 }) || null,
+    academic_year: resolveAcademicYear(academicYear),
+    created_count: Number(summary?.created || 0),
+    updated_count: Number(summary?.updated || 0),
+    skipped_count: Number(summary?.skipped || 0),
+    skipped_rows: Array.isArray(skipped) ? skipped : [],
+    executed_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabase.from('import_logs').insert(payload);
+  if (error) throw error;
+}
 
 const safeProfileName = (profile, fallback = 'Student') => {
   return profile?.full_name || profile?.email || fallback;
@@ -501,6 +1399,49 @@ const scoreGuideRecommendation = (project, mentor, workload) => {
 
 // ====== USER PROFILE FUNCTIONS ======
 
+function stripProfilePrivateFields(profile) {
+  if (!profile || typeof profile !== 'object') return profile;
+  const { auth_email, ...safeProfile } = profile;
+  return safeProfile;
+}
+
+export const resolveLoginAuthEmail = async (req, res) => {
+  try {
+    const loginEmail = normalizeTextField(req.body?.email, { maxLength: 160 })?.toLowerCase();
+    if (!loginEmail) {
+      return res.status(400).json({ message: 'Email is required.' });
+    }
+
+    let matchedProfile = null;
+    const { data: visibleMatch, error: visibleError } = await supabase
+      .from('profiles')
+      .select('email, auth_email')
+      .eq('email', loginEmail)
+      .maybeSingle();
+
+    if (visibleError) throw visibleError;
+    matchedProfile = visibleMatch || null;
+
+    if (!matchedProfile) {
+      const { data: authMatch, error: authError } = await supabase
+        .from('profiles')
+        .select('email, auth_email')
+        .eq('auth_email', loginEmail)
+        .maybeSingle();
+
+      if (authError) throw authError;
+      matchedProfile = authMatch || null;
+    }
+
+    res.json({
+      login_email: matchedProfile?.email || loginEmail,
+      auth_email: matchedProfile?.auth_email || matchedProfile?.email || loginEmail,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Failed to resolve login email.' });
+  }
+};
+
 export const getUserProfile = async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -513,7 +1454,7 @@ export const getUserProfile = async (req, res) => {
       return res.status(404).json({ message: 'Profile not found', error: error.message });
     }
 
-    res.json(data);
+    res.json(stripProfilePrivateFields(data));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -544,7 +1485,7 @@ export const updateUserProfile = async (req, res) => {
       return res.status(400).json({ message: 'Update failed', error: error.message });
     }
 
-    res.json(data);
+    res.json(stripProfilePrivateFields(data));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -827,6 +1768,526 @@ export const getAdminMentorManagementData = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+export const extractAdminMentorImport = async (req, res) => {
+  try {
+    const normalizedMimeType = String(req.body?.mimeType || '').toLowerCase();
+    const normalizedFileName = String(req.body?.fileName || '').toLowerCase();
+    const isWorkbookUpload = Boolean(
+      req.body?.fileBase64
+      && (
+        normalizedMimeType.includes('spreadsheet')
+        || normalizedMimeType.includes('excel')
+        || normalizedFileName.endsWith('.xlsx')
+        || normalizedFileName.endsWith('.xls')
+        || normalizedFileName.endsWith('.csv')
+      )
+    );
+
+    const workbookPeople = isWorkbookUpload ? extractPeopleFromWorkbook(req.body?.fileBase64) : [];
+    const rawText = workbookPeople.length > 0 ? '' : await extractTextFromImportPayload(req.body || {});
+
+    if (!workbookPeople.length && !rawText) {
+      return res.status(400).json({ message: 'Upload a non-empty TXT, JSON, or PDF file.' });
+    }
+
+    const aiPeople = rawText ? await extractPeopleWithOpenAI(rawText) : null;
+    const people = (workbookPeople.length ? workbookPeople : (aiPeople?.length ? aiPeople : fallbackExtractPeopleFromText(rawText)))
+      .map(normalizeImportedPerson);
+    const { data: currentAdminProfile, error: currentAdminError } = await supabase
+      .from('profiles')
+      .select('id, role, email')
+      .eq('id', req.user.id)
+      .maybeSingle();
+
+    if (currentAdminError) throw currentAdminError;
+
+    const preview = await buildAdminMentorImportPreview(people, currentAdminProfile);
+
+    res.json({
+      people: preview.rows,
+      meta: {
+        ...buildImportSummary(preview.rows),
+        ...preview.summary,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Failed to extract people from file.' });
+  }
+};
+
+function splitEmailParts(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  const atIndex = normalized.lastIndexOf('@');
+  if (atIndex <= 0 || atIndex >= normalized.length - 1) return null;
+  return {
+    local: normalized.slice(0, atIndex),
+    domain: normalized.slice(atIndex + 1),
+  };
+}
+
+function sanitizeAliasSegment(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '.')
+    .replace(/\.{2,}/g, '.')
+    .replace(/^\.|\.$/g, '');
+}
+
+function resolveImportedAuthEmail(visibleEmail) {
+  const normalizedVisibleEmail = String(visibleEmail || '').trim().toLowerCase();
+  if (!normalizedVisibleEmail) return null;
+  if (!DEMO_AUTH_EMAIL_MODE) return normalizedVisibleEmail;
+
+  const inboxParts = splitEmailParts(DEMO_AUTH_INBOX);
+  if (!inboxParts?.local || !inboxParts?.domain) return normalizedVisibleEmail;
+
+  const visibleParts = splitEmailParts(normalizedVisibleEmail);
+  const aliasSeed = visibleParts
+    ? `${visibleParts.local}.${visibleParts.domain}`
+    : normalizedVisibleEmail;
+  const aliasSegment = sanitizeAliasSegment(aliasSeed);
+  if (!aliasSegment) return normalizedVisibleEmail;
+
+  return `${inboxParts.local}+${aliasSegment}@${inboxParts.domain}`;
+}
+
+export const applyAdminMentorImport = async (req, res) => {
+  try {
+    const people = parseStructuredPeoplePayload(req.body?.people);
+    const skipped = [];
+    let created = 0;
+    let updated = 0;
+    const academicYear = resolveAcademicYear(req.body?.academic_year);
+    const lifecycleFields = buildImportedProfileLifecycleFields(academicYear);
+    const invitedLifecycleFields = buildImportedProfileLifecycleFields(academicYear, {
+      accountStatus: 'invited',
+    });
+    const passwordSetupRedirectUrl = getPasswordSetupRedirectUrl(req);
+    const authEmailsByVisibleEmail = new Map(
+      people
+        .filter((person) => person?.email)
+        .map((person) => [String(person.email).trim().toLowerCase(), resolveImportedAuthEmail(person.email)])
+    );
+    const existingAuthUsersByEmail = await getExistingAuthUsersByEmail([...authEmailsByVisibleEmail.values()]);
+    const { data: currentAdminProfile, error: currentAdminError } = await supabase
+      .from('profiles')
+      .select('id, role, email, auth_email')
+      .eq('id', req.user.id)
+      .maybeSingle();
+
+    if (currentAdminError) throw currentAdminError;
+
+    for (const person of people) {
+      if (!person.full_name) {
+        skipped.push({
+          full_name: person.full_name,
+          email: person.email,
+          reason: 'Missing full name.',
+        });
+        continue;
+      }
+
+      let existingProfile = null;
+      if (person.email) {
+        const { data, error: existingError } = await supabase
+          .from('profiles')
+          .select('id, email, role, auth_email')
+          .eq('email', person.email)
+          .maybeSingle();
+
+        if (existingError) throw existingError;
+        existingProfile = data || null;
+      }
+
+      const matchesCurrentAdmin = Boolean(
+        currentAdminProfile?.id
+        && currentAdminProfile.role === 'admin'
+        && (
+          !person.email
+          || !currentAdminProfile.email
+          || String(person.email).toLowerCase() === String(currentAdminProfile.email).toLowerCase()
+        )
+      );
+
+      const resolvedVisibleEmail = person.email || currentAdminProfile?.email || null;
+      const baseProfilePayload = {
+        full_name: person.full_name,
+        email: resolvedVisibleEmail,
+        auth_email: existingProfile?.auth_email || resolveImportedAuthEmail(resolvedVisibleEmail),
+        employee_id: person.employee_id,
+        department: person.department,
+        specialization: person.specialization.join(', '),
+        domains_of_interest: person.specialization,
+        ...lifecycleFields,
+      };
+
+      if (person.role === 'admin' || matchesCurrentAdmin) {
+        if (existingProfile?.id && existingProfile.role === 'admin') {
+          const { error: updateError } = await supabase
+            .from('profiles')
+            .update({
+              ...baseProfilePayload,
+              auth_email: existingProfile.auth_email || currentAdminProfile?.auth_email || resolveImportedAuthEmail(resolvedVisibleEmail),
+              role: 'admin',
+            })
+            .eq('id', existingProfile.id);
+
+          if (updateError) throw updateError;
+          updated += 1;
+          continue;
+        }
+
+        if (existingProfile?.id && existingProfile.role !== 'admin') {
+          skipped.push({
+            full_name: person.full_name,
+            email: person.email,
+            reason: 'Matched account is not an admin profile, so it was not updated as admin.',
+          });
+          continue;
+        }
+
+        if (currentAdminProfile?.id && currentAdminProfile.role === 'admin') {
+          const { error: updateError } = await supabase
+            .from('profiles')
+            .update({
+              ...baseProfilePayload,
+              auth_email: currentAdminProfile.auth_email || resolveImportedAuthEmail(resolvedVisibleEmail),
+              role: 'admin',
+            })
+            .eq('id', currentAdminProfile.id);
+
+          if (updateError) throw updateError;
+          updated += 1;
+          continue;
+        }
+
+        skipped.push({
+          full_name: person.full_name,
+          email: person.email,
+          reason: 'No admin profile could be resolved for this uploaded admin row.',
+        });
+        continue;
+      }
+
+      if (!person.email) {
+        skipped.push({
+          full_name: person.full_name,
+          email: person.email,
+          reason: 'Missing email for mentor row.',
+        });
+        continue;
+      }
+
+      const profilePayload = {
+        ...baseProfilePayload,
+        role: 'mentor',
+        designation: 'guide',
+      };
+
+      if (existingProfile?.id) {
+        if (existingProfile.role === 'admin') {
+          skipped.push({
+            full_name: person.full_name,
+            email: person.email,
+            reason: 'Matched account is an admin profile, so it was not converted into a mentor.',
+          });
+          continue;
+        }
+
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update(profilePayload)
+          .eq('id', existingProfile.id);
+
+        if (updateError) throw updateError;
+        updated += 1;
+        continue;
+      }
+
+      const existingAuthUser = existingAuthUsersByEmail.get(String(profilePayload.auth_email || '').toLowerCase()) || null;
+
+      if (existingAuthUser?.id) {
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .upsert({
+            id: existingAuthUser.id,
+            ...profilePayload,
+            ...invitedLifecycleFields,
+          });
+
+        if (updateError) throw updateError;
+        updated += 1;
+        continue;
+      }
+
+      const createdUser = await createImportedAuthUser({
+        authEmail: profilePayload.auth_email,
+        role: 'mentor',
+        redirectTo: passwordSetupRedirectUrl,
+      });
+
+      if (!createdUser?.id) {
+        skipped.push({
+          full_name: person.full_name,
+          email: person.email,
+          reason: 'User account could not be created.',
+        });
+        continue;
+      }
+
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .upsert({
+          id: createdUser.id,
+          ...profilePayload,
+          ...invitedLifecycleFields,
+        });
+
+      if (updateError) throw updateError;
+      created += 1;
+    }
+
+    const summary = {
+      created,
+      updated,
+      skipped: skipped.length,
+      invited: created,
+    };
+
+    await writeImportLog({
+      importType: 'mentor',
+      uploadedBy: req.user?.id,
+      fileName: req.body?.fileName,
+      academicYear,
+      summary,
+      skipped,
+    });
+
+    res.json({
+      message: 'Mentor import completed.',
+      summary,
+      skipped,
+    });
+  } catch (error) {
+    res.status(error?.statusCode || 500).json({ message: error.message || 'Failed to import mentors.' });
+  }
+};
+
+export const extractCoordinatorStudentImport = async (req, res) => {
+  try {
+    const normalizedMimeType = String(req.body?.mimeType || '').toLowerCase();
+    const normalizedFileName = String(req.body?.fileName || '').toLowerCase();
+    const isWorkbookUpload = Boolean(
+      req.body?.fileBase64
+      && (
+        normalizedMimeType.includes('spreadsheet')
+        || normalizedMimeType.includes('excel')
+        || normalizedFileName.endsWith('.xlsx')
+        || normalizedFileName.endsWith('.xls')
+        || normalizedFileName.endsWith('.csv')
+      )
+    );
+
+    const workbookStudents = isWorkbookUpload ? extractStudentsFromWorkbook(req.body?.fileBase64) : [];
+    const rawText = workbookStudents.length > 0 ? '' : await extractTextFromImportPayload(req.body || {});
+    const textStudents = workbookStudents.length > 0 ? [] : fallbackExtractStudentsFromText(rawText);
+    const students = (workbookStudents.length > 0 ? workbookStudents : textStudents)
+      .map(normalizeImportedStudent);
+    const { data: coordinatorProfile, error: coordinatorError } = await supabase
+      .from('profiles')
+      .select('id, class_id, class_section, department')
+      .eq('id', req.user.id)
+      .maybeSingle();
+
+    if (coordinatorError) throw coordinatorError;
+    if (!coordinatorProfile?.class_id) {
+      return res.status(403).json({ message: 'Coordinator class assignment is required for student import.' });
+    }
+
+    const preview = await buildCoordinatorStudentImportPreview(students, coordinatorProfile);
+
+    res.json({
+      students: preview.rows,
+      meta: {
+        ...buildStudentImportSummary(preview.rows),
+        ...preview.summary,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Failed to extract students from file.' });
+  }
+};
+
+export const applyCoordinatorStudentImport = async (req, res) => {
+  try {
+    const students = parseStructuredStudentsPayload(req.body?.students);
+    const skipped = [];
+    let created = 0;
+    let updated = 0;
+    const academicYear = resolveAcademicYear(req.body?.academic_year);
+    const lifecycleFields = buildImportedProfileLifecycleFields(academicYear);
+    const invitedLifecycleFields = buildImportedProfileLifecycleFields(academicYear, {
+      accountStatus: 'invited',
+    });
+    const passwordSetupRedirectUrl = getPasswordSetupRedirectUrl(req);
+    const authEmailsByVisibleEmail = new Map(
+      students
+        .filter((student) => student?.email)
+        .map((student) => [String(student.email).trim().toLowerCase(), resolveImportedAuthEmail(student.email)])
+    );
+    const existingAuthUsersByEmail = await getExistingAuthUsersByEmail([...authEmailsByVisibleEmail.values()]);
+
+    const { data: coordinatorProfile, error: coordinatorError } = await supabase
+      .from('profiles')
+      .select('id, class_id, class_section, department')
+      .eq('id', req.user.id)
+      .maybeSingle();
+
+    if (coordinatorError) throw coordinatorError;
+    if (!coordinatorProfile?.class_id) {
+      return res.status(403).json({ message: 'Coordinator class assignment is required for student import.' });
+    }
+
+    const coordinatorClassSection = String(coordinatorProfile.class_section || '').trim();
+
+    for (const student of students) {
+      if (!student.full_name || !student.email) {
+        skipped.push({
+          full_name: student.full_name,
+          email: student.email,
+          reason: 'Missing full name or email.',
+        });
+        continue;
+      }
+
+      const targetClassSection = student.class_section || coordinatorClassSection || null;
+      const targetDepartment = student.department || coordinatorProfile.department || null;
+      const resolvedClassAssignment = await resolveProfileClassAssignment({
+        classSection: targetClassSection,
+        department: targetDepartment,
+      });
+
+      if (resolvedClassAssignment.class_id && resolvedClassAssignment.class_id !== coordinatorProfile.class_id) {
+        skipped.push({
+          full_name: student.full_name,
+          email: student.email,
+          reason: 'Student row belongs to a different class and was skipped.',
+        });
+        continue;
+      }
+
+      const profilePayload = {
+        full_name: student.full_name,
+        email: student.email,
+        auth_email: null,
+        role: 'student',
+        roll_number: student.roll_number,
+        department: targetDepartment,
+        class_section: resolvedClassAssignment.class_section || coordinatorClassSection || null,
+        class_id: coordinatorProfile.class_id,
+        ...lifecycleFields,
+      };
+
+      const { data: existingProfile, error: existingError } = await supabase
+        .from('profiles')
+        .select('id, role, auth_email')
+        .eq('email', student.email)
+        .maybeSingle();
+
+      if (existingError) throw existingError;
+
+      if (existingProfile?.id) {
+        profilePayload.auth_email = existingProfile.auth_email || student.email;
+        if (existingProfile.role && existingProfile.role !== 'student') {
+          skipped.push({
+            full_name: student.full_name,
+            email: student.email,
+            reason: 'Matched account is not a student profile.',
+          });
+          continue;
+        }
+
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update(profilePayload)
+          .eq('id', existingProfile.id);
+
+        if (updateError) throw updateError;
+        updated += 1;
+        continue;
+      }
+
+      profilePayload.auth_email = resolveImportedAuthEmail(student.email);
+
+      const existingAuthUser = existingAuthUsersByEmail.get(String(profilePayload.auth_email || '').toLowerCase()) || null;
+
+      if (existingAuthUser?.id) {
+        const { error: upsertError } = await supabase
+          .from('profiles')
+          .upsert({
+            id: existingAuthUser.id,
+            ...profilePayload,
+            ...invitedLifecycleFields,
+          });
+
+        if (upsertError) throw upsertError;
+        updated += 1;
+        continue;
+      }
+
+      const createdUser = await createImportedAuthUser({
+        authEmail: profilePayload.auth_email,
+        role: 'student',
+        redirectTo: passwordSetupRedirectUrl,
+      });
+
+      if (!createdUser?.id) {
+        skipped.push({
+          full_name: student.full_name,
+          email: student.email,
+          reason: 'User account could not be created.',
+        });
+        continue;
+      }
+
+      const { error: upsertError } = await supabase
+        .from('profiles')
+        .upsert({
+          id: createdUser.id,
+          ...profilePayload,
+          ...invitedLifecycleFields,
+        });
+
+      if (upsertError) throw upsertError;
+      created += 1;
+    }
+
+    const summary = {
+      created,
+      updated,
+      skipped: skipped.length,
+      invited: created,
+    };
+
+    await writeImportLog({
+      importType: 'student',
+      uploadedBy: req.user?.id,
+      fileName: req.body?.fileName,
+      academicYear,
+      summary,
+      skipped,
+    });
+
+    res.json({
+      summary,
+      skipped,
+    });
+  } catch (error) {
+    res.status(error?.statusCode || 500).json({ message: error.message || 'Failed to apply student import.' });
   }
 };
 

@@ -4,6 +4,11 @@ import {
   getAdminDashboardData,
   getAdminGuideAllocationData,
   getAdminMentorManagementData,
+  extractAdminMentorImport,
+  applyAdminMentorImport,
+  extractCoordinatorStudentImport,
+  applyCoordinatorStudentImport,
+  resolveLoginAuthEmail,
   getUserProfile, 
   updateUserProfile,
 
@@ -95,6 +100,11 @@ router.get('/dashboard-data', authenticateUser, getDashboardData);
 router.get('/admin/dashboard-data', authenticateUser, requireRole(['admin']), getAdminDashboardData);
 router.get('/admin/guide-allocation-data', authenticateUser, requireRole(['admin']), getAdminGuideAllocationData);
 router.get('/admin/mentor-management-data', authenticateUser, requireRole(['admin']), getAdminMentorManagementData);
+router.post('/admin/mentor-management-import/extract', authenticateUser, requireRole(['admin']), extractAdminMentorImport);
+router.post('/admin/mentor-management-import/apply', authenticateUser, requireRole(['admin']), applyAdminMentorImport);
+router.post('/coordinator/student-import/extract', authenticateUser, requireRole(['mentor']), requireCoordinator, extractCoordinatorStudentImport);
+router.post('/coordinator/student-import/apply', authenticateUser, requireRole(['mentor']), requireCoordinator, applyCoordinatorStudentImport);
+router.post('/auth/resolve-email', resolveLoginAuthEmail);
 router.get('/profile', authenticateUser, getUserProfile);
 router.put('/profile', authenticateUser, updateUserProfile);
 

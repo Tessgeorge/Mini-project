@@ -1,6 +1,6 @@
 import SectionCard from "./SectionCard";
 
-export default function PublishPanel({ verificationStatus = "Verification Completed" }) {
+export default function PublishPanel({ verificationStatus = "Verification Completed", onPublishClick }) {
   return (
     <SectionCard title="Result Publishing Panel">
       <div className="space-y-4">
@@ -10,6 +10,7 @@ export default function PublishPanel({ verificationStatus = "Verification Comple
         </div>
         <button
           type="button"
+          onClick={onPublishClick}
           className="w-full sm:w-auto px-5 py-2.5 rounded-lg bg-teal-600 text-white font-semibold hover:bg-teal-700 transition-colors"
         >
           Approve &amp; Publish Results
