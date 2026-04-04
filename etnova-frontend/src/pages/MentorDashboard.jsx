@@ -85,6 +85,66 @@ function getProjectDisplayName(project) {
   return project?.team_name || project?.title || "Untitled Team";
 }
 
+function formatReviewStageLabel(stageKey) {
+  return REVIEW_ROUND_OPTIONS.find((option) => option.value === stageKey)?.label
+    || getWorkflowStageMeta(stageKey).label;
+}
+
+function formatActivityTime(ts) {
+  if (!ts) return "Recently";
+  const diff = Date.now() - new Date(ts).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function buildRecentActivityItems({
+  evaluations = [],
+  guideProjects = [],
+  reviewProjects = [],
+  reviewerStageLabels = [],
+}) {
+  const items = [];
+
+  (evaluations || []).slice(0, 3).forEach((ev) => {
+    items.push({
+      text: `Evaluation submitted for ${ev.project_name || ev.project_id || "team"} (${ev.phase || ev.evaluation_type || "Review"})`,
+      time: formatActivityTime(ev.created_at),
+    });
+  });
+
+  const recentGuideProjects = [...(guideProjects || [])]
+    .map((project) => ({
+      project,
+      ts: new Date(project?.updated_at || project?.created_at || 0).getTime(),
+    }))
+    .sort((a, b) => b.ts - a.ts);
+
+  for (const item of recentGuideProjects) {
+    if (items.length >= 5) break;
+    const project = item.project;
+    const statusLabel = getStatusMeta(project?.status, { context: "project" }).label;
+    items.push({
+      text: `${getProjectDisplayName(project)} is currently ${String(statusLabel || "active").toLowerCase()} in your guide queue.`,
+      time: item.ts > 0 ? formatActivityTime(item.ts) : "Current",
+    });
+  }
+
+  if (items.length < 5 && reviewerStageLabels.length > 0) {
+    items.push({
+      text: `Reviewer access is open for ${reviewerStageLabels.join(", ")}.`,
+      time: reviewProjects.length > 0
+        ? `${reviewProjects.length} team${reviewProjects.length === 1 ? "" : "s"} available`
+        : "Active now",
+    });
+  }
+
+  return items.slice(0, 5);
+}
+
 async function fetchEvaluationsForMentor(mentorId) {
   return withInflight(mentorEvaluationInflight, mentorId, async () => {
     const preferredFilters = mentorEvalFilterStrategy
@@ -243,7 +303,7 @@ function TabPanelLoader({ label = "Loading section..." }) {
 
 const REVIEW_STAGE_ORDER = ["Idea", "Abstract", "Zeroth Review", "First Review", "Second Review", "Final Review"];
 const REVIEW_STAGE_VALUE_ORDER = REVIEW_ROUND_OPTIONS.map((option) => option.value);
-const MY_CLASS_TABS = ["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews"];
+const MY_CLASS_TABS = ["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews", "my-class-marks"];
 const MENTOR_TABS = new Set(["overview", "teams", "evaluation", ...MY_CLASS_TABS, "my-class-marks"]);
 const MENTOR_ACTIVE_TAB_STORAGE_KEY = "etnova:mentorDashboard:activeTab";
 const MENTOR_SELECTED_TEAM_STORAGE_KEY = "etnova:mentorDashboard:selectedTeamId";
@@ -435,10 +495,10 @@ function WeeklyChart({ evaluations }) {
     d.setDate(d.getDate() - i);
     const key = d.toISOString().split("T")[0];
     const label = d.toLocaleDateString("en-IN", { weekday: "short" });
-    const count = evaluations.filter(e => e.created_at?.startsWith(key)).length;
+    const count = evaluations.filter((e) => e.created_at?.startsWith(key)).length;
     days.push({ label, key, count });
   }
-  const max = Math.max(...days.map(d => d.count), 1);
+  const max = Math.max(...days.map((d) => d.count), 1);
   return (
     <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
       <div className="flex justify-between items-start mb-6">
@@ -455,8 +515,10 @@ function WeeklyChart({ evaluations }) {
             <div key={d.key} className="flex flex-col items-center gap-1.5 flex-1">
               <span className="text-xs font-bold text-gray-600">{d.count > 0 ? d.count : ""}</span>
               <div className="w-full rounded-t-lg bg-gray-100 relative overflow-hidden" style={{ height: "80px" }}>
-                <div className="absolute bottom-0 w-full rounded-t-lg bg-gradient-to-t from-teal-500 to-teal-300 transition-all duration-700"
-                  style={{ height: `${Math.max(pct, d.count > 0 ? 10 : 0)}%` }} />
+                <div
+                  className="absolute bottom-0 w-full rounded-t-lg bg-gradient-to-t from-teal-500 to-teal-300 transition-all duration-700"
+                  style={{ height: `${Math.max(pct, d.count > 0 ? 10 : 0)}%` }}
+                />
               </div>
               <span className="text-xs text-gray-400 font-medium">{d.label}</span>
             </div>
@@ -887,14 +949,66 @@ function Topbar({ active, mentorName, onProfileClick, onToggleSidebar, onNavigat
 }
 
 // ─── OVERVIEW TAB ───────────────────────────────────────────────────────────
-function OverviewTab({ projects, evaluations, milestones, recentActivity, loading, onNavigate, onSubmitReview, showEvaluationPanel }) {
+function OverviewTab({
+  projects,
+  evaluations,
+  milestones,
+  recentActivity,
+  loading,
+  onNavigate,
+  onSubmitReview,
+  showEvaluationPanel,
+  reviewProjects = [],
+  allowedReviewStages = [],
+  hasReviewAccess = false,
+  isCoordinatorWithClass = false,
+  myClassData = null,
+}) {
   const [reviewProject, setReviewProject] = useState(null);
   if (loading) return <Spinner />;
 
-  const pendingTeams = projects.filter(proj => !evaluations.some(ev => ev.project_id === proj.id));
+  const pendingTeams = projects.filter((proj) => !evaluations.some((ev) => ev.project_id === proj.id));
   const handleSubmitReview = async (data) => { await onSubmitReview(data); setReviewProject(null); };
   const avgScore = evaluations.length
     ? Math.round(evaluations.reduce((s, e) => s + Number(e.score), 0) / evaluations.length) : 0;
+  const reviewerStageLabels = allowedReviewStages.map(formatReviewStageLabel);
+  const reviewerSummary = showEvaluationPanel
+    ? `${reviewProjects.length} team${reviewProjects.length !== 1 ? "s" : ""} available`
+    : hasReviewAccess
+      ? "Awaiting open review stage"
+      : "Access controlled by coordinator";
+  const coordinatorPendingCount = Number(myClassData?.pendingEvaluations || 0);
+  const coordinatorTitle = myClassData?.classTitle || "No coordinator role";
+
+  // ─── FIXED: Only include stages where coordinator explicitly saved a student deadline ───
+  const _adminDeadlineItems = isCoordinatorWithClass
+    ? (myClassData?.reviewStages || [])
+        .filter((s) => Boolean(s?.coordinator_deadline))
+        .map((s) => ({
+          title: `${normalizeReviewStageName(s.stage_name)} — Evaluation Deadline`,
+          due_date: s.coordinator_deadline,
+          status: s.is_completed ? "completed" : "upcoming",
+          source: "admin",
+        }))
+    : [];
+
+  const studentDeadlineItems = isCoordinatorWithClass
+    ? (myClassData?.reviewStages || [])
+        .filter((s) => Boolean(s?.coordinator_deadline) && Boolean(s?.deadline) && s.student_deadline_set_by_coordinator === true)
+        .map((s) => ({
+          title: `${normalizeReviewStageName(s.stage_name)} — Student Deadline`,
+          due_date: s.deadline,
+          status: "upcoming",
+          source: "student",
+        }))
+    : [];
+
+  const allDeadlineItems = (isCoordinatorWithClass
+    ? studentDeadlineItems
+    : milestones.map((m) => ({ ...m, source: "admin" }))
+  )
+    .filter((item) => Boolean(item?.due_date))
+    .sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
 
   return (
     <div className="space-y-6">
@@ -910,32 +1024,87 @@ function OverviewTab({ projects, evaluations, milestones, recentActivity, loadin
         </div>
         <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
           <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-1">Evaluation Panel</p>
-          <p className="text-5xl font-extrabold text-gray-900 mt-2 mb-1">{evaluations.length}</p>
+          <p className="text-5xl font-extrabold text-gray-900 mt-2 mb-1">{showEvaluationPanel ? reviewProjects.length : 0}</p>
           <p className="text-sm text-gray-400 mb-5">
-            {showEvaluationPanel && pendingTeams.length > 0
-              ? `${pendingTeams.length} team${pendingTeams.length !== 1 ? "s" : ""} pending evaluation.`
-              : showEvaluationPanel
-                ? "Review Evaluation is available as a separate module."
+            {showEvaluationPanel
+              ? `${reviewerStageLabels.join(", ")} open for ${reviewProjects.length} team${reviewProjects.length !== 1 ? "s" : ""}.`
+              : hasReviewAccess
+                ? "Reviewer access exists, but no open stage is available right now."
                 : "Review Evaluation opens only when reviewer access is assigned."}
           </p>
-          <button onClick={() => onNavigate(showEvaluationPanel ? "evaluation" : "teams")}
-            className="w-full bg-teal-400 hover:bg-teal-500 active:scale-95 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2">
-            <Icon.Evaluation /> {showEvaluationPanel ? "Open Review Evaluation" : "Open Teams"}
+          <button
+            onClick={() => showEvaluationPanel && onNavigate("evaluation")}
+            disabled={!showEvaluationPanel}
+            className={`w-full font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2 ${
+              showEvaluationPanel
+                ? "bg-teal-400 hover:bg-teal-500 active:scale-95 text-white"
+                : "bg-gray-100 text-gray-400 cursor-not-allowed"
+            }`}
+          >
+            <Icon.Evaluation /> {showEvaluationPanel ? "Open Review Evaluation" : "Access Locked"}
           </button>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-4">
-        {[
-          { label: "Evaluations Done", value: evaluations.length, color: "text-teal-500", bg: "bg-teal-50" },
-          { label: "Average Score", value: avgScore ? `${avgScore}%` : "—", color: "text-blue-500", bg: "bg-blue-50" },
-          { label: "Completed", value: projects.filter(p => p.status?.toLowerCase() === "completed").length, color: "text-emerald-500", bg: "bg-emerald-50" },
-        ].map(s => (
-          <div key={s.label} className={`${s.bg} rounded-2xl p-4 border border-white`}>
-            <p className={`text-3xl font-extrabold ${s.color}`}>{s.value}</p>
-            <p className="text-xs text-gray-500 mt-1 font-medium">{s.label}</p>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className="bg-teal-50 rounded-2xl p-5 border border-white">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-bold uppercase tracking-widest text-gray-500">Guide Role</p>
+            <span className="rounded-full border border-white/80 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-gray-600">
+              {projects.length} assigned
+            </span>
           </div>
-        ))}
+          <p className="mt-3 text-3xl font-extrabold text-teal-600">{pendingTeams.length}</p>
+          <p className="mt-1 text-xs font-semibold text-gray-500">teams need follow-up</p>
+          <p className="mt-3 text-xs text-gray-500">
+            {pendingTeams.length > 0
+              ? `${pendingTeams.length} team${pendingTeams.length !== 1 ? "s are" : " is"} waiting for your guide action.`
+              : "No pending guide responsibilities right now."}
+          </p>
+        </div>
+        <div className="bg-blue-50 rounded-2xl p-5 border border-white">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-bold uppercase tracking-widest text-gray-500">Reviewer Access</p>
+            <span className="rounded-full border border-white/80 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-gray-600">
+              {showEvaluationPanel ? `${allowedReviewStages.length} stage${allowedReviewStages.length === 1 ? "" : "s"}` : "Locked"}
+            </span>
+          </div>
+          <p className="mt-3 text-3xl font-extrabold text-blue-600">{showEvaluationPanel ? reviewProjects.length : 0}</p>
+          <p className="mt-1 text-xs font-semibold text-gray-500">{reviewerSummary}</p>
+          <p className="mt-3 text-xs text-gray-500">
+            {showEvaluationPanel
+              ? reviewerStageLabels.join(", ")
+              : "Status only here so the main review action is not duplicated."}
+          </p>
+        </div>
+        <div className="bg-emerald-50 rounded-2xl p-5 border border-white">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-bold uppercase tracking-widest text-gray-500">Coordinator Class</p>
+            <span className="rounded-full border border-white/80 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-gray-600">
+              {isCoordinatorWithClass ? "Available" : "Not assigned"}
+            </span>
+          </div>
+          <p className="mt-3 text-base font-extrabold text-gray-900">{coordinatorTitle}</p>
+          <p className="mt-1 text-xs font-semibold text-gray-500">
+            {isCoordinatorWithClass
+              ? `${myClassData?.totalProjects || 0} teams · ${coordinatorPendingCount} pending`
+              : "No coordinator class linked"}
+          </p>
+          <button
+            type="button"
+            onClick={() => isCoordinatorWithClass && onNavigate("my-class-overview")}
+            disabled={!isCoordinatorWithClass}
+            className={`mt-4 inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition-all ${
+              isCoordinatorWithClass
+                ? "bg-white text-emerald-700 shadow-sm hover:-translate-y-0.5"
+                : "bg-white/70 text-gray-400 cursor-not-allowed"
+            }`}
+          >
+            Open My Class <Icon.ArrowRight />
+          </button>
+        </div>
       </div>
+
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
         <div className="xl:col-span-2"><WeeklyChart projects={projects} evaluations={evaluations} /></div>
         <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
@@ -955,48 +1124,105 @@ function OverviewTab({ projects, evaluations, milestones, recentActivity, loadin
           )}
         </div>
       </div>
+
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
         <div className="xl:col-span-2 bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
-          <p className="font-extrabold text-gray-800 text-base mb-1">Deadlines & Milestones</p>
-          <p className="text-xs text-gray-400 mb-5">Read-only timeline controlled by admin.</p>
-          {milestones.length === 0 ? <p className="text-sm text-gray-400">No milestones set.</p> : (
+          <div className="flex items-start justify-between mb-1">
+            <p className="font-extrabold text-gray-800 text-base">Deadlines & Milestones</p>
+          </div>
+          <p className="text-xs text-gray-400 mb-5">
+            {isCoordinatorWithClass
+              ? "Student submission deadlines from My Class."
+              : "Read-only timeline controlled by admin."}
+          </p>
+
+          {allDeadlineItems.length === 0 ? (
+            <p className="text-sm text-gray-400">No milestones set.</p>
+          ) : (
             <div className="space-y-3">
-              {milestones.map((m, i) => {
-                const today = new Date(); const due = new Date(m.due_date);
-                const isPast = due < today; const isToday = due.toDateString() === today.toDateString();
-                const tag = m.status === "completed" ? "Completed" : isToday ? "Today" : isPast ? "Overdue" : "Upcoming";
-                const tagStyle = tag === "Completed" ? "bg-blue-50 text-blue-600 border-blue-200"
-                  : tag === "Overdue" ? "bg-red-50 text-red-600 border-red-200"
-                    : tag === "Today" ? "bg-amber-50 text-amber-600 border-amber-200"
-                      : "bg-teal-50 text-teal-600 border-teal-200";
+              {allDeadlineItems.map((m, i) => {
+                const today = new Date();
+                const due = new Date(m.due_date);
+                const isPast = due < today;
+                const isToday = due.toDateString() === today.toDateString();
+                const tag =
+                  m.status === "completed"
+                    ? "Completed"
+                    : isToday
+                    ? "Today"
+                    : isPast
+                    ? "Overdue"
+                    : "Upcoming";
+                const tagStyle =
+                  tag === "Completed"
+                    ? "bg-blue-50 text-blue-600 border-blue-200"
+                    : tag === "Overdue"
+                    ? "bg-red-50 text-red-600 border-red-200"
+                    : tag === "Today"
+                    ? "bg-amber-50 text-amber-600 border-amber-200"
+                    : "bg-teal-50 text-teal-600 border-teal-200";
+                const dotColor =
+                  tag === "Completed"
+                    ? "bg-blue-500"
+                    : tag === "Overdue"
+                    ? "bg-red-500"
+                    : tag === "Today"
+                    ? "bg-amber-500"
+                    : m.source === "student"
+                    ? "bg-indigo-400"
+                    : "bg-teal-400";
+
+                const formattedDate = !Number.isNaN(due.getTime())
+                  ? due.toLocaleString("en-IN", {
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                  : m.due_date;
+
                 return (
-                  <div key={i} className="flex items-center justify-between p-4 rounded-xl border border-gray-100 bg-gray-50 hover:bg-gray-100 transition-colors">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-2 h-2 rounded-full flex-shrink-0 ${tag === "Completed" ? "bg-blue-500" : tag === "Overdue" ? "bg-red-500" : tag === "Today" ? "bg-amber-500" : "bg-teal-400"}`} />
-                      <div>
-                        <p className="text-sm font-semibold text-gray-800">{m.title}</p>
-                        <p className="text-xs text-gray-400">{m.due_date}</p>
+                  <div
+                    key={i}
+                    className="flex items-center justify-between p-4 rounded-xl border border-gray-100 bg-gray-50 hover:bg-gray-100 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={`w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`} />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-semibold text-gray-800">{m.title}</p>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-0.5">{formattedDate}</p>
                       </div>
                     </div>
-                    <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${tagStyle}`}>{tag}</span>
+                    <span
+                      className={`text-xs font-semibold px-3 py-1 rounded-full border flex-shrink-0 ml-3 ${tagStyle}`}
+                    >
+                      {tag}
+                    </span>
                   </div>
                 );
               })}
             </div>
           )}
         </div>
+
         <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
-          <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4">Team Score Overview</p>
+          <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4">Team Status Overview</p>
           <div className="space-y-4">
-            {projects.map(proj => {
-              const ev = evaluations.filter(e => e.project_id === proj.id);
-              const avg = ev.length ? Math.round(ev.reduce((s, e) => s + Number(e.score), 0) / ev.length) : null;
+            {projects.map((proj) => {
               return (
                 <div key={proj.id} className="flex items-center gap-3">
-                  <ProgressRing pct={avg || 0} size={44} stroke={4} />
+                  <div className="w-11 h-11 rounded-full border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-500 font-bold text-sm flex-shrink-0">
+                    {getProjectDisplayName(proj)?.[0] || "?"}
+                  </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-gray-800 truncate">{getProjectDisplayName(proj)}</p>
-                    <p className={`text-xs font-bold ${avg ? scoreClr(avg) : "text-gray-400"}`}>{avg ? `${avg}/100` : "Not evaluated"}</p>
+                    <div className="mt-1 flex items-center gap-2 flex-wrap">
+                      <StatusBadge status={proj.status} />
+                      <span className="text-xs text-gray-400">{proj.team_members?.length || 0} members</span>
+                    </div>
                   </div>
                 </div>
               );
@@ -1005,37 +1231,6 @@ function OverviewTab({ projects, evaluations, milestones, recentActivity, loadin
           </div>
         </div>
       </div>
-      {pendingTeams.length > 0 && (
-        <div id="pending-section" className="bg-white rounded-2xl border border-amber-100 shadow-sm overflow-hidden">
-          <div className="flex items-center gap-3 px-6 py-4 bg-amber-50 border-b border-amber-100">
-            <span className="text-amber-500"><Icon.Alert /></span>
-            <div>
-              <p className="font-extrabold text-gray-800">Pending Reviews</p>
-              <p className="text-xs text-gray-500">{pendingTeams.length} team{pendingTeams.length !== 1 ? "s" : ""} waiting for your evaluation</p>
-            </div>
-          </div>
-          <div className="divide-y divide-gray-50">
-            {pendingTeams.map(proj => (
-              <div key={proj.id} className="flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600 font-extrabold text-sm flex-shrink-0">{getProjectDisplayName(proj)?.[0] || "?"}</div>
-                  <div>
-                    <p className="font-semibold text-gray-800">{getProjectDisplayName(proj)}</p>
-                    <div className="flex items-center gap-3 mt-0.5">
-                      <span className="text-xs text-gray-400 flex items-center gap-1"><Icon.Clock />{proj.team_members?.length || 0} members</span>
-                      <StatusBadge status={proj.status} />
-                    </div>
-                  </div>
-                </div>
-                <button onClick={() => setReviewProject(proj)}
-                  className="flex items-center gap-2 bg-teal-400 hover:bg-teal-500 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-all active:scale-95">
-                  Start Review <Icon.ArrowRight />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
       {reviewProject && <ReviewModal project={reviewProject} onClose={() => setReviewProject(null)} onSubmit={handleSubmitReview} />}
     </div>
   );
@@ -1155,72 +1350,42 @@ function TeamsTab({ projects, evaluations, loading, mentorId, mentorName, onNavi
 function EvaluationTab({ projects, loading, allowedReviewStages = [], writableReviewStages = [] }) {
   const [selectedProjectId, setSelectedProjectId] = useState(() => getStoredMentorSelectedReviewProjectId());
   const [search, setSearch] = useState("");
-  const [batchFilter, setBatchFilter] = useState("all"); // "all" | "1" | "2" | "unassigned"
+  const [batchFilter, setBatchFilter] = useState("all");
   const selectedProject = projects.find((project) => project.id === selectedProjectId) || null;
 
   useEffect(() => {
     if (!selectedProjectId) {
-      try {
-        window.sessionStorage.removeItem(MENTOR_SELECTED_REVIEW_PROJECT_STORAGE_KEY);
-      } catch {}
+      try { window.sessionStorage.removeItem(MENTOR_SELECTED_REVIEW_PROJECT_STORAGE_KEY); } catch {}
       return;
     }
-    try {
-      window.sessionStorage.setItem(MENTOR_SELECTED_REVIEW_PROJECT_STORAGE_KEY, selectedProjectId);
-    } catch {}
+    try { window.sessionStorage.setItem(MENTOR_SELECTED_REVIEW_PROJECT_STORAGE_KEY, selectedProjectId); } catch {}
   }, [selectedProjectId]);
 
   useEffect(() => {
     if (loading || !selectedProjectId) return;
     const stillExists = projects.some((project) => project.id === selectedProjectId);
-    if (!stillExists) {
-      setSelectedProjectId(null);
-    }
+    if (!stillExists) setSelectedProjectId(null);
   }, [loading, projects, selectedProjectId]);
 
-  // ── derive class name & batch buckets ──────────────────────────────────
   const className = projects.length > 0
     ? (projects[0].class_name || projects[0].classes?.class_section || "Assigned Class")
     : "Assigned Class";
 
-  // Collect all unique batches present
   const batchOptions = ["all"];
   const batchNums = [...new Set(projects.map(p => p.batch).filter(b => b != null))].sort();
   batchNums.forEach(b => batchOptions.push(String(b)));
   if (projects.some(p => p.batch == null)) batchOptions.push("unassigned");
 
-  // Filter by search + batch
   const filtered = projects.filter(project => {
     const name = getProjectDisplayName(project).toLowerCase();
-    const members = (project.team_members || [])
-      .map(m => m.profiles?.full_name || "").join(" ").toLowerCase();
+    const members = (project.team_members || []).map(m => m.profiles?.full_name || "").join(" ").toLowerCase();
     const matchSearch = !search.trim() || name.includes(search.toLowerCase()) || members.includes(search.toLowerCase());
-
     const matchBatch = batchFilter === "all"
       || (batchFilter === "unassigned" && project.batch == null)
       || String(project.batch) === batchFilter;
-
     return matchSearch && matchBatch;
   });
 
-  // Group filtered teams by batch
-  const groupedByBatch = filtered.reduce((acc, project) => {
-    const batchKey = project.batch != null ? `Batch ${project.batch}` : "Unassigned";
-    if (!acc[batchKey]) acc[batchKey] = [];
-    acc[batchKey].push(project);
-    return acc;
-  }, {});
-
-  // Sort batch groups: Batch 1 first, then Batch 2, etc., Unassigned last
-  const sortedBatchKeys = Object.keys(groupedByBatch).sort((a, b) => {
-    if (a === "Unassigned") return 1;
-    if (b === "Unassigned") return -1;
-    const numA = parseInt(a.replace("Batch ", ""), 10);
-    const numB = parseInt(b.replace("Batch ", ""), 10);
-    return numA - numB;
-  });
-
-  // ── batch color helpers ─────────────────────────────────────────────────
   const batchColors = {
     "Batch 1": { bg: "bg-teal-50", border: "border-teal-200", text: "text-teal-700", dot: "bg-teal-500", header: "from-teal-500 to-emerald-500" },
     "Batch 2": { bg: "bg-indigo-50", border: "border-indigo-200", text: "text-indigo-700", dot: "bg-indigo-500", header: "from-indigo-500 to-purple-500" },
@@ -1228,24 +1393,18 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
   };
   const getBatchColor = (key) => batchColors[key] || batchColors["Batch 2"];
 
-  // ── open/closed stage indicator ─────────────────────────────────────────
   const openStageLabel = writableReviewStages.length > 0
     ? REVIEW_ROUND_OPTIONS.find(o => o.value === writableReviewStages[0])?.label || writableReviewStages[0]
     : null;
 
   if (loading) return <Spinner />;
 
-  // ── detail view ─────────────────────────────────────────────────────────
   if (selectedProject) {
     return (
       <div className="space-y-5">
-        {/* Breadcrumb */}
         <div className="flex items-center gap-2 text-sm">
-          <button
-            type="button"
-            onClick={() => setSelectedProjectId(null)}
-            className="text-teal-600 hover:text-teal-700 font-semibold flex items-center gap-1.5"
-          >
+          <button type="button" onClick={() => setSelectedProjectId(null)}
+            className="text-teal-600 hover:text-teal-700 font-semibold flex items-center gap-1.5">
             <span className="rotate-180 inline-flex"><Icon.ArrowRight /></span>
             Review Evaluation
           </button>
@@ -1254,8 +1413,6 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
           <Icon.ChevronRight />
           <span className="text-gray-800 font-semibold">{getProjectDisplayName(selectedProject)}</span>
         </div>
-
-        {/* Team detail header */}
         <div className="bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm">
           <div className="bg-gradient-to-r from-[#00D2C4] to-[#00a89d] px-6 py-5">
             <div className="flex items-start justify-between">
@@ -1268,22 +1425,16 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
               <StatusBadge status={selectedProject.status} />
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
-              <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">
-                {className}
-              </span>
+              <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">{className}</span>
               <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">
                 {(selectedProject.team_members || []).length} {(selectedProject.team_members || []).length === 1 ? "Student" : "Students"}
               </span>
               {selectedProject.batch != null && (
-                <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">
-                  Batch {selectedProject.batch}
-                </span>
+                <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white">Batch {selectedProject.batch}</span>
               )}
             </div>
           </div>
-
           <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Allowed stages */}
             <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
               <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-3">Review Stages</p>
               <div className="flex flex-wrap gap-2">
@@ -1292,17 +1443,12 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
                   const isWritable = writableReviewStages.includes(stageKey);
                   return (
                     <span key={stageKey} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold ${isWritable ? "border-teal-200 bg-teal-50 text-teal-700" : "border-slate-200 bg-white text-slate-500"}`}>
-                      {isWritable ? <Icon.Unlock /> : <Icon.Lock />}
-                      {label}
+                      {isWritable ? <Icon.Unlock /> : <Icon.Lock />}{label}
                     </span>
                   );
-                }) : (
-                  <span className="text-sm font-semibold text-slate-500">No stage assigned yet.</span>
-                )}
+                }) : <span className="text-sm font-semibold text-slate-500">No stage assigned yet.</span>}
               </div>
             </div>
-
-            {/* Team members */}
             <div className="rounded-2xl border border-slate-100 bg-white px-4 py-4">
               <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-3">Team Members</p>
               <div className="flex flex-wrap gap-2">
@@ -1311,22 +1457,16 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
                   const colors = ["bg-teal-400", "bg-indigo-400", "bg-purple-400", "bg-amber-400", "bg-rose-400"];
                   return (
                     <div key={member.id || i} className="flex items-center gap-2 rounded-full bg-slate-50 border border-slate-200 pr-3 pl-1 py-1">
-                      <div className={`w-6 h-6 rounded-full ${colors[i % 5]} text-white text-xs font-bold flex items-center justify-center`}>
-                        {name[0]}
-                      </div>
+                      <div className={`w-6 h-6 rounded-full ${colors[i % 5]} text-white text-xs font-bold flex items-center justify-center`}>{name[0]}</div>
                       <span className="text-xs font-semibold text-slate-700">{name}</span>
                     </div>
                   );
                 })}
-                {(selectedProject.team_members || []).length === 0 && (
-                  <span className="text-sm text-slate-400">No students linked</span>
-                )}
+                {(selectedProject.team_members || []).length === 0 && <span className="text-sm text-slate-400">No students linked</span>}
               </div>
             </div>
           </div>
         </div>
-
-        {/* Rubric evaluation */}
         <Suspense fallback={<TabPanelLoader label="Loading rubric evaluation..." />}>
           <DynamicRubricEvaluation
             projectId={selectedProject.id}
@@ -1340,11 +1480,8 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
     );
   }
 
-  // ── list view ───────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-
-      {/* Page header */}
       <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
         <div className="flex items-start justify-between flex-wrap gap-4">
           <div>
@@ -1354,7 +1491,6 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
               Teams from the assigned class appear below, grouped by batch. Click a team to enter rubric-wise marks.
             </p>
           </div>
-          {/* Open stage indicator */}
           {openStageLabel ? (
             <div className="flex items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-4 py-2.5">
               <span className="w-2 h-2 rounded-full bg-teal-500 animate-pulse" />
@@ -1367,52 +1503,35 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
             </div>
           )}
         </div>
-
-        {/* Search + batch filter */}
         <div className="mt-5 flex flex-wrap gap-3">
-          {/* Search box */}
           <div className="flex-1 min-w-[200px] relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><Icon.Search /></span>
-            <input
-              type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
+            <input type="text" value={search} onChange={e => setSearch(e.target.value)}
               placeholder="Search team or student name…"
-              className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-400 focus:border-transparent"
-            />
+              className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-400 focus:border-transparent" />
             {search && (
-              <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                <Icon.X />
-              </button>
+              <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"><Icon.X /></button>
             )}
           </div>
-
-          {/* Batch filter pills */}
           <div className="flex items-center gap-2 flex-wrap">
             {batchOptions.map(opt => {
               const label = opt === "all" ? "All Batches" : opt === "unassigned" ? "Unassigned" : `Batch ${opt}`;
               const isActive = batchFilter === opt;
-              const color = opt === "1" ? "teal" : opt === "2" ? "indigo" : "slate";
               return (
-                <button
-                  key={opt}
-                  onClick={() => setBatchFilter(opt)}
+                <button key={opt} onClick={() => setBatchFilter(opt)}
                   className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${
                     isActive
                       ? opt === "1" ? "bg-teal-500 text-white border-teal-500"
                         : opt === "2" ? "bg-indigo-500 text-white border-indigo-500"
                         : "bg-slate-700 text-white border-slate-700"
                       : "bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50"
-                  }`}
-                >
+                  }`}>
                   {label}
                 </button>
               );
             })}
           </div>
         </div>
-
-        {/* Stats row */}
         <div className="mt-4 flex flex-wrap gap-4">
           <span className="text-sm text-slate-500">
             <span className="font-bold text-slate-800">{filtered.length}</span> team{filtered.length !== 1 ? "s" : ""} shown
@@ -1426,18 +1545,14 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
         </div>
       </div>
 
-      {/* No access state */}
       {projects.length === 0 && (
         <div className="bg-white rounded-2xl p-10 border border-gray-100 shadow-sm text-center">
-          <div className="w-14 h-14 mx-auto rounded-full bg-slate-100 flex items-center justify-center mb-3">
-            <Icon.Lock />
-          </div>
+          <div className="w-14 h-14 mx-auto rounded-full bg-slate-100 flex items-center justify-center mb-3"><Icon.Lock /></div>
           <p className="text-gray-700 font-semibold">No review access assigned</p>
           <p className="text-gray-400 text-sm mt-1">Once the coordinator grants reviewer access, teams will appear here.</p>
         </div>
       )}
 
-      {/* No results from search/filter */}
       {projects.length > 0 && filtered.length === 0 && (
         <div className="bg-white rounded-2xl p-10 border border-gray-100 shadow-sm text-center">
           <p className="text-gray-600 font-semibold">No teams match your search</p>
@@ -1447,84 +1562,57 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
         </div>
       )}
 
-      {/* Flat team list */}
       <div className="flex flex-col gap-2.5">
         {filtered.map((project) => {
           const batchKey = project.batch ? `Batch ${project.batch}` : "Unassigned";
           const colors = getBatchColor(batchKey);
-          const memberNames = (project.team_members || [])
-            .map(m => m.profiles?.full_name || m.profiles?.email || "Student");
+          const memberNames = (project.team_members || []).map(m => m.profiles?.full_name || m.profiles?.email || "Student");
           const memberColors = ["#14b8a6", "#6366f1", "#8b5cf6", "#f59e0b", "#ef4444"];
-
           return (
-            <div
-              key={project.id}
-              onClick={() => setSelectedProjectId(project.id)}
-              className="group bg-white rounded-xl border border-gray-100 shadow-[0_1px_2px_rgba(0,0,0,0.02)] hover:shadow-md hover:border-teal-300 transition-all duration-200 p-3 sm:px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer relative overflow-hidden"
-            >
-              {/* Batch colour accent bar on the left */}
+            <div key={project.id} onClick={() => setSelectedProjectId(project.id)}
+              className="group bg-white rounded-xl border border-gray-100 shadow-[0_1px_2px_rgba(0,0,0,0.02)] hover:shadow-md hover:border-teal-300 transition-all duration-200 p-3 sm:px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer relative overflow-hidden">
               <div className={`absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b ${colors.header}`} />
-
-              {/* Left: Avatar & Title info */}
               <div className="flex items-center gap-3.5 min-w-0 pl-1 flex-1">
                 <div className={`w-10 h-10 rounded-lg ${colors.bg} border ${colors.border} flex items-center justify-center flex-shrink-0`}>
-                  <span className={`text-sm font-extrabold ${colors.text}`}>
-                    {getProjectDisplayName(project)[0]?.toUpperCase() || "?"}
-                  </span>
+                  <span className={`text-sm font-extrabold ${colors.text}`}>{getProjectDisplayName(project)[0]?.toUpperCase() || "?"}</span>
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 mb-0.5">
-                    <h4 className="font-extrabold text-gray-900 leading-tight truncate text-sm">
-                      {getProjectDisplayName(project)}
-                    </h4>
-                    <span className={`rounded-full border ${colors.border} ${colors.bg} px-1.5 py-0.5 text-[10px] font-bold ${colors.text} hidden sm:inline-block`}>
-                      {batchKey}
-                    </span>
+                    <h4 className="font-extrabold text-gray-900 leading-tight truncate text-sm">{getProjectDisplayName(project)}</h4>
+                    <span className={`rounded-full border ${colors.border} ${colors.bg} px-1.5 py-0.5 text-[10px] font-bold ${colors.text} hidden sm:inline-block`}>{batchKey}</span>
                   </div>
-                  {/* Students line */}
                   {memberNames.length > 0 ? (
                     <div className="flex items-center gap-2 mt-1">
                       <div className="flex">
                         {(project.team_members || []).slice(0, 3).map((tm, i) => (
-                          <div key={i}
-                            className="w-4 h-4 rounded-full border border-white text-white text-[8px] font-bold flex items-center justify-center flex-shrink-0"
+                          <div key={i} className="w-4 h-4 rounded-full border border-white text-white text-[8px] font-bold flex items-center justify-center flex-shrink-0"
                             style={{ background: memberColors[i % 5], marginLeft: i > 0 ? "-2px" : "0" }}>
                             {(tm.profiles?.full_name || "?")[0]}
                           </div>
                         ))}
                       </div>
                       <span className="text-xs text-slate-500 font-medium truncate">
-                        {memberNames.slice(0, 3).join(", ")}
-                        {memberNames.length > 3 ? ` +${memberNames.length - 3}` : ""}
+                        {memberNames.slice(0, 3).join(", ")}{memberNames.length > 3 ? ` +${memberNames.length - 3}` : ""}
                       </span>
                     </div>
-                  ) : (
-                    <span className="text-xs text-slate-400 font-medium mt-1">No students</span>
-                  )}
+                  ) : <span className="text-xs text-slate-400 font-medium mt-1">No students</span>}
                 </div>
               </div>
-
-              {/* Right: Status, Stage & Button */}
               <div className="flex items-center gap-4 sm:gap-6 ml-11 sm:ml-0 flex-shrink-0">
                 <div className="flex items-center gap-3">
                   {openStageLabel && (
                     <span className="rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-700 hidden md:flex items-center gap-1">
-                      <Icon.Unlock />
-                      {openStageLabel}
+                      <Icon.Unlock />{openStageLabel}
                     </span>
                   )}
                   <StatusBadge status={project.status} />
                 </div>
-                
-                {/* CTA Button */}
-                <button
-                  type="button"
+                <button type="button"
                   className={`flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
                     writableReviewStages.length > 0
                       ? "bg-teal-50 text-teal-700 border-teal-200 group-hover:bg-teal-400 group-hover:text-white group-hover:border-teal-400"
                       : "bg-white border-slate-200 text-slate-600 group-hover:border-teal-200 group-hover:bg-teal-50 group-hover:text-teal-700"
-                  }`}
-                >
+                  }`}>
                   Review <Icon.ArrowRight />
                 </button>
               </div>
@@ -1566,18 +1654,12 @@ export default function MentorDashboard() {
       } else {
         window.sessionStorage.removeItem(MENTOR_ACTIVE_TAB_STORAGE_KEY);
       }
-    } catch {
-      // best-effort persistence only
-    }
+    } catch {}
   }, [active]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    try {
-      window.sessionStorage.removeItem(MENTOR_SELECTED_TEAM_STORAGE_KEY);
-    } catch {
-      // best-effort cleanup only
-    }
+    try { window.sessionStorage.removeItem(MENTOR_SELECTED_TEAM_STORAGE_KEY); } catch {}
   }, [active]);
 
   const loadCoordinatorClassData = useCallback(async (classId) => {
@@ -1603,31 +1685,31 @@ export default function MentorDashboard() {
           : Promise.resolve({ data: [] }),
       ]);
 
-    const members = membersRes.data || [];
-    const classEvals = evalRes.data || [];
-    const guides = guidesRes.data || [];
-    const documents = docsRes.data || [];
-    const guideMap = new Map(guides.map(g => [g.id, g.full_name || "Unassigned"]));
-    const memberCountByProject = members.reduce((acc, item) => { acc[item.project_id] = (acc[item.project_id] || 0) + 1; return acc; }, {});
-    const totalStudents = new Set(members.map((item) => item.student_id).filter(Boolean)).size;
-    const studentsByProject = members.reduce((acc, item) => {
-      if (!item?.project_id || !item?.student_id) return acc;
-      if (!acc[item.project_id]) acc[item.project_id] = new Set();
-      acc[item.project_id].add(item.student_id);
-      return acc;
-    }, {});
-    const evalByProject = classEvals.reduce((acc, item) => {
-      if (!acc[item.project_id]) acc[item.project_id] = [];
-      const normalizedScore = Number(item.score ?? item.obtained_marks);
-      acc[item.project_id].push(Number.isNaN(normalizedScore) ? 0 : normalizedScore);
-      return acc;
-    }, {});
-    const latestDocumentByProjectType = documents.reduce((acc, item) => {
-      if (!item?.project_id || !item?.document_type) return acc;
-      const key = `${item.project_id}:${String(item.document_type).trim().toLowerCase()}`;
-      if (!acc[key]) acc[key] = item;
-      return acc;
-    }, {});
+      const members = membersRes.data || [];
+      const classEvals = evalRes.data || [];
+      const guides = guidesRes.data || [];
+      const documents = docsRes.data || [];
+      const guideMap = new Map(guides.map(g => [g.id, g.full_name || "Unassigned"]));
+      const memberCountByProject = members.reduce((acc, item) => { acc[item.project_id] = (acc[item.project_id] || 0) + 1; return acc; }, {});
+      const totalStudents = new Set(members.map((item) => item.student_id).filter(Boolean)).size;
+      const studentsByProject = members.reduce((acc, item) => {
+        if (!item?.project_id || !item?.student_id) return acc;
+        if (!acc[item.project_id]) acc[item.project_id] = new Set();
+        acc[item.project_id].add(item.student_id);
+        return acc;
+      }, {});
+      const evalByProject = classEvals.reduce((acc, item) => {
+        if (!acc[item.project_id]) acc[item.project_id] = [];
+        const normalizedScore = Number(item.score ?? item.obtained_marks);
+        acc[item.project_id].push(Number.isNaN(normalizedScore) ? 0 : normalizedScore);
+        return acc;
+      }, {});
+      const latestDocumentByProjectType = documents.reduce((acc, item) => {
+        if (!item?.project_id || !item?.document_type) return acc;
+        const key = `${item.project_id}:${String(item.document_type).trim().toLowerCase()}`;
+        if (!acc[key]) acc[key] = item;
+        return acc;
+      }, {});
 
       let reviewMarks = [];
       if (projectIds.length) {
@@ -1650,34 +1732,32 @@ export default function MentorDashboard() {
         const scores = evalByProject[project.id] || [];
         const avgScore = scores.length ? scores.reduce((sum, s) => sum + s, 0) / scores.length : null;
 
-      if (project.approved_idea_id) {
-        stageProgress.idea += 1;
-      }
+        if (project.approved_idea_id) stageProgress.idea += 1;
 
-      const abstractDocument = latestDocumentByProjectType[`${project.id}:abstract`];
-      if (Boolean(abstractDocument?.coordinator_verified) || String(abstractDocument?.status || "").toLowerCase() === "approved") {
-        stageProgress.abstract += 1;
-      }
-
-      const studentIds = [...(studentsByProject[project.id] || new Set())];
-      const studentSet = new Set(studentIds);
-      const marksByStage = reviewMarks.reduce((acc, row) => {
-        const reviewStage = normalizeReviewStageValue(row?.review_stage);
-        if (!studentSet.has(row?.student_id) || !REVIEW_STAGE_VALUE_ORDER.includes(reviewStage)) return acc;
-        if (!acc[reviewStage]) acc[reviewStage] = new Set();
-        acc[reviewStage].add(row.student_id);
-        return acc;
-      }, {});
-
-      REVIEW_STAGE_VALUE_ORDER.forEach((reviewStage) => {
-        const markedStudents = marksByStage[reviewStage];
-        if (studentIds.length > 0 && markedStudents && markedStudents.size === studentIds.length) {
-          stageProgress[reviewStage] += 1;
+        const abstractDocument = latestDocumentByProjectType[`${project.id}:abstract`];
+        if (Boolean(abstractDocument?.coordinator_verified) || String(abstractDocument?.status || "").toLowerCase() === "approved") {
+          stageProgress.abstract += 1;
         }
-      });
 
-      return { ...project, teamSize: memberCountByProject[project.id] || 0, evaluationCount: scores.length, avgScore, guideName: guideMap.get(project.guide_id) || "Unassigned" };
-    });
+        const studentIds = [...(studentsByProject[project.id] || new Set())];
+        const studentSet = new Set(studentIds);
+        const marksByStage = reviewMarks.reduce((acc, row) => {
+          const reviewStage = normalizeReviewStageValue(row?.review_stage);
+          if (!studentSet.has(row?.student_id) || !REVIEW_STAGE_VALUE_ORDER.includes(reviewStage)) return acc;
+          if (!acc[reviewStage]) acc[reviewStage] = new Set();
+          acc[reviewStage].add(row.student_id);
+          return acc;
+        }, {});
+
+        REVIEW_STAGE_VALUE_ORDER.forEach((reviewStage) => {
+          const markedStudents = marksByStage[reviewStage];
+          if (studentIds.length > 0 && markedStudents && markedStudents.size === studentIds.length) {
+            stageProgress[reviewStage] += 1;
+          }
+        });
+
+        return { ...project, teamSize: memberCountByProject[project.id] || 0, evaluationCount: scores.length, avgScore, guideName: guideMap.get(project.guide_id) || "Unassigned" };
+      });
 
       const evaluatedCount = projectRows.filter(item => item.evaluationCount > 0).length;
       const allScores = classEvals.map(item => Number(item.score ?? item.obtained_marks)).filter(s => !Number.isNaN(s));
@@ -1823,7 +1903,6 @@ export default function MentorDashboard() {
           setAllowedReviewStages(allowedStages);
           setWritableReviewStages(writableStages);
           setProjects(projData || []);
-
           setEvaluations(evalData || []);
 
           setMilestones((msData || []).map(m => ({
@@ -1832,9 +1911,28 @@ export default function MentorDashboard() {
             status: m.status || "upcoming",
           })).filter(m => Boolean(m.due_date) && String(m.due_date).includes("-")));
 
-          const activity = (evalData || []).slice(0, 5).map(ev => {
-            const proj = (projData || []).find(p => p.id === ev.project_id);
-            return { text: `Evaluation submitted for ${getProjectDisplayName(proj)} (${ev.phase})`, time: getTimeAgo(ev.created_at) };
+          const activity = buildRecentActivityItems({
+            evaluations: (evalData || []).map((ev) => {
+              const proj = (projData || []).find((p) => p.id === ev.project_id);
+              return {
+                ...ev,
+                project_id: ev.project_id,
+                phase: ev.phase,
+                created_at: ev.created_at,
+                project_name: getProjectDisplayName(proj),
+              };
+            }),
+            guideProjects: guideProjectRows || [],
+            reviewProjects: reviewerProjectRows || [],
+            reviewerStageLabels: allowedStages.map(formatReviewStageLabel),
+          }).map((item) => {
+            if (item.project_name) {
+              return {
+                text: `Evaluation submitted for ${item.project_name} (${item.phase})`,
+                time: item.time,
+              };
+            }
+            return item;
           });
           setRecentActivity(activity);
         }
@@ -1871,16 +1969,12 @@ export default function MentorDashboard() {
 
   useEffect(() => {
     if (loading) return;
-    if (!isCoordinatorWithClass && MY_CLASS_TABS.includes(active)) {
-      setActive("overview");
-    }
+    if (!isCoordinatorWithClass && MY_CLASS_TABS.includes(active)) setActive("overview");
   }, [active, isCoordinatorWithClass, loading]);
 
   useEffect(() => {
     if (loading) return;
-    if (!canOpenEvaluationPanel && active === "evaluation") {
-      setActive("overview");
-    }
+    if (!canOpenEvaluationPanel && active === "evaluation") setActive("overview");
   }, [active, canOpenEvaluationPanel, loading]);
 
   useEffect(() => {
@@ -1913,16 +2007,6 @@ export default function MentorDashboard() {
       supabase.removeChannel(channel);
     };
   }, [coordinatorClassId, isMyClassActive, loadCoordinatorClassData, mentorProfile?.is_coordinator]);
-
-  function getTimeAgo(ts) {
-    if (!ts) return "—";
-    const diff = Date.now() - new Date(ts).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    return `${Math.floor(hrs / 24)}d ago`;
-  }
 
   const handleSubmitReview = async ({ projectId, phase, score, feedback }) => {
     try {
@@ -1963,7 +2047,6 @@ export default function MentorDashboard() {
 
   return (
     <div className="flex h-[100dvh] bg-gray-50 overflow-hidden relative">
-      {/* Mobile overlay */}
       {isSidebarOpen && (
         <div className="fixed inset-0 bg-gray-900/50 z-30 md:hidden backdrop-blur-sm transition-opacity" onClick={() => setIsSidebarOpen(false)} />
       )}
@@ -1995,7 +2078,10 @@ export default function MentorDashboard() {
           {active === "overview" && (
             <OverviewTab projects={guideProjects} evaluations={evaluations} milestones={milestones}
               recentActivity={recentActivity} loading={loading} onNavigate={setActive}
-              onSubmitReview={handleSubmitReview} showEvaluationPanel={canOpenEvaluationPanel} />
+              onSubmitReview={handleSubmitReview} showEvaluationPanel={canOpenEvaluationPanel}
+              reviewProjects={reviewProjects} allowedReviewStages={allowedReviewStages}
+              hasReviewAccess={hasReviewAccess} isCoordinatorWithClass={isCoordinatorWithClass}
+              myClassData={myClassData} />
           )}
           {active === "teams" && (
             <TeamsTab projects={guideProjects} evaluations={evaluations} loading={loading}
@@ -2036,4 +2122,4 @@ export default function MentorDashboard() {
       )}
     </div>
   );
-  }
+}

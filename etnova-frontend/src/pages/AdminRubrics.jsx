@@ -61,6 +61,26 @@ function getFinalResultStatusMeta(row) {
   };
 }
 
+const FINAL_MARKS_TOTAL = 150;
+
+function getGradeFromFinalMarks(finalMarks) {
+  const numericMarks = Number(finalMarks);
+  if (finalMarks == null || Number.isNaN(numericMarks)) return "-";
+
+  const percentage = (numericMarks / FINAL_MARKS_TOTAL) * 100;
+
+  if (percentage >= 90) return "S";
+  if (percentage >= 85) return "A+";
+  if (percentage >= 80) return "A";
+  if (percentage >= 75) return "B+";
+  if (percentage >= 70) return "B";
+  if (percentage >= 65) return "C+";
+  if (percentage >= 60) return "C";
+  if (percentage >= 55) return "D";
+  if (percentage >= 50) return "P";
+  return "F";
+}
+
 export default function AdminRubrics() {
   const navigate = useNavigate();
   const [stage, setStage] = useState(ADMIN_RUBRIC_STAGE_OPTIONS[0].value);
@@ -459,6 +479,7 @@ export default function AdminRubrics() {
                         <th className="px-4 py-3 text-left font-semibold">Student</th>
                         <th className="px-4 py-3 text-left font-semibold">Student ID</th>
                         <th className="px-4 py-3 text-left font-semibold">Final Marks</th>
+                        <th className="px-4 py-3 text-left font-semibold">Grade</th>
                         <th className="px-4 py-3 text-left font-semibold">Status</th>
                       </tr>
                     </thead>
@@ -471,6 +492,7 @@ export default function AdminRubrics() {
                           </td>
                           <td className="px-4 py-3 text-slate-700">{row.student_id}</td>
                           <td className="px-4 py-3 font-semibold text-slate-900">{row.final_marks ?? "-"}</td>
+                          <td className="px-4 py-3 font-semibold text-slate-900">{getGradeFromFinalMarks(row.final_marks)}</td>
                           <td className="px-4 py-3">
                             <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getFinalResultStatusMeta(row).className}`}>
                               {getFinalResultStatusMeta(row).label}

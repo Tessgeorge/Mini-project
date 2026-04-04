@@ -1230,13 +1230,20 @@ const getSimpleStageBreakdownForClassProjects = async ({ stage, projectIds }) =>
   return map;
 };
 
-export const getCoordinatorFinalResults = async (classId) => {
-  await recalculateClassFinalResults(classId);
+export const getCoordinatorFinalResults = async (classId, options = {}) => {
+  const requestedProjectId = options?.projectId || null;
+  const includeDetailedBreakdown = Boolean(requestedProjectId);
 
-  const { data: projects, error: projectError } = await supabase
+  let projectQuery = supabase
     .from('projects')
     .select('id, title')
     .eq('class_id', classId);
+
+  if (requestedProjectId) {
+    projectQuery = projectQuery.eq('id', requestedProjectId);
+  }
+
+  const { data: projects, error: projectError } = await projectQuery;
 
   if (projectError) throw projectError;
 
@@ -1277,11 +1284,17 @@ export const getCoordinatorFinalResults = async (classId) => {
 
   const profileMap = new Map((profiles || []).map((row) => [row.id, row]));
   const finalMap = new Map((finalRows || []).map((row) => [row.student_id, row]));
-  const [reviewRoundsMap, guideMap, eseMap] = await Promise.all([
-    getReviewRoundBreakdownForClassProjects({ projectIds }),
-    getSimpleStageBreakdownForClassProjects({ stage: 'guide', projectIds }),
-    getSimpleStageBreakdownForClassProjects({ stage: 'ese', projectIds }),
-  ]);
+  let reviewRoundsMap = {};
+  let guideMap = {};
+  let eseMap = {};
+
+  if (includeDetailedBreakdown) {
+    [reviewRoundsMap, guideMap, eseMap] = await Promise.all([
+      getReviewRoundBreakdownForClassProjects({ projectIds }),
+      getSimpleStageBreakdownForClassProjects({ stage: 'guide', projectIds }),
+      getSimpleStageBreakdownForClassProjects({ stage: 'ese', projectIds }),
+    ]);
+  }
 
   return uniqueStudentIds.map((studentId) => {
     const profile = profileMap.get(studentId) || {};

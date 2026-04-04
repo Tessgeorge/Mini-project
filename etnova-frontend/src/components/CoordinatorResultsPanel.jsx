@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import {
@@ -13,6 +13,36 @@ function formatMarks(value) {
   return Number(value).toFixed(1);
 }
 
+const FINAL_MARKS_TOTAL = 150;
+
+function getGradeLabel(row) {
+  if (!row?.updated_at) return "-";
+
+  const finalMarks = Number(row?.final_marks);
+  if (Number.isNaN(finalMarks)) return "-";
+
+  const percentage = (finalMarks / FINAL_MARKS_TOTAL) * 100;
+
+  if (percentage >= 90) return "S";
+  if (percentage >= 85) return "A+";
+  if (percentage >= 80) return "A";
+  if (percentage >= 75) return "B+";
+  if (percentage >= 70) return "B";
+  if (percentage >= 65) return "C+";
+  if (percentage >= 60) return "C";
+  if (percentage >= 55) return "D";
+  if (percentage >= 50) return "P";
+  return "F";
+}
+
+function getGradeBadgeClass(grade) {
+  if (grade === "-" || grade == null) return "bg-slate-100 text-slate-500";
+  if (["S", "A+", "A"].includes(grade)) return "bg-emerald-50 text-emerald-700";
+  if (["B+", "B", "C+"].includes(grade)) return "bg-teal-50 text-teal-700";
+  if (["C", "D", "P"].includes(grade)) return "bg-amber-50 text-amber-700";
+  return "bg-rose-50 text-rose-700";
+}
+
 function buildDraft(rows) {
   return (rows || []).reduce((acc, row) => {
     acc[row.student_id] = {
@@ -23,16 +53,23 @@ function buildDraft(rows) {
   }, {});
 }
 
-export default function CoordinatorResultsPanel({ projectId = null, students = [] }) {
+const EMPTY_STUDENTS = [];
+
+export default function CoordinatorResultsPanel({ projectId = null, students = EMPTY_STUDENTS }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [accessRestricted, setAccessRestricted] = useState(false);
   const [results, setResults] = useState([]);
   const [internalRows, setInternalRows] = useState([]);
   const [draft, setDraft] = useState({});
   const [publishOpen, setPublishOpen] = useState(false);
   const publishRef = useRef(null);
+  const studentIdsKey = useMemo(
+    () => (students || []).map((student) => student?.student_id).filter(Boolean).sort().join("|"),
+    [students]
+  );
 
   useEffect(() => {
     if (!publishOpen) return;
@@ -57,7 +94,6 @@ export default function CoordinatorResultsPanel({ projectId = null, students = [
       if (type === "internal") successMsg = "Internal marks published to students.";
       else if (type === "admin") successMsg = "Results sent to Admin for final publishing.";
       else if (type === "unpublish_internal") successMsg = "Internal marks have been revoked. Final marks (if published by admin) remain visible.";
-      else if (type === "unpublish_internal") successMsg = "Internal marks revoked tracking.";
       else if (type === "unpublish_admin") successMsg = "Submission to Admin revoked.";
       setNotice(successMsg);
     } catch (err) {
@@ -89,7 +125,7 @@ export default function CoordinatorResultsPanel({ projectId = null, students = [
       });
       doc.text(`${scopedResults.length} students  -  Generated: ${dateStr}`, 14, 22);
 
-      const tableColumn = ["Sl. No.", "Student", "Project", "Internal (Out of 75)", "External (Out of 75)", "Total Marks"];
+      const tableColumn = ["Sl. No.", "Student", "Project", "Internal (Out of 75)", "External (Out of 75)", "Total Marks", "Grade"];
       const tableRows = scopedResults.map((row, idx) => [
         idx + 1,
         row.full_name || row.student_id || "-",
@@ -97,6 +133,7 @@ export default function CoordinatorResultsPanel({ projectId = null, students = [
         formatMarks(row.cie_total),
         formatMarks(row.ese_total),
         formatMarks(row.final_marks),
+        getGradeLabel(row),
       ]);
 
       autoTable(doc, {
@@ -125,18 +162,41 @@ export default function CoordinatorResultsPanel({ projectId = null, students = [
     }
   };
 
-  const loadAll = async () => {
-    const requests = [fetchCoordinatorResultsBreakdown()];
+  const loadAll = useCallback(async () => {
+    console.log("[CoordinatorResultsPanel] Starting load", {
+      projectId,
+      studentCount: students.length,
+    });
+
+    const requests = [fetchCoordinatorResultsBreakdown(projectId)];
 
     if (projectId || students.length > 0) {
       requests.push(fetchCoordinatorInternalMarks());
     }
 
-    const [resultData, internalData] = await Promise.all(requests);
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => {
+        const timeoutError = new Error("Coordinator results request timed out.");
+        timeoutError.code = "REQUEST_TIMEOUT";
+        reject(timeoutError);
+      }, 12000);
+    });
+
+    const [resultData, internalData] = await Promise.race([
+      Promise.all(requests),
+      timeoutPromise,
+    ]);
+
+    console.log("[CoordinatorResultsPanel] Load success", {
+      projectId,
+      resultCount: Array.isArray(resultData) ? resultData.length : 0,
+      internalCount: Array.isArray(internalData) ? internalData.length : 0,
+    });
+
     setResults(resultData || []);
     setInternalRows(internalData || []);
     setDraft(buildDraft(internalData || []));
-  };
+  }, [projectId, students.length]);
 
   useEffect(() => {
     let cancelled = false;
@@ -144,11 +204,30 @@ export default function CoordinatorResultsPanel({ projectId = null, students = [
     const run = async () => {
       setLoading(true);
       setError("");
+      setAccessRestricted(false);
       try {
         if (cancelled) return;
         await loadAll();
       } catch (err) {
-        if (!cancelled) setError(err.message || "Failed to load coordinator result breakdown.");
+        console.error("[CoordinatorResultsPanel] Load failed", {
+          projectId,
+          studentCount: students.length,
+          error: err,
+        });
+
+        if (!cancelled) {
+          const message = err?.message || "Failed to load coordinator result breakdown.";
+          const isAccessDenied =
+            err?.status === 401 ||
+            err?.status === 403 ||
+            /access denied|authentication required|coordinator access required|scope not found|not a coordinator/i.test(message);
+
+          setAccessRestricted(isAccessDenied);
+          setResults([]);
+          setInternalRows([]);
+          setDraft({});
+          setError(isAccessDenied ? "" : message);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -158,7 +237,7 @@ export default function CoordinatorResultsPanel({ projectId = null, students = [
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadAll, projectId, studentIdsKey, students.length]);
 
   const summary = useMemo(() => {
     const scopedResults = projectId
@@ -212,6 +291,8 @@ export default function CoordinatorResultsPanel({ projectId = null, students = [
     return projectId ? internalRows.filter((row) => scopedStudentIds.has(row.student_id)) : internalRows;
   }, [internalRows, projectId, scopedStudentIds, students]);
 
+  const resultTableColumnCount = projectId ? 11 : 7;
+
   const handleDraftChange = (studentId, field, value) => {
     setDraft((prev) => ({
       ...prev,
@@ -261,6 +342,11 @@ export default function CoordinatorResultsPanel({ projectId = null, students = [
         </div>
       </div>
 
+      {accessRestricted ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          Access not granted.
+        </div>
+      ) : null}
       {error ? <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
       {notice ? <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div> : null}
 
@@ -410,14 +496,17 @@ export default function CoordinatorResultsPanel({ projectId = null, students = [
                 <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Internal /75</th>
                 <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">External /75</th>
                 <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Final</th>
+                <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Grade</th>
                 <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-500">Loading coordinator result breakdown...</td></tr>
+                <tr><td colSpan={resultTableColumnCount} className="px-4 py-8 text-center text-slate-500">Loading coordinator result breakdown...</td></tr>
+              ) : accessRestricted ? (
+                <tr><td colSpan={resultTableColumnCount} className="px-4 py-8 text-center text-slate-500">Access not granted.</td></tr>
               ) : scopedResults.length === 0 ? (
-                <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-500">No results available yet.</td></tr>
+                <tr><td colSpan={resultTableColumnCount} className="px-4 py-8 text-center text-slate-500">No data available.</td></tr>
               ) : (
                 scopedResults.map((row) => (
                   <tr key={row.student_id} className="align-top">
@@ -452,6 +541,11 @@ export default function CoordinatorResultsPanel({ projectId = null, students = [
                       </p>
                     </td>
                     <td className="px-4 py-4 font-black text-teal-700">{formatMarks(row.final_marks)}</td>
+                    <td className="px-4 py-4">
+                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${getGradeBadgeClass(getGradeLabel(row))}`}>
+                        {getGradeLabel(row)}
+                      </span>
+                    </td>
                     <td className="px-4 py-4">
                       <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
                         {row.status || "pending"}
