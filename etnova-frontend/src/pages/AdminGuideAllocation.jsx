@@ -231,6 +231,7 @@ export default function AdminGuideAllocation() {
       .channel("guide-allocation-projects-live")
       .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, () => fetchData(true))
       .on("postgres_changes", { event: "*", schema: "public", table: "guide_allocations" }, () => fetchData(true))
+      .on("postgres_changes", { event: "*", schema: "public", table: "class_submission_deadlines" }, () => fetchData(true))
       .on("postgres_changes", { event: "*", schema: "public", table: "team_members" }, () => fetchData(true))
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => fetchData(true))
       .on("postgres_changes", { event: "*", schema: "public", table: "project_ideas" }, () => fetchData(true))
@@ -750,8 +751,8 @@ export default function AdminGuideAllocation() {
             {filteredProjects.length === 0 && !loading ? (
               <div className="rounded-2xl border border-slate-200/70 bg-white px-6 py-10 text-center shadow-sm">
                 <div className="mx-auto max-w-sm space-y-2">
-                  <p className="text-sm font-medium text-slate-700">No teams matched this filter.</p>
-                  <p className="text-sm text-slate-500">Try switching the class filter or refresh the latest project data.</p>
+                  <p className="text-sm font-medium text-slate-700">No projects are available yet.</p>
+                  <p className="text-sm text-slate-500">Projects appear here only after that class coordinator locks team formation.</p>
                 </div>
               </div>
             ) : null}
@@ -937,8 +938,8 @@ export default function AdminGuideAllocation() {
                   <tr>
                     <td colSpan={6} className="px-6 py-10 text-center">
                       <div className="mx-auto max-w-sm space-y-2">
-                        <p className="text-sm font-medium text-slate-700">No teams matched this filter.</p>
-                        <p className="text-sm text-slate-500">Try switching the class filter or refresh the latest project data.</p>
+                        <p className="text-sm font-medium text-slate-700">No projects are available yet.</p>
+                        <p className="text-sm text-slate-500">Projects appear here only after that class coordinator locks team formation.</p>
                       </div>
                     </td>
                   </tr>

@@ -1603,7 +1603,7 @@ export const getAdminDashboardData = async (req, res) => {
 
 export const getAdminGuideAllocationData = async (req, res) => {
   try {
-    const [mentorResult, projectResult, classResult] = await Promise.all([
+    const [mentorResult, projectResult, classResult, lockResult] = await Promise.all([
       supabase
         .from('profiles')
         .select('id, full_name, email, department, specialization, domains_of_interest, max_team_capacity')
@@ -1634,11 +1634,16 @@ export const getAdminGuideAllocationData = async (req, res) => {
         .from('classes')
         .select('id, class_section')
         .order('class_section', { ascending: true }),
+      supabase
+        .from('class_submission_deadlines')
+        .select('class_id, deadline')
+        .eq('stage', 'team_formation'),
     ]);
 
     if (mentorResult.error) throw mentorResult.error;
     if (projectResult.error) throw projectResult.error;
     if (classResult.error) throw classResult.error;
+    if (lockResult.error) throw lockResult.error;
 
     const projectRows = projectResult.data || [];
     const projectIds = projectRows.map((row) => row.id).filter(Boolean);
@@ -1681,6 +1686,11 @@ export const getAdminGuideAllocationData = async (req, res) => {
       class_name: String(row.class_section || '').trim(),
       class_key: normalizeClassSectionInput(row.class_section),
     }));
+    const lockedClassIds = new Set(
+      (lockResult.data || [])
+        .filter((row) => row?.class_id && row?.deadline)
+        .map((row) => row.class_id)
+    );
     const classById = new Map(classRows.map((row) => [row.id, row]));
     const classByKey = new Map(classRows.map((row) => [String(row.class_key || '').trim(), row]));
 
@@ -1718,6 +1728,7 @@ export const getAdminGuideAllocationData = async (req, res) => {
         })
         .find(Boolean) || '';
       const detectedIdea = ideaById.get(project.approved_idea_id) || ideaById.get(project.current_idea_id) || null;
+      const resolvedClassId = matchedClass?.id || classProfile?.class_id || null;
 
       return {
         id: project.id,
@@ -1731,12 +1742,13 @@ export const getAdminGuideAllocationData = async (req, res) => {
         technologies: Array.isArray(detectedIdea?.technologies) ? detectedIdea.technologies : [],
         idea_title: detectedIdea?.title || '',
         team_department: teamDepartment,
-        class_id: matchedClass?.id || classProfile?.class_id || null,
+        class_id: resolvedClassId,
         class_name: matchedClass?.class_name || String(classProfile?.class_section || '').trim(),
         allocated_guide_id: allocation?.guide_id || null,
         allocated_guide_name: guideNameById.get(allocation?.guide_id) || '',
+        formation_locked: Boolean(resolvedClassId && lockedClassIds.has(resolvedClassId)),
       };
-    });
+    }).filter((project) => project.formation_locked);
 
     res.json({
       mentors,
@@ -2149,17 +2161,7 @@ export const applyCoordinatorStudentImport = async (req, res) => {
     );
     const existingAuthUsersByEmail = await getExistingAuthUsersByEmail([...authEmailsByVisibleEmail.values()]);
 
-    const { data: coordinatorProfile, error: coordinatorError } = await supabase
-      .from('profiles')
-      .select('id, class_id, class_section, department')
-      .eq('id', req.user.id)
-      .maybeSingle();
-
-    if (coordinatorError) throw coordinatorError;
-    if (!coordinatorProfile?.class_id) {
-      return res.status(403).json({ message: 'Coordinator class assignment is required for student import.' });
-    }
-
+    const coordinatorProfile = await getCoordinatorStudentContext(req.user.id);
     const coordinatorClassSection = String(coordinatorProfile.class_section || '').trim();
 
     for (const student of students) {
@@ -2225,6 +2227,15 @@ export const applyCoordinatorStudentImport = async (req, res) => {
           .eq('id', existingProfile.id);
 
         if (updateError) throw updateError;
+        const { error: enforceClassError } = await supabase
+          .from('profiles')
+          .update({
+            class_id: coordinatorProfile.class_id,
+            class_section: resolvedClassAssignment.class_section || coordinatorClassSection || null,
+            department: targetDepartment,
+          })
+          .eq('id', existingProfile.id);
+        if (enforceClassError) throw enforceClassError;
         updated += 1;
         continue;
       }
@@ -2271,6 +2282,15 @@ export const applyCoordinatorStudentImport = async (req, res) => {
         });
 
       if (upsertError) throw upsertError;
+      const { error: enforceClassError } = await supabase
+        .from('profiles')
+        .update({
+          class_id: coordinatorProfile.class_id,
+          class_section: resolvedClassAssignment.class_section || coordinatorClassSection || null,
+          department: targetDepartment,
+        })
+        .eq('id', createdUser.id);
+      if (enforceClassError) throw enforceClassError;
       created += 1;
     }
 
@@ -2296,6 +2316,215 @@ export const applyCoordinatorStudentImport = async (req, res) => {
     });
   } catch (error) {
     res.status(error?.statusCode || 500).json({ message: error.message || 'Failed to apply student import.' });
+  }
+};
+
+async function getCoordinatorStudentContext(userId) {
+  const { data: coordinatorProfile, error: coordinatorError } = await supabase
+    .from('profiles')
+    .select('id, class_id, class_section, department')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (coordinatorError) throw coordinatorError;
+  if (!coordinatorProfile?.class_id) {
+    const error = new Error('Coordinator class assignment is required for student management.');
+    error.status = 403;
+    throw error;
+  }
+
+  const { data: classRow, error: classError } = await supabase
+    .from('classes')
+    .select('id, class_section, department')
+    .eq('id', coordinatorProfile.class_id)
+    .maybeSingle();
+
+  if (classError) throw classError;
+
+  return {
+    ...coordinatorProfile,
+    class_id: coordinatorProfile.class_id,
+    class_section: String(classRow?.class_section || coordinatorProfile.class_section || '').trim() || null,
+    department: classRow?.department || coordinatorProfile.department || null,
+  };
+}
+
+export const listCoordinatorStudents = async (req, res) => {
+  try {
+    const coordinatorProfile = await getCoordinatorStudentContext(req.user.id);
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, full_name, email, roll_number, department, class_section, class_id')
+      .eq('role', 'student')
+      .eq('class_id', coordinatorProfile.class_id)
+      .order('full_name');
+
+    if (error) throw error;
+    return res.json(data || []);
+  } catch (error) {
+    return res.status(error.status || 500).json({ message: error.message || 'Failed to load students.' });
+  }
+};
+
+export const createCoordinatorStudent = async (req, res) => {
+  try {
+    const coordinatorProfile = await getCoordinatorStudentContext(req.user.id);
+    const fullName = normalizeTextField(req.body?.full_name, { required: true, maxLength: 150 });
+    const rollNumber = normalizeTextField(req.body?.roll_number, { maxLength: 60 });
+    const email = normalizeTextField(req.body?.email, { required: true, maxLength: 160 })?.toLowerCase();
+
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required.' });
+    }
+
+    const createdUser = await createImportedAuthUser({
+      email,
+      role: 'student',
+    });
+
+    if (!createdUser?.id) {
+      return res.status(500).json({ message: 'Student account could not be created.' });
+    }
+
+    const profilePayload = {
+      id: createdUser.id,
+      full_name: fullName,
+      email,
+      role: 'student',
+      roll_number: rollNumber || null,
+      department: coordinatorProfile.department || null,
+      class_section: coordinatorProfile.class_section || null,
+      class_id: coordinatorProfile.class_id,
+    };
+
+    const { error: upsertError } = await supabase
+      .from('profiles')
+      .upsert(profilePayload);
+
+    if (upsertError) throw upsertError;
+    const { error: enforceClassError } = await supabase
+      .from('profiles')
+      .update({
+        class_id: coordinatorProfile.class_id,
+        class_section: coordinatorProfile.class_section || null,
+        department: coordinatorProfile.department || null,
+      })
+      .eq('id', createdUser.id);
+    if (enforceClassError) throw enforceClassError;
+    return res.status(201).json({ student: profilePayload });
+  } catch (error) {
+    return res.status(error.status || 500).json({ message: error.message || 'Failed to create student.' });
+  }
+};
+
+export const updateCoordinatorStudent = async (req, res) => {
+  try {
+    const coordinatorProfile = await getCoordinatorStudentContext(req.user.id);
+    const studentId = req.params.id;
+    const fullName = normalizeTextField(req.body?.full_name, { required: true, maxLength: 150 });
+    const rollNumber = normalizeTextField(req.body?.roll_number, { maxLength: 60 });
+    const email = normalizeTextField(req.body?.email, { required: true, maxLength: 160 })?.toLowerCase();
+
+    const { data: existingProfile, error: existingError } = await supabase
+      .from('profiles')
+      .select('id, role, class_id, email')
+      .eq('id', studentId)
+      .maybeSingle();
+
+    if (existingError) throw existingError;
+    if (!existingProfile?.id || existingProfile.role !== 'student' || existingProfile.class_id !== coordinatorProfile.class_id) {
+      return res.status(404).json({ message: 'Student not found in your class.' });
+    }
+
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required.' });
+    }
+
+    if (email !== String(existingProfile.email || '').toLowerCase()) {
+      const { data: emailMatch, error: emailMatchError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', email)
+        .neq('id', studentId)
+        .maybeSingle();
+
+      if (emailMatchError) throw emailMatchError;
+      if (emailMatch?.id) {
+        return res.status(409).json({ message: 'Another user already uses this email.' });
+      }
+
+      const { error: authUpdateError } = await supabase.auth.admin.updateUserById(studentId, {
+        email,
+        email_confirm: true,
+      });
+      if (authUpdateError) throw authUpdateError;
+    }
+
+    const { error: updateError } = await supabase
+      .from('profiles')
+      .update({
+        full_name: fullName,
+        email,
+        roll_number: rollNumber || null,
+        department: coordinatorProfile.department || null,
+        class_section: coordinatorProfile.class_section || null,
+        class_id: coordinatorProfile.class_id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', studentId);
+
+    if (updateError) throw updateError;
+    return res.json({ student_id: studentId, full_name: fullName, email, roll_number: rollNumber || null });
+  } catch (error) {
+    return res.status(error.status || 500).json({ message: error.message || 'Failed to update student.' });
+  }
+};
+
+export const deleteCoordinatorStudent = async (req, res) => {
+  try {
+    const coordinatorProfile = await getCoordinatorStudentContext(req.user.id);
+    const studentId = req.params.id;
+
+    const { data: existingProfile, error: existingError } = await supabase
+      .from('profiles')
+      .select('id, role, class_id')
+      .eq('id', studentId)
+      .maybeSingle();
+
+    if (existingError) throw existingError;
+    if (!existingProfile?.id || existingProfile.role !== 'student' || existingProfile.class_id !== coordinatorProfile.class_id) {
+      return res.status(404).json({ message: 'Student not found in your class.' });
+    }
+
+    const deleteOperations = [
+      () => supabase.from('final_results').delete().eq('student_id', studentId),
+      () => supabase.from('review_marks').delete().eq('student_id', studentId),
+      () => supabase.from('guide_marks').delete().eq('student_id', studentId),
+      () => supabase.from('ese_marks').delete().eq('student_id', studentId),
+      () => supabase.from('individual_marks').delete().eq('student_id', studentId),
+      () => supabase.from('team_members').delete().eq('student_id', studentId),
+      () => supabase.from('join_requests').delete().eq('student_id', studentId),
+      () => supabase.from('notifications').delete().eq('user_id', studentId),
+      () => supabase.from('documents').delete().eq('uploaded_by', studentId),
+    ];
+
+    for (const runDelete of deleteOperations) {
+      const { error } = await runDelete();
+      if (error) throw error;
+    }
+
+    const { error: profileDeleteError } = await supabase
+      .from('profiles')
+      .delete()
+      .eq('id', studentId);
+    if (profileDeleteError) throw profileDeleteError;
+
+    const { error: authDeleteError } = await supabase.auth.admin.deleteUser(studentId);
+    if (authDeleteError) throw authDeleteError;
+
+    return res.status(204).send();
+  } catch (error) {
+    return res.status(error.status || 500).json({ message: error.message || 'Failed to delete student.' });
   }
 };
 

@@ -8,11 +8,17 @@ import { getStatusMeta } from "../constants/statusConfig";
 import { EVALUATION_STAGE_OPTIONS, getWorkflowStageMeta } from "../constants/workflowConfig";
 import { ADMIN_DATA_SYNC_KEY, emitAdminDataUpdated } from "../utils/adminLiveSync";
 import { apiRequest } from "../config/apiClient";
-import { REVIEW_ROUND_OPTIONS } from "../services/rubrics";
+import { REVIEW_ROUND_OPTIONS, fetchCoordinatorResultsBreakdown } from "../services/rubrics";
 
 const TeamWorkspace = lazy(() => import("./Teamworkspace"));
 const MyClass = lazy(() => import("./MyClass"));
 const DynamicRubricEvaluation = lazy(() => import("../components/DynamicRubricEvaluation"));
+
+function hasFinalMarkUpdated(row) {
+  if (!row) return false;
+  if (row.final_marks == null || Number.isNaN(Number(row.final_marks))) return false;
+  return String(row.status || "").trim().toLowerCase() === "published";
+}
 
 // ─── Icons ─────────────────────────────────────────────────────────────────
 const Icon = {
@@ -250,14 +256,57 @@ function resolveCoordinatorClassId(profile, projects) {
   if (profile.class_id) {
     return { classId: profile.class_id, error: "" };
   }
-  const classIds = Array.from(new Set((projects || []).map((project) => project?.class_id).filter(Boolean)));
+  const normalizeSectionKey = (value) => String(value || "").trim().toLowerCase();
+  const profileSection = normalizeSectionKey(profile?.class_section || profile?.batch);
+  const projectClassIds = (projects || []).map((project) => project?.class_id).filter(Boolean);
+  const projectSectionMatches = (projects || [])
+    .filter((project) => normalizeSectionKey(project?.class_name) && normalizeSectionKey(project?.class_name) === profileSection)
+    .map((project) => project?.class_id)
+    .filter(Boolean);
+  const classIds = Array.from(new Set([...projectClassIds, ...projectSectionMatches]));
   if (classIds.length === 1) {
     return { classId: classIds[0], error: "" };
+  }
+  if (!classIds.length && profileSection) {
+    return { classId: "__pending_section_resolution__", error: "" };
   }
   if (classIds.length > 1) {
     return { classId: null, error: "Coordinator is linked to multiple classes. Ask admin to assign a coordinator class." };
   }
   return { classId: null, error: "No coordinator class assigned." };
+}
+
+async function resolveCoordinatorClassIdStrict(profile, projects) {
+  const quick = resolveCoordinatorClassId(profile, projects);
+  if (quick.classId && quick.classId !== "__pending_section_resolution__") {
+    return quick;
+  }
+
+  const normalizeSectionKey = (value) => String(value || "").trim().toLowerCase();
+  const candidateSections = [
+    profile?.class_section,
+    profile?.batch,
+    ...(projects || []).map((project) => project?.class_name),
+  ]
+    .map(normalizeSectionKey)
+    .filter(Boolean);
+
+  if (!candidateSections.length) return { classId: null, error: quick.error || "No coordinator class assigned." };
+
+  const { data, error } = await supabase
+    .from("classes")
+    .select("id, class_section")
+    .in("class_section", [...new Set(candidateSections)]);
+
+  if (error) {
+    console.error("Failed to resolve coordinator class:", error);
+    return { classId: null, error: quick.error || "No coordinator class assigned." };
+  }
+
+  const match = (data || []).find((row) => candidateSections.includes(normalizeSectionKey(row.class_section)));
+  return match?.id
+    ? { classId: match.id, error: "" }
+    : { classId: null, error: quick.error || "No coordinator class assigned." };
 }
 
 const STATUS_MAP = {
@@ -1769,11 +1818,17 @@ export default function MentorDashboard() {
           reviewMarks = reviewMarksRows || [];
         }
       }
+      const finalResultRows = projectIds.length ? await fetchCoordinatorResultsBreakdown() : [];
 
       const stageProgress = {
         idea: 0, abstract: 0, zeroth_review: 0,
         first_review: 0, second_review: 0, final_review: 0,
       };
+
+      const finalResultByStudentId = (finalResultRows || []).reduce((acc, row) => {
+        if (row?.student_id) acc[row.student_id] = row;
+        return acc;
+      }, {});
 
       const projectRows = projectsInClass.map(project => {
         const scores = evalByProject[project.id] || [];
@@ -1803,10 +1858,19 @@ export default function MentorDashboard() {
           }
         });
 
-        return { ...project, teamSize: memberCountByProject[project.id] || 0, evaluationCount: scores.length, avgScore, guideName: guideMap.get(project.guide_id) || "Unassigned" };
+        const isFullyEvaluated = studentIds.length > 0 && studentIds.every((studentId) => hasFinalMarkUpdated(finalResultByStudentId[studentId]));
+
+        return {
+          ...project,
+          teamSize: memberCountByProject[project.id] || 0,
+          evaluationCount: scores.length,
+          avgScore,
+          guideName: guideMap.get(project.guide_id) || "Unassigned",
+          isFullyEvaluated,
+        };
       });
 
-      const evaluatedCount = projectRows.filter(item => item.evaluationCount > 0).length;
+      const evaluatedCount = projectRows.filter((item) => item.isFullyEvaluated).length;
       const teamsWithLessThanTwoMembers = projectRows.filter((item) => Number(item.teamSize || 0) < 2).length;
 
       return {
@@ -1988,7 +2052,7 @@ export default function MentorDashboard() {
           setRecentActivity(activity);
         }
 
-        const coordinatorResolution = resolveCoordinatorClassId(profile, projData);
+        const coordinatorResolution = await resolveCoordinatorClassIdStrict(profile, projData);
         if (coordinatorResolution.classId) {
           setMyClassLoading(true);
           const freshData = await loadCoordinatorClassData(coordinatorResolution.classId);
@@ -2047,7 +2111,10 @@ export default function MentorDashboard() {
     return () => { supabase.removeChannel(channel); };
   }, [loadNotifications, mentorProfile?.id]);
 
-  const coordinatorClassId = resolveCoordinatorClassId(mentorProfile, projects).classId;
+  const coordinatorClassResolution = resolveCoordinatorClassId(mentorProfile, projects);
+  const coordinatorClassId = coordinatorClassResolution.classId && coordinatorClassResolution.classId !== "__pending_section_resolution__"
+    ? coordinatorClassResolution.classId
+    : (myClassData?.classId || null);
   const isCoordinatorWithClass = Boolean(mentorProfile?.is_coordinator && coordinatorClassId);
   const canOpenEvaluationPanel = hasReviewAccess && allowedReviewStages.length > 0 && reviewProjects.length > 0;
   const isMyClassActive = MY_CLASS_TABS.includes(active);

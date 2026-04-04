@@ -9,6 +9,10 @@ import {
   extractCoordinatorStudentImport,
   applyCoordinatorStudentImport,
   resolveLoginAuthEmail,
+  listCoordinatorStudents,
+  createCoordinatorStudent,
+  updateCoordinatorStudent,
+  deleteCoordinatorStudent,
   getUserProfile, 
   updateUserProfile,
 
@@ -105,6 +109,10 @@ router.post('/admin/mentor-management-import/apply', authenticateUser, requireRo
 router.post('/coordinator/student-import/extract', authenticateUser, requireRole(['mentor']), requireCoordinator, extractCoordinatorStudentImport);
 router.post('/coordinator/student-import/apply', authenticateUser, requireRole(['mentor']), requireCoordinator, applyCoordinatorStudentImport);
 router.post('/auth/resolve-email', resolveLoginAuthEmail);
+router.get('/coordinator/students', authenticateUser, requireRole(['mentor']), requireCoordinator, listCoordinatorStudents);
+router.post('/coordinator/students', authenticateUser, requireRole(['mentor']), requireCoordinator, createCoordinatorStudent);
+router.put('/coordinator/students/:id', authenticateUser, requireRole(['mentor']), requireCoordinator, updateCoordinatorStudent);
+router.delete('/coordinator/students/:id', authenticateUser, requireRole(['mentor']), requireCoordinator, deleteCoordinatorStudent);
 router.get('/profile', authenticateUser, getUserProfile);
 router.put('/profile', authenticateUser, updateUserProfile);
 

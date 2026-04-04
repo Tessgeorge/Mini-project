@@ -37,6 +37,20 @@ async function getScopedDocument(documentId, classId) {
   return data;
 }
 
+async function isTeamFormationLocked(classId) {
+  if (!classId) return false;
+
+  const { data, error } = await supabase
+    .from('class_submission_deadlines')
+    .select('deadline')
+    .eq('class_id', classId)
+    .eq('stage', 'team_formation')
+    .maybeSingle();
+
+  if (error) throw error;
+  return Boolean(data?.deadline);
+}
+
 // ─── 1. GET /coordinator/class ───────────────────────────────────────────────
 // Overview page KPIs: class info + team count + eval counts + avg score
 export const getClassOverview = async (req, res) => {
@@ -264,6 +278,7 @@ export const getClassTeams = async (req, res) => {
     const coord = await getCoordinatorClassId(req.user.id);
     if (!coord?.class_id) return res.status(403).json({ message: 'Not a coordinator.' });
     await recalculateClassFinalResults(coord.class_id);
+    const formationLocked = await isTeamFormationLocked(coord.class_id);
     const { data: coordinatorClass } = await supabase
       .from('classes')
       .select('id, class_section')
@@ -306,7 +321,7 @@ export const getClassTeams = async (req, res) => {
       return acc;
     }, []);
 
-    if (!projects.length) return res.json([]);
+    if (!projects.length) return res.json({ formation_locked: formationLocked, teams: [] });
 
     // Guide names
     const guideIds = [...new Set(projects.map(p => p.guide_id).filter(Boolean))];
@@ -366,7 +381,10 @@ export const getClassTeams = async (req, res) => {
       };
     });
 
-    res.json(result);
+    res.json({
+      formation_locked: formationLocked,
+      teams: result,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -378,6 +396,10 @@ export const saveTeamBatches = async (req, res) => {
   try {
     const coord = await getCoordinatorClassId(req.user.id);
     if (!coord?.class_id) return res.status(403).json({ message: 'Not a coordinator.' });
+    const formationLocked = await isTeamFormationLocked(coord.class_id);
+    if (formationLocked) {
+      return res.status(423).json({ message: 'Team formation is locked. Unlock it before changing batches.' });
+    }
     const { data: coordinatorClass } = await supabase
       .from('classes')
       .select('id, class_section')
@@ -457,6 +479,41 @@ export const saveTeamBatches = async (req, res) => {
   }
 };
 
+export const setTeamFormationLock = async (req, res) => {
+  try {
+    const coord = await getCoordinatorClassId(req.user.id);
+    if (!coord?.class_id) return res.status(403).json({ message: 'Not a coordinator.' });
+
+    const locked = Boolean(req.body?.locked);
+
+    if (locked) {
+      const { error } = await supabase
+        .from('class_submission_deadlines')
+        .upsert({
+          class_id: coord.class_id,
+          stage: 'team_formation',
+          deadline: new Date().toISOString(),
+          created_by: req.user.id,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'class_id,stage' });
+
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('class_submission_deadlines')
+        .delete()
+        .eq('class_id', coord.class_id)
+        .eq('stage', 'team_formation');
+
+      if (error) throw error;
+    }
+
+    res.json({ formation_locked: locked });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // ─── 6. GET /coordinator/deadlines ──────────────────────────────────────────
 export const getDeadlines = async (req, res) => {
   try {
@@ -467,6 +524,7 @@ export const getDeadlines = async (req, res) => {
       .from('class_submission_deadlines')
       .select('id, stage, deadline, updated_at')
       .eq('class_id', coord.class_id)
+      .neq('stage', 'team_formation')
       .order('stage');
 
     if (error) throw error;
