@@ -412,12 +412,9 @@ export default function AdminMentorManagement() {
   const handleDeleteMentor = async (mentorId) => {
     setError("");
     try {
-      const { error: deleteError } = await supabase
-        .from("profiles")
-        .delete()
-        .eq("id", mentorId);
-
-      if (deleteError) throw deleteError;
+      await apiRequest(`/admin/users/${mentorId}`, {
+        method: "DELETE",
+      });
       await fetchData(true);
     } catch (err) {
       setError(err.message || "Failed to delete mentor.");

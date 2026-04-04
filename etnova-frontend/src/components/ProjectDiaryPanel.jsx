@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../config/supabaseClient";
+import { apiRequest } from "../config/apiClient";
 import { createNotifications } from "../utils/notificationHelpers";
 
 const EMPTY_ARRAY = [];
@@ -78,7 +79,25 @@ function pdfSafeLabel(value, fallback = "Entry") {
     .trim();
 }
 
-function buildDiaryPdfBlob({ projectTitle, entries }) {
+function resolveDiaryProjectTitle(project, ideas = []) {
+  const latestSubmittedIdea = (ideas || [])
+    .filter((idea) => String(idea?.status || "").toLowerCase() !== "draft" && String(idea?.title || "").trim())
+    .slice()
+    .sort((a, b) => {
+      const aTime = new Date(a?.submitted_at || a?.updated_at || a?.created_at || 0).getTime();
+      const bTime = new Date(b?.submitted_at || b?.updated_at || b?.created_at || 0).getTime();
+      return bTime - aTime;
+    })[0];
+
+  return String(
+    latestSubmittedIdea?.title
+    || project?.title
+    || project?.team_name
+    || "Untitled Project",
+  ).trim();
+}
+
+function buildDiaryPdfBlob({ projectTitle, projectMetaLines = [], entries }) {
   const pageWidth = 595;
   const pageHeight = 842;
   const marginLeft = 54;
@@ -90,6 +109,9 @@ function buildDiaryPdfBlob({ projectTitle, entries }) {
   const headerLines = [
     { text: "PROJECT DIARY", size: 9.5, gap: 16, bold: true, tracking: true },
     { text: String(projectTitle || "Untitled Project"), size: 20, gap: 26, bold: true },
+    ...projectMetaLines
+      .filter(Boolean)
+      .map((line) => ({ text: String(line), size: 9.75, gap: 15, bold: false, muted: true })),
     { text: "Official record of submissions, reviews, meetings, and guide observations", size: 10.5, gap: 18, bold: false },
     { text: `Generated on ${formatDateTime(new Date().toISOString())}`, size: 9.5, gap: 24, bold: false, muted: true },
   ];
@@ -297,6 +319,7 @@ function buildDiaryEntries({
   ideaReviews,
   documents,
   evaluations,
+  diaryEntries,
   meetings,
   nameByUserId,
   guideUserIds,
@@ -321,6 +344,8 @@ function buildDiaryEntries({
     ]
       .filter(Boolean)
       .join(" "),
+    sourceTable: null,
+    sourceId: null,
   });
 
   const ideaById = {};
@@ -340,9 +365,9 @@ function buildDiaryEntries({
     const submitterName = nameByUserId[idea.created_by] || "Team member";
     const latestReviewerName = latestReview ? (nameByUserId[latestReview.reviewer_id] || "Guide") : "Guide";
     const normalizedIdeaStatus = String(idea.status || "").toLowerCase();
-    const ideaActionLine = normalizedIdeaStatus === "draft"
-      ? `Version v${idea.version_no || 1} of the idea "${idea.title || "Untitled idea"}" was saved by ${submitterName} and added to the project record.`
-      : `Version v${idea.version_no || 1} of the idea "${idea.title || "Untitled idea"}" was formally submitted by ${submitterName} for guide review and academic consideration.`;
+    if (normalizedIdeaStatus === "draft") return;
+
+    const ideaActionLine = `Version v${idea.version_no || 1} of the idea "${idea.title || "Untitled idea"}" was formally submitted by ${submitterName} for guide review and academic consideration.`;
 
     entries.push({
       id: `idea-submitted-${idea.id}`,
@@ -357,6 +382,8 @@ function buildDiaryEntries({
         .filter(Boolean)
         .join(" "),
       status: idea.status,
+      sourceTable: "project_ideas",
+      sourceId: idea.id,
     });
   });
 
@@ -395,6 +422,8 @@ function buildDiaryEntries({
           .filter(Boolean)
           .join(" "),
         status: fallbackStatus,
+        sourceTable: latestIdeaReview ? "idea_reviews" : (ideaStageEvaluations[ideaStageEvaluations.length - 1] ? "evaluations" : null),
+        sourceId: latestIdeaReview?.id || ideaStageEvaluations[ideaStageEvaluations.length - 1]?.id || null,
       });
     }
   }
@@ -402,6 +431,7 @@ function buildDiaryEntries({
   (ideaReviews || []).forEach((review) => {
     if (!guideUserIds.has(review.reviewer_id)) return;
     const idea = ideaById[review.idea_id];
+    if (String(idea?.status || "").toLowerCase() === "draft") return;
     const reviewerName = nameByUserId[review.reviewer_id] || "Guide";
     const action = String(review.action || "reviewed").replace(/_/g, " ");
     entries.push({
@@ -418,6 +448,8 @@ function buildDiaryEntries({
         .filter(Boolean)
         .join(" "),
       status: review.action,
+      sourceTable: "idea_reviews",
+      sourceId: review.id,
     });
   });
 
@@ -440,6 +472,8 @@ function buildDiaryEntries({
         .filter(Boolean)
         .join(" "),
       status: doc.status,
+      sourceTable: "documents",
+      sourceId: doc.id,
     });
 
     const normalizedDocStatus = String(doc.status || "").toLowerCase();
@@ -458,6 +492,8 @@ function buildDiaryEntries({
           .filter(Boolean)
           .join(" "),
         status: doc.status,
+        sourceTable: "documents",
+        sourceId: doc.id,
       });
     }
   });
@@ -475,9 +511,29 @@ function buildDiaryEntries({
       body: [
         `Guide ${evaluatorName} recorded formal review feedback for ${toTitle(evaluation.evaluation_type || "review")}.`,
         evaluation.feedback ? `Recorded academic remarks: ${evaluation.feedback}` : "No written feedback was added for this review entry.",
+        ]
+          .filter(Boolean)
+          .join(" "),
+      sourceTable: "evaluations",
+      sourceId: evaluation.id,
+    });
+  });
+
+  (diaryEntries || []).forEach((entry) => {
+    const authorName = entry?.profiles?.full_name || nameByUserId[entry?.author_id] || "Guide";
+    entries.push({
+      id: `guide-diary-${entry.id}`,
+      time: entry.created_at || entry.updated_at || new Date().toISOString(),
+      type: "note",
+      title: String(entry?.title || "").trim() || "Guide Diary Entry",
+      body: [
+        `Guide ${authorName} added a diary observation for this project.`,
+        String(entry?.content || "").trim() || "No written note was added.",
       ]
         .filter(Boolean)
         .join(" "),
+      sourceTable: "project_diary_entries",
+      sourceId: entry.id,
     });
   });
 
@@ -499,6 +555,8 @@ function buildDiaryEntries({
           meeting.response_note ? `Guide note: ${meeting.response_note}` : "The meeting is confirmed and waiting for the scheduled time.",
         ].filter(Boolean).join(" "),
         status: "approved",
+        sourceTable: "project_meeting_requests",
+        sourceId: meeting.id,
       });
     }
 
@@ -514,6 +572,8 @@ function buildDiaryEntries({
           meeting.response_note ? `Guide note: ${meeting.response_note}` : "The meeting was completed without an additional written note.",
         ].filter(Boolean).join(" "),
         status: "approved",
+        sourceTable: "project_meeting_requests",
+        sourceId: meeting.id,
       });
     }
   });
@@ -536,16 +596,23 @@ export default function ProjectDiaryPanel({
   const [ideaReviews, setIdeaReviews] = useState(EMPTY_ARRAY);
   const [documents, setDocuments] = useState(EMPTY_ARRAY);
   const [evaluations, setEvaluations] = useState(EMPTY_ARRAY);
+  const [diaryEntries, setDiaryEntries] = useState(EMPTY_ARRAY);
   const [meetingRequests, setMeetingRequests] = useState(EMPTY_ARRAY);
   const [meetingDateTime, setMeetingDateTime] = useState("");
   const [meetingAgenda, setMeetingAgenda] = useState("");
   const [requestingMeeting, setRequestingMeeting] = useState(false);
   const [actingMeetingId, setActingMeetingId] = useState("");
+  const [guideDiaryNote, setGuideDiaryNote] = useState("");
+  const [savingGuideDiaryNote, setSavingGuideDiaryNote] = useState(false);
+  const [deletingEntryId, setDeletingEntryId] = useState("");
   const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now());
 
   const mentor = project?.guide || project?.mentor || (mentorId ? { id: mentorId, full_name: mentorName || "Guide" } : null);
+  const normalizedRole = String(role || "").trim().toLowerCase();
   const canRequestMeeting = role === "student" && Boolean(currentUserId && mentor?.id);
-  const canModerateMeeting = role === "mentor" && Boolean(currentUserId);
+  const canManageDiary = (normalizedRole === "mentor" || normalizedRole === "guide") && Boolean(currentUserId && project?.id);
+  const canModerateMeeting = canManageDiary;
+  const canAddGuideDiaryNote = canManageDiary;
   const guideUserIds = useMemo(() => {
     const ids = new Set();
     if (project?.guide?.id) ids.add(project.guide.id);
@@ -577,6 +644,7 @@ export default function ProjectDiaryPanel({
         ideasRes,
         documentsRes,
         evaluationsRes,
+        diaryEntriesRes,
         meetingsRes,
       ] = await Promise.all([
         supabase
@@ -594,6 +662,7 @@ export default function ProjectDiaryPanel({
           .select("id,project_id,evaluator_id,evaluation_type,obtained_marks,max_marks,feedback,created_at")
           .eq("project_id", project.id)
           .order("created_at", { ascending: false }),
+        apiRequest(`/projects/${project.id}/diary-entries`, { method: "GET", skipCache: true }),
         supabase
           .from("project_meeting_requests")
           .select("id,project_id,requested_by,requested_to,requested_for,agenda,status,response_note,requested_at,responded_at,responded_by")
@@ -628,6 +697,7 @@ export default function ProjectDiaryPanel({
       setIdeaReviews(ideaReviews);
       setDocuments(documentsRes.data || []);
       setEvaluations(evaluationsRes.data || []);
+      setDiaryEntries(Array.isArray(diaryEntriesRes) ? diaryEntriesRes : []);
     } catch (err) {
       setError(err.message || "Failed to load project diary.");
     } finally {
@@ -646,6 +716,7 @@ export default function ProjectDiaryPanel({
       .on("postgres_changes", { event: "*", schema: "public", table: "project_ideas", filter: `project_id=eq.${project.id}` }, () => loadDiary())
       .on("postgres_changes", { event: "*", schema: "public", table: "documents", filter: `project_id=eq.${project.id}` }, () => loadDiary())
       .on("postgres_changes", { event: "*", schema: "public", table: "evaluations", filter: `project_id=eq.${project.id}` }, () => loadDiary())
+      .on("postgres_changes", { event: "*", schema: "public", table: "project_diary_entries", filter: `project_id=eq.${project.id}` }, () => loadDiary())
       .on("postgres_changes", { event: "*", schema: "public", table: "project_meeting_requests", filter: `project_id=eq.${project.id}` }, () => loadDiary())
       .on("postgres_changes", { event: "*", schema: "public", table: "idea_reviews" }, () => loadDiary())
       .subscribe();
@@ -661,11 +732,28 @@ export default function ProjectDiaryPanel({
     ideaReviews,
     documents,
     evaluations,
+    diaryEntries,
     meetings: meetingRequests,
     nameByUserId,
     guideUserIds,
     currentTimeMs,
-  }), [project, ideas, ideaReviews, documents, evaluations, meetingRequests, nameByUserId, guideUserIds, currentTimeMs]);
+  }), [project, ideas, ideaReviews, documents, evaluations, diaryEntries, meetingRequests, nameByUserId, guideUserIds, currentTimeMs]);
+
+  const diaryProjectTitle = useMemo(
+    () => resolveDiaryProjectTitle(project, ideas),
+    [project, ideas],
+  );
+  const diaryTeamNames = useMemo(
+    () => (project?.team_members || [])
+      .map((member) => member?.profiles?.full_name)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b)),
+    [project?.team_members],
+  );
+  const diaryHeaderMetaLines = useMemo(() => ([
+    diaryTeamNames.length ? `Team: ${diaryTeamNames.join(", ")}` : "",
+    mentor?.full_name ? `Guide: ${mentor.full_name}` : "",
+  ].filter(Boolean)), [diaryTeamNames, mentor?.full_name]);
 
   const groupedEntries = useMemo(() => {
     const recentEntries = (entries || []).slice(0, RECENT_ENTRY_LIMIT);
@@ -767,8 +855,11 @@ export default function ProjectDiaryPanel({
     const printableEntries = (entries || [])
       .slice(0, RECENT_ENTRY_LIMIT)
       .sort((a, b) => new Date(a?.time || 0).getTime() - new Date(b?.time || 0).getTime());
-    const projectTitle = project?.title || project?.team_name || "Project Diary";
-    const pdfBlob = buildDiaryPdfBlob({ projectTitle, entries: printableEntries });
+    const pdfBlob = buildDiaryPdfBlob({
+      projectTitle: diaryProjectTitle,
+      projectMetaLines: diaryHeaderMetaLines,
+      entries: printableEntries,
+    });
     const pdfUrl = URL.createObjectURL(pdfBlob);
     const win = window.open(pdfUrl, "_blank", "noopener,noreferrer");
     if (!win) {
@@ -782,16 +873,66 @@ export default function ProjectDiaryPanel({
     const printableEntries = (entries || [])
       .slice(0, RECENT_ENTRY_LIMIT)
       .sort((a, b) => new Date(a?.time || 0).getTime() - new Date(b?.time || 0).getTime());
-    const projectTitle = project?.title || project?.team_name || "Project Diary";
-    const pdfBlob = buildDiaryPdfBlob({ projectTitle, entries: printableEntries });
+    const pdfBlob = buildDiaryPdfBlob({
+      projectTitle: diaryProjectTitle,
+      projectMetaLines: diaryHeaderMetaLines,
+      entries: printableEntries,
+    });
     const pdfUrl = URL.createObjectURL(pdfBlob);
     const a = document.createElement("a");
     a.href = pdfUrl;
-    a.download = buildDiaryFilename(projectTitle);
+    a.download = buildDiaryFilename(diaryProjectTitle);
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(pdfUrl), 10_000);
+  };
+
+  const submitGuideDiaryNote = async () => {
+    if (!canAddGuideDiaryNote) return;
+    const note = String(guideDiaryNote || "").trim();
+    if (!note) {
+      setError("Please add a diary note before saving.");
+      return;
+    }
+    setSavingGuideDiaryNote(true);
+    setError("");
+    try {
+      await apiRequest(`/projects/${project.id}/diary-entries`, {
+        method: "POST",
+        body: {
+          entry_type: "guide_note",
+          title: null,
+          content: note,
+        },
+      });
+      setGuideDiaryNote("");
+      await loadDiary();
+    } catch (err) {
+      setError(err.message || "Failed to save diary note.");
+    } finally {
+      setSavingGuideDiaryNote(false);
+    }
+  };
+
+  const deleteDiaryEntry = async (entry) => {
+    if (!canManageDiary || !entry?.sourceTable || !entry?.sourceId) return;
+    setDeletingEntryId(entry.id);
+    setError("");
+    try {
+      await apiRequest(`/projects/${project.id}/diary-entry`, {
+        method: "DELETE",
+        body: {
+          sourceTable: entry.sourceTable,
+          sourceId: entry.sourceId,
+        },
+      });
+      await loadDiary();
+    } catch (err) {
+      setError(err.message || "Failed to delete diary entry.");
+    } finally {
+      setDeletingEntryId("");
+    }
   };
 
   return (
@@ -801,7 +942,10 @@ export default function ProjectDiaryPanel({
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h2 className="text-sm font-black text-slate-900">Project Diary</h2>
-            <p className="text-[11px] text-slate-500 mt-0.5">Recent submission timeline</p>
+            <p className="text-[11px] font-semibold text-slate-700 mt-0.5">{diaryProjectTitle}</p>
+            {diaryHeaderMetaLines.length > 0 && (
+              <p className="text-[11px] text-slate-500 mt-0.5">{diaryHeaderMetaLines.join(" | ")}</p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {mentor?.full_name && (
@@ -855,6 +999,33 @@ export default function ProjectDiaryPanel({
             >
               {requestingMeeting ? "Requesting..." : "Request Meeting"}
             </button>
+          </div>
+        )}
+
+        {canAddGuideDiaryNote && (
+          <div className="rounded-lg border border-teal-200 bg-teal-50 p-3">
+            <p className="text-xs font-bold text-teal-900 mb-2">Add diary entry</p>
+            <textarea
+              rows={3}
+              maxLength={1000}
+              placeholder="Add a guide observation for this project diary..."
+              className="w-full rounded-md border border-teal-200 bg-white px-3 py-2 text-xs text-slate-700 resize-none"
+              value={guideDiaryNote}
+              onChange={(event) => setGuideDiaryNote(event.target.value)}
+            />
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <p className="text-[11px] text-teal-700">
+                This note will appear in the shared diary for this team.
+              </p>
+              <button
+                type="button"
+                disabled={savingGuideDiaryNote}
+                onClick={submitGuideDiaryNote}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold bg-teal-500 hover:bg-teal-600 disabled:opacity-60 text-white"
+              >
+                {savingGuideDiaryNote ? "Saving..." : "Save Entry"}
+              </button>
+            </div>
           </div>
         )}
 
@@ -922,11 +1093,23 @@ export default function ProjectDiaryPanel({
                           <p className="text-xs font-bold text-slate-900">{entry.title}</p>
                           <p className="text-[11px] text-slate-500 mt-0.5">{formatDateTime(entry.time)}</p>
                         </div>
-                        {entry.status && entry.type === "submission" && (
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${statusBadge(entry.status)}`}>
-                            {String(entry.status).replace(/_/g, " ")}
-                          </span>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {entry.status && entry.type === "submission" && (
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${statusBadge(entry.status)}`}>
+                              {String(entry.status).replace(/_/g, " ")}
+                            </span>
+                          )}
+                          {canManageDiary && entry.sourceTable && entry.sourceId && (
+                            <button
+                              type="button"
+                              disabled={deletingEntryId === entry.id}
+                              onClick={() => deleteDiaryEntry(entry)}
+                              className="inline-flex items-center justify-center rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-700 disabled:opacity-60"
+                            >
+                              {deletingEntryId === entry.id ? "Deleting..." : "Delete"}
+                            </button>
+                          )}
+                        </div>
                       </div>
                       {entry.body && (
                         <p className="mt-1.5 text-xs text-slate-700 leading-relaxed line-clamp-3">

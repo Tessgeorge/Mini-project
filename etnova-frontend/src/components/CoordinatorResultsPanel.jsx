@@ -138,7 +138,6 @@ export default function CoordinatorResultsPanel({ projectId = null, classId = nu
 
       const tableColumn = ["Sl. No.", "Student", "Project", "Internal (Out of 75)", "External (Out of 75)", "Total Marks", "Grade"];
       const tableRows = filteredResults.map((row, idx) => [
-      const tableColumn = ["Sl. No.", "Student", "Project", "Internal (Out of 75)", "External (Out of 75)", "Total Marks", "Grade"];
         idx + 1,
         row.full_name || row.student_id || "-",
         row.project_title || "-",
@@ -202,7 +201,6 @@ export default function CoordinatorResultsPanel({ projectId = null, classId = nu
     setResults(resultData || []);
     setInternalRows(internalData || []);
     setDraft(buildDraft(internalData || []));
-  }, [projectId, students.length]);
   }, [classId, projectId, students.length]);
 
   useEffect(() => {

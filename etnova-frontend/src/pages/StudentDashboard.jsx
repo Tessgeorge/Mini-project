@@ -72,44 +72,24 @@ function isProfileComplete(profile) {
   );
 }
 
-function normalizeClassDeadlineRows(reviewStageRows = [], classDeadlineRows = []) {
+function normalizeClassDeadlineRows(reviewStageRows = []) {
   const latestByStage = new Map();
 
   (reviewStageRows || [])
-    .filter((row) => Boolean(row.deadline) && !row.is_locked)
     .forEach((row) => {
       const stageKey = String(row.stage_name || "").trim().toLowerCase();
-      const prev = latestByStage.get(stageKey);
-      const rowTs = new Date(row.deadline || 0).getTime();
-      const prevTs = prev ? new Date(prev.deadline || 0).getTime() : -1;
-      if (!prev || rowTs > prevTs || (rowTs === prevTs && String(row.id || "") > String(prev.id || ""))) {
-        latestByStage.set(stageKey, row);
-      }
+      latestByStage.set(stageKey, row);
     });
 
   const reviewItems = Array.from(latestByStage.values()).map((row) => ({
     stageKey: normalizeWorkflowStage(row.stage_name),
     stage: getWorkflowStageMeta(row.stage_name).label,
+    active: Boolean(row.student_deadline_set_by_coordinator) && !row.is_locked,
     deadline: row.deadline,
     date: toDateKey(row.deadline),
   }));
-  const reviewStageKeys = new Set(reviewItems.map((item) => item.stageKey).filter(Boolean));
-
-  const teamFormationItems = (classDeadlineRows || [])
-    .filter((row) => (
-      String(row?.stage || "").trim().toLowerCase() === "team_formation"
-      && row?.deadline
-      && !reviewStageKeys.has("team_formation")
-    ))
-    .map((row) => ({
-      stageKey: "team_formation",
-      stage: "Team Formation",
-      deadline: row.deadline,
-      date: toDateKey(row.deadline),
-    }));
-
-  return [...reviewItems, ...teamFormationItems]
-    .filter((row) => row.date)
+  return reviewItems
+    .filter((row) => row.active && row.date && row.deadline)
     .sort((a, b) => new Date(a.deadline || a.date) - new Date(b.deadline || b.date));
 }
 
@@ -120,7 +100,6 @@ async function resolveClassIdFromContext({ profile, project }) {
   const candidateSections = [
     profile?.class_section,
     profile?.batch,
-    project?.class_name,
     ...(Array.isArray(project?.team_members)
       ? project.team_members.flatMap((member) => [
         member?.profiles?.class_section,
@@ -420,26 +399,14 @@ export default function StudentDashboard() {
       return;
     }
 
-    const [{ data: reviewRows, error: deadlineError }, { data: classDeadlineRows, error: classDeadlineError }] = await Promise.all([
-      supabase
-        .from("review_stages")
-        .select("id, class_id, stage_name, deadline, coordinator_deadline, is_locked")
-        .eq("class_id", classId)
-        .eq("student_deadline_set_by_coordinator", true)
-        .not("deadline", "is", null)
-        .order("deadline", { ascending: true }),
-      supabase
-        .from("class_submission_deadlines")
-        .select("id, class_id, stage, deadline")
-        .eq("class_id", classId)
-        .eq("stage", "team_formation")
-        .not("deadline", "is", null),
-    ]);
+    const { data: reviewRows, error: deadlineError } = await supabase
+      .from("review_stages")
+      .select("id, class_id, stage_name, deadline, coordinator_deadline, is_locked, student_deadline_set_by_coordinator, stage_order")
+      .eq("class_id", classId)
+      .order("stage_order", { ascending: true });
 
     if (deadlineError) throw new Error(deadlineError.message || "Failed to load review deadlines.");
-    if (classDeadlineError) throw new Error(classDeadlineError.message || "Failed to load class deadlines.");
-
-    setDeadlines(normalizeClassDeadlineRows(reviewRows || [], classDeadlineRows || []));
+    setDeadlines(normalizeClassDeadlineRows(reviewRows || []));
   }, []);
 
   // Load data
@@ -517,22 +484,6 @@ export default function StudentDashboard() {
             await loadClassDeadlines(studentClassId);
           } catch (refreshError) {
             console.error("Failed to refresh review deadlines:", refreshError);
-          }
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "class_submission_deadlines",
-          filter: `class_id=eq.${studentClassId}`,
-        },
-        async () => {
-          try {
-            await loadClassDeadlines(studentClassId);
-          } catch (refreshError) {
-            console.error("Failed to refresh class deadlines:", refreshError);
           }
         }
       )

@@ -3519,6 +3519,145 @@ export const updateEvaluation = async (req, res) => {
   }
 };
 
+export const getProjectDiaryEntries = async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('project_diary_entries')
+      .select(`
+        id,
+        project_id,
+        author_id,
+        entry_type,
+        title,
+        content,
+        created_at,
+        updated_at,
+        profiles!project_diary_entries_author_id_fkey(full_name, email)
+      `)
+      .eq('project_id', req.params.id)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const createProjectDiaryEntry = async (req, res) => {
+  try {
+    const content = String(req.body?.content || '').trim();
+    const title = String(req.body?.title || '').trim() || null;
+    const entryType = String(req.body?.entry_type || 'guide_note').trim() || 'guide_note';
+
+    if (!content) {
+      return res.status(400).json({ message: 'Diary entry content is required.' });
+    }
+
+    const { data, error } = await supabase
+      .from('project_diary_entries')
+      .insert({
+        project_id: req.params.id,
+        author_id: req.user.id,
+        entry_type: entryType,
+        title,
+        content,
+      })
+      .select(`
+        id,
+        project_id,
+        author_id,
+        entry_type,
+        title,
+        content,
+        created_at,
+        updated_at,
+        profiles!project_diary_entries_author_id_fkey(full_name, email)
+      `)
+      .single();
+
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const deleteProjectDiaryEntry = async (req, res) => {
+  try {
+    const projectId = req.params.id;
+    const { sourceTable, sourceId } = req.body || {};
+
+    if (!sourceTable || !sourceId) {
+      return res.status(400).json({ message: 'sourceTable and sourceId are required.' });
+    }
+
+    const supportedTables = new Set(['project_ideas', 'idea_reviews', 'documents', 'evaluations', 'project_meeting_requests', 'project_diary_entries']);
+    if (!supportedTables.has(sourceTable)) {
+      return res.status(400).json({ message: 'Unsupported diary entry source.' });
+    }
+
+    if (sourceTable === 'idea_reviews') {
+      const { data: review, error: reviewError } = await supabase
+        .from('idea_reviews')
+        .select('id, idea_id')
+        .eq('id', sourceId)
+        .single();
+
+      if (reviewError || !review) {
+        return res.status(404).json({ message: 'Diary entry not found.' });
+      }
+
+      const { data: idea, error: ideaError } = await supabase
+        .from('project_ideas')
+        .select('id, project_id')
+        .eq('id', review.idea_id)
+        .single();
+
+      if (ideaError || !idea || idea.project_id !== projectId) {
+        return res.status(404).json({ message: 'Diary entry not found in this project.' });
+      }
+
+      const { error: deleteError } = await supabase
+        .from('idea_reviews')
+        .delete()
+        .eq('id', sourceId);
+
+      if (deleteError) throw deleteError;
+      return res.json({ message: 'Diary entry deleted successfully.' });
+    }
+
+    const { data: row, error: rowError } = await supabase
+      .from(sourceTable)
+      .select('id, project_id')
+      .eq('id', sourceId)
+      .single();
+
+    if (rowError || !row || row.project_id !== projectId) {
+      return res.status(404).json({ message: 'Diary entry not found in this project.' });
+    }
+
+    if (sourceTable === 'project_ideas') {
+      const { error: reviewDeleteError } = await supabase
+        .from('idea_reviews')
+        .delete()
+        .eq('idea_id', sourceId);
+      if (reviewDeleteError) throw reviewDeleteError;
+    }
+
+    const { error: deleteError } = await supabase
+      .from(sourceTable)
+      .delete()
+      .eq('id', sourceId)
+      .eq('project_id', projectId);
+
+    if (deleteError) throw deleteError;
+    res.json({ message: 'Diary entry deleted successfully.' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 export const getIndividualMarks = async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -3581,6 +3720,71 @@ export const getAllUsers = async (req, res) => {
     res.json(data || []);
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+export const deleteAdminUser = async (req, res) => {
+  try {
+    const userId = req.params.id;
+
+    if (!userId) {
+      return res.status(400).json({ message: 'User id is required.' });
+    }
+
+    if (req.user?.id === userId) {
+      return res.status(400).json({ message: 'You cannot delete your own admin account.' });
+    }
+
+    const { data: existingProfile, error: existingError } = await supabase
+      .from('profiles')
+      .select('id, role')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (existingError) throw existingError;
+    if (!existingProfile?.id) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    const deleteOperations = [
+      () => supabase.from('reviewer_access').delete().eq('mentor_id', userId),
+      () => supabase.from('guide_allocations').delete().eq('guide_id', userId),
+      () => supabase.from('project_diary_entries').delete().eq('author_id', userId),
+      () => supabase.from('idea_reviews').delete().eq('reviewer_id', userId),
+      () => supabase.from('evaluations').delete().eq('evaluator_id', userId),
+      () => supabase.from('notifications').delete().eq('user_id', userId),
+      () => supabase.from('project_meeting_requests').delete().eq('requested_to', userId),
+      () => supabase.from('project_meeting_requests').delete().eq('responded_by', userId),
+    ];
+
+    for (const runDelete of deleteOperations) {
+      const { error } = await runDelete();
+      if (error) throw error;
+    }
+
+    const projectClearOperations = [
+      () => supabase.from('projects').update({ guide_id: null }).eq('guide_id', userId),
+      () => supabase.from('projects').update({ mentor_id: null }).eq('mentor_id', userId),
+      () => supabase.from('projects').update({ coordinator_id: null }).eq('coordinator_id', userId),
+    ];
+
+    for (const runUpdate of projectClearOperations) {
+      const { error } = await runUpdate();
+      if (error) throw error;
+    }
+
+    const { error: profileDeleteError } = await supabase
+      .from('profiles')
+      .delete()
+      .eq('id', userId);
+    if (profileDeleteError) throw profileDeleteError;
+
+    const { error: authDeleteError } = await supabase.auth.admin.deleteUser(userId);
+    if (authDeleteError) throw authDeleteError;
+
+    return res.status(204).send();
+  } catch (error) {
+    return res.status(error.status || 500).json({ message: error.message || 'Failed to delete user.' });
   }
 };
 

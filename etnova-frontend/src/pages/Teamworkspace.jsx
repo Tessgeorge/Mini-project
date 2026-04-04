@@ -215,45 +215,24 @@ function getIdeaDescription(proj) {
   return proj?.description || "";
 }
 
-function normalizeWorkspaceDeadlineRows(reviewStageRows = [], classDeadlineRows = []) {
+function normalizeWorkspaceDeadlineRows(reviewStageRows = []) {
   const latestByStage = new Map();
   (reviewStageRows || [])
-    .filter((row) => Boolean(row?.deadline) && !row?.is_locked)
     .forEach((row) => {
       const stageLabel = getWorkflowStageMeta(row.stage_name).label;
-      const prev = latestByStage.get(stageLabel);
-      const rowTs = new Date(row.deadline || 0).getTime();
-      const prevTs = prev ? new Date(prev.deadline || 0).getTime() : -1;
-      if (!prev || rowTs > prevTs || (rowTs === prevTs && String(row.id || "") > String(prev.id || ""))) {
-        latestByStage.set(stageLabel, row);
-      }
+      latestByStage.set(stageLabel, row);
     });
 
   const reviewItems = Array.from(latestByStage.values()).map((row) => ({
     id: row.id,
     stageKey: normalizeWorkflowStage(row.stage_name),
     stage: getWorkflowStageMeta(row.stage_name).label,
+    active: Boolean(row.student_deadline_set_by_coordinator) && !row.is_locked,
     deadline: row.deadline,
     date: toLocalDateKey(row.deadline),
   }));
-  const reviewStageKeys = new Set(reviewItems.map((item) => item.stageKey).filter(Boolean));
-
-  const teamFormationItems = (classDeadlineRows || [])
-    .filter((row) => (
-      String(row?.stage || "").trim().toLowerCase() === "team_formation"
-      && row?.deadline
-      && !reviewStageKeys.has("team_formation")
-    ))
-    .map((row) => ({
-      id: row.id,
-      stageKey: "team_formation",
-      stage: "Team Formation",
-      deadline: row.deadline,
-      date: toLocalDateKey(row.deadline),
-    }));
-
-  return [...reviewItems, ...teamFormationItems]
-    .filter((row) => Boolean(row.date))
+  return reviewItems
+    .filter((row) => Boolean(row.active && row.date && row.deadline))
     .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
 }
 
@@ -267,7 +246,6 @@ async function resolveWorkspaceClassId(project) {
   const candidateSections = [
     anchor?.class_section,
     anchor?.batch,
-    project?.class_name,
   ]
     .map((value) => String(value || "").trim())
     .filter(Boolean);
@@ -1851,25 +1829,14 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack, onNa
       supabase.from("documents").select("id,project_id,uploaded_by,document_type,file_name,file_url,file_size,version,status,uploaded_at,feedback,profiles:uploaded_by(full_name,email,roll_number)").eq("project_id", proj.id).order("uploaded_at", { ascending: false }),
       supabase.from("project_milestones").select("phase_index,due_date").eq("project_id", proj.id).order("phase_index", { ascending: true }),
       effectiveClassId
-        ? Promise.all([
-          supabase
-            .from("review_stages")
-            .select("id, stage_name, deadline, student_deadline_set_by_coordinator, is_locked")
-            .eq("class_id", effectiveClassId)
-            .eq("student_deadline_set_by_coordinator", true)
-            .not("deadline", "is", null)
-            .order("deadline", { ascending: true }),
-          supabase
-            .from("class_submission_deadlines")
-            .select("id, stage, deadline")
-            .eq("class_id", effectiveClassId)
-            .eq("stage", "team_formation")
-            .not("deadline", "is", null),
-        ])
-        : Promise.resolve([{ data: [] }, { data: [] }]),
+        ? supabase
+          .from("review_stages")
+          .select("id, stage_name, deadline, student_deadline_set_by_coordinator, is_locked, stage_order")
+          .eq("class_id", effectiveClassId)
+          .order("stage_order", { ascending: true })
+        : Promise.resolve({ data: [] }),
       supabase.from("project_ideas").select("id,title,status,created_at,updated_at").eq("project_id", proj.id),
-    ]).then(([ev, doc, ms, stageResults, idRes]) => {
-      const [reviewStageResult, classDeadlineResult] = stageResults || [{ data: [] }, { data: [] }];
+    ]).then(([ev, doc, ms, reviewStageResult, idRes]) => {
       const normalizedEvaluations = (ev.data || [])
         .map(normalizeTeamEvaluationRow)
         .sort((a, b) => new Date(b?.created_at || 0) - new Date(a?.created_at || 0));
@@ -1879,32 +1846,22 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack, onNa
       const dates = Array(WORKFLOW_TIMELINE.length).fill(null);
       (ms.data || []).forEach(r => { dates[r.phase_index] = r.due_date; });
       setMilestoneDates(dates);
-      setReviewDeadlines(normalizeWorkspaceDeadlineRows(reviewStageResult?.data || [], classDeadlineResult?.data || []));
+      setReviewDeadlines(normalizeWorkspaceDeadlineRows(reviewStageResult?.data || []));
       setIdeas(idRes?.data || []);
       setLoading(false);
     });
-  }, [effectiveClassId, proj.batch, proj.class_id, proj.class_name, proj.id]);
+  }, [effectiveClassId, proj.batch, proj.class_id, proj.id]);
 
   useEffect(() => {
     if (!effectiveClassId) return undefined;
 
     const refreshClassDeadlines = async () => {
-      const [{ data: reviewRows }, { data: classDeadlineRows }] = await Promise.all([
-        supabase
-          .from("review_stages")
-          .select("id, stage_name, deadline, student_deadline_set_by_coordinator, is_locked")
-          .eq("class_id", effectiveClassId)
-          .eq("student_deadline_set_by_coordinator", true)
-          .not("deadline", "is", null)
-          .order("deadline", { ascending: true }),
-        supabase
-          .from("class_submission_deadlines")
-          .select("id, stage, deadline")
-          .eq("class_id", effectiveClassId)
-          .eq("stage", "team_formation")
-          .not("deadline", "is", null),
-      ]);
-      setReviewDeadlines(normalizeWorkspaceDeadlineRows(reviewRows || [], classDeadlineRows || []));
+      const { data: reviewRows } = await supabase
+        .from("review_stages")
+        .select("id, stage_name, deadline, student_deadline_set_by_coordinator, is_locked, stage_order")
+        .eq("class_id", effectiveClassId)
+        .order("stage_order", { ascending: true });
+      setReviewDeadlines(normalizeWorkspaceDeadlineRows(reviewRows || []));
     };
 
     const channel = supabase
@@ -1912,13 +1869,6 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack, onNa
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "review_stages", filter: `class_id=eq.${effectiveClassId}` },
-        async () => {
-          await refreshClassDeadlines();
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "class_submission_deadlines", filter: `class_id=eq.${effectiveClassId}` },
         async () => {
           await refreshClassDeadlines();
         }
@@ -1938,7 +1888,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack, onNa
       window.removeEventListener("admin-data-updated", onAdminDataUpdated);
       window.removeEventListener("storage", onStorage);
     };
-  }, [effectiveClassId, proj.class_id, proj.class_name, proj.batch]);
+  }, [effectiveClassId, proj.class_id, proj.batch]);
 
   const refreshProjectStatus = async () => {
     const { data } = await supabase

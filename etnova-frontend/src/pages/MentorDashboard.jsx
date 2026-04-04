@@ -2229,10 +2229,45 @@ export default function MentorDashboard() {
       if (!Number.isNaN(studentDate.getTime()) && !Number.isNaN(adminDate.getTime()) && studentDate >= adminDate)
         throw new Error("Student deadline must be earlier than admin evaluation deadline.");
     }
-    const { error } = await supabase.from("review_stages")
-      .update({ deadline: deadlineIso, student_deadline_set_by_coordinator: deadlineIso !== null })
-      .eq("id", stageId).eq("class_id", coordinatorClassId);
-    if (error) throw new Error(error.message || "Failed to update student deadline.");
+    const normalizedStageName = normalizeReviewStageName(targetStage.stage_name);
+    const normalizedStageKey = String(normalizedStageName || "").trim().toLowerCase();
+    const stageAliasMap = {
+      idea: ["Idea", "idea", "Idea Approval", "idea approval"],
+      abstract: ["Abstract", "abstract", "Abstract Submission", "abstract submission"],
+      "zeroth review": ["Zeroth Review", "zeroth review", "0th Review", "0th review"],
+      "first review": ["First Review", "first review", "1st Review", "1st review"],
+      "second review": ["Second Review", "second review", "2nd Review", "2nd review"],
+      "final review": ["Final Review", "final review"],
+    };
+    const candidateStageNames = Array.from(new Set([
+      targetStage.stage_name,
+      normalizedStageName,
+      String(targetStage.stage_name || "").trim(),
+      ...(stageAliasMap[normalizedStageKey] || []),
+    ].filter(Boolean)));
+
+    let updateError = null;
+    for (const stageName of candidateStageNames) {
+      const { error } = await supabase
+        .from("review_stages")
+        .update({ deadline: deadlineIso, student_deadline_set_by_coordinator: deadlineIso !== null })
+        .eq("class_id", coordinatorClassId)
+        .eq("stage_name", stageName);
+      if (error) {
+        updateError = error;
+        break;
+      }
+    }
+
+    if (!updateError) {
+      const { error } = await supabase
+        .from("review_stages")
+        .update({ deadline: deadlineIso, student_deadline_set_by_coordinator: deadlineIso !== null })
+        .eq("id", stageId)
+        .eq("class_id", coordinatorClassId);
+      updateError = error;
+    }
+    if (updateError) throw new Error(updateError.message || "Failed to update student deadline.");
     emitAdminDataUpdated();
     setMyClassData(await loadCoordinatorClassData(coordinatorClassId));
   };
