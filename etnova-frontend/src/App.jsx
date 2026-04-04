@@ -7,6 +7,7 @@ import supabase from './config/supabaseClient'
 const SignIn = lazy(() => import('./pages/SignIn'))
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
 const ResetPassword = lazy(() => import('./pages/ResetPassword'))
+const RoleHelpSupport = lazy(() => import('./pages/RoleHelpSupport'))
 const MentorDashboard = lazy(() => import('./pages/MentorDashboard'))
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
 const AdminGuideAllocation = lazy(() => import('./pages/AdminGuideAllocation'))
@@ -65,6 +66,7 @@ function App() {
             <Route path="dashboard" element={<StudentDashboard />} />
             <Route path="ideas" element={<IdeaWorkspace />} />
             <Route path="chat" element={<StudentDiscussion />} />
+            <Route path="help" element={<RoleHelpSupport role="student" />} />
             <Route path="submissions" element={<Submissions />} />
             <Route path="profile" element={<MyProject />} />
 
@@ -84,10 +86,26 @@ function App() {
             }
           />
           <Route
+            path="/mentor/help"
+            element={
+              <ProtectedRoute allowedRoles={['mentor']}>
+                <RoleHelpSupport role="mentor" />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/admin"
             element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <AdminDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/help"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <RoleHelpSupport role="admin" />
               </ProtectedRoute>
             }
           />

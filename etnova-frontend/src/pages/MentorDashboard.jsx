@@ -2082,6 +2082,7 @@ export default function MentorDashboard() {
                 onClose={() => setShowProfileMenu(false)}
                 onLogout={handleSignOut}
                 onEditProfile={() => { setShowProfileMenu(false); setShowProfileEditor(true); }}
+                onHelpSupport={() => navigate("/mentor/help")}
                 roleLabel="Mentor"
                 roleIcon="school"
                 infoItems={[

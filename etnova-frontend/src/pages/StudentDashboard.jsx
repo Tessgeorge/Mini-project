@@ -776,7 +776,8 @@ export default function StudentDashboard() {
         <div className="fixed top-14 right-2 sm:right-6 md:right-8 z-50">
           <ProfileMenu profile={profile} isOpen={showProfileMenu}
             onClose={() => setShowProfileMenu(false)} onLogout={handleLogout}
-            onEditProfile={() => { setShowProfileMenu(false); setShowSettingsModal(true); }} />
+            onEditProfile={() => { setShowProfileMenu(false); setShowSettingsModal(true); }}
+            onHelpSupport={() => navigate("/student/help")} />
         </div>
       )}
 

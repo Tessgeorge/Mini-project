@@ -755,6 +755,7 @@ export default function AdminMentorManagement() {
               setShowProfileMenu(false);
               setShowProfileSettings(true);
             }}
+            onHelpSupport={() => navigate("/admin/help")}
             roleLabel="Administrator"
             roleIcon="admin_panel_settings"
             infoItems={[

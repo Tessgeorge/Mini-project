@@ -476,6 +476,7 @@ export default function AdminGuideAllocation() {
               setShowProfileMenu(false);
               setShowProfileSettings(true);
             }}
+            onHelpSupport={() => navigate("/admin/help")}
             roleLabel="Administrator"
             roleIcon="admin_panel_settings"
             infoItems={[

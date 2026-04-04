@@ -6,6 +6,7 @@ export default function ProfileMenu({
     onClose,
     onLogout,
     onEditProfile,
+    onHelpSupport,
     roleLabel = 'Student',
     roleIcon = 'school',
     infoItems: customInfoItems = null,
@@ -115,6 +116,7 @@ export default function ProfileMenu({
                 </button>
 
                 <button
+                    onClick={() => { onHelpSupport?.(); onClose(); }}
                     className="w-full px-5 py-3 text-left flex items-center gap-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors group"
                 >
                     <span
