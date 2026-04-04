@@ -5,6 +5,8 @@ import ProtectedRoute from './components/ProtectedRoute'
 import supabase from './config/supabaseClient'
 
 const SignIn = lazy(() => import('./pages/SignIn'))
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
+const ResetPassword = lazy(() => import('./pages/ResetPassword'))
 const MentorDashboard = lazy(() => import('./pages/MentorDashboard'))
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
 const AdminGuideAllocation = lazy(() => import('./pages/AdminGuideAllocation'))
@@ -53,6 +55,8 @@ function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/signin" replace />} />
           <Route path="/signin" element={<SignIn />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           <Route
             path="/student"
             element={<StudentRouteWrapper />}

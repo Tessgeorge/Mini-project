@@ -115,9 +115,14 @@ export default function AdminMentorManagement() {
     mentorCount: 0,
     adminCount: 0,
     validMentorCount: 0,
+    createCount: 0,
+    updateCount: 0,
+    skipCount: 0,
   });
   const [showImportPreview, setShowImportPreview] = useState(true);
   const [extractingImport, setExtractingImport] = useState(false);
+  const [pendingImportRows, setPendingImportRows] = useState([]);
+  const [confirmingImport, setConfirmingImport] = useState(false);
   const [selectedMentorId, setSelectedMentorId] = useState("");
   const [workloadOpen, setWorkloadOpen] = useState(true);
   const [workloadLoading, setWorkloadLoading] = useState(false);
@@ -162,11 +167,15 @@ export default function AdminMentorManagement() {
       setImportNotice(saved?.importNotice || "");
       setImportSkipped(Array.isArray(saved?.importSkipped) ? saved.importSkipped : []);
       setImportPreview(Array.isArray(saved?.importPreview) ? saved.importPreview : []);
+      setPendingImportRows(Array.isArray(saved?.pendingImportRows) ? saved.pendingImportRows : []);
       setImportMeta(saved?.importMeta || {
         extractedCount: 0,
         mentorCount: 0,
         adminCount: 0,
         validMentorCount: 0,
+        createCount: 0,
+        updateCount: 0,
+        skipCount: 0,
       });
       setShowImportPreview(saved?.showImportPreview !== false);
     } catch {
@@ -180,11 +189,12 @@ export default function AdminMentorManagement() {
       importNotice,
       importSkipped,
       importPreview,
+      pendingImportRows,
       importMeta,
       showImportPreview,
     };
     window.localStorage.setItem(IMPORT_PREVIEW_STORAGE_KEY, JSON.stringify(payload));
-  }, [importFileName, importNotice, importSkipped, importPreview, importMeta, showImportPreview]);
+  }, [importFileName, importNotice, importSkipped, importPreview, pendingImportRows, importMeta, showImportPreview]);
 
   useEffect(() => {
     const workload = new Map();
@@ -420,6 +430,7 @@ export default function AdminMentorManagement() {
     setError("");
     setImportNotice("");
     setImportSkipped([]);
+    setPendingImportRows([]);
     setExtractingImport(true);
 
     try {
@@ -453,11 +464,15 @@ export default function AdminMentorManagement() {
       const validMentors = extractedPeople.filter((person) => person.role === "mentor" && person.full_name && person.email);
 
       setImportPreview(extractedPeople);
+      setPendingImportRows(extractedPeople);
       setImportMeta(data?.meta || {
         extractedCount: extractedPeople.length,
         mentorCount: extractedPeople.filter((person) => person.role === "mentor").length,
         adminCount: extractedPeople.filter((person) => person.role === "admin").length,
         validMentorCount: validMentors.length,
+        createCount: extractedPeople.filter((person) => person.import_action === "create").length,
+        updateCount: extractedPeople.filter((person) => person.import_action === "update").length,
+        skipCount: extractedPeople.filter((person) => person.import_action === "skip").length,
       });
       setShowImportPreview(true);
 
@@ -467,30 +482,74 @@ export default function AdminMentorManagement() {
         return;
       }
 
-      const applyResult = await apiRequest("/admin/mentor-management-import/apply", {
-        method: "POST",
-        body: {
-          people: extractedPeople,
-        },
-      });
-
       setImportFileName(file.name);
       setImportNotice(
         [
-          `Processed ${file.name}.`,
+          `Preview ready for ${file.name}.`,
           `Extracted ${data?.meta?.extractedCount || 0} people.`,
           `Mapped ${validMentors.length} valid mentor row${validMentors.length === 1 ? "" : "s"} into Mentor Management.`,
-          `Created ${applyResult?.summary?.created || 0}, updated ${applyResult?.summary?.updated || 0}, skipped ${applyResult?.summary?.skipped || 0}.`,
+          "Review the rows below and confirm import to apply changes.",
         ].join(" ")
       );
-      setImportSkipped(applyResult?.skipped || []);
-      await fetchData(true);
     } catch (err) {
       setImportFileName(file.name);
       setError(err.message || "Failed to process uploaded file.");
     } finally {
       setExtractingImport(false);
       event.target.value = "";
+    }
+  };
+
+  const handleCancelImportPreview = () => {
+    setImportFileName("");
+    setImportNotice("");
+    setImportSkipped([]);
+    setImportPreview([]);
+    setPendingImportRows([]);
+    setImportMeta({
+      extractedCount: 0,
+      mentorCount: 0,
+      adminCount: 0,
+      validMentorCount: 0,
+      createCount: 0,
+      updateCount: 0,
+      skipCount: 0,
+    });
+    setShowImportPreview(true);
+  };
+
+  const handleConfirmImport = async () => {
+    if (pendingImportRows.length === 0) return;
+
+    setError("");
+    setImportSkipped([]);
+    setConfirmingImport(true);
+
+    try {
+      const applyResult = await apiRequest("/admin/mentor-management-import/apply", {
+        method: "POST",
+        body: {
+          people: pendingImportRows,
+          fileName: importFileName,
+        },
+      });
+
+      setImportNotice(
+        [
+          `Processed ${importFileName || "uploaded file"}.`,
+          `Created ${applyResult?.summary?.created || 0}, updated ${applyResult?.summary?.updated || 0}, skipped ${applyResult?.summary?.skipped || 0}.`,
+          applyResult?.summary?.invited
+            ? `Password setup email sent for ${applyResult.summary.invited} new account${applyResult.summary.invited === 1 ? "" : "s"}.`
+            : null,
+        ].filter(Boolean).join(" ")
+      );
+      setImportSkipped(applyResult?.skipped || []);
+      setPendingImportRows([]);
+      await fetchData(true);
+    } catch (err) {
+      setError(err.message || "Failed to apply mentor import.");
+    } finally {
+      setConfirmingImport(false);
     }
   };
 
@@ -768,7 +827,7 @@ export default function AdminMentorManagement() {
                 </p>
               ) : null}
 
-              {importNotice ? (
+              {importNotice && importPreview.length === 0 ? (
                 <div className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-800">
                   {importNotice}
                 </div>
@@ -809,12 +868,44 @@ export default function AdminMentorManagement() {
 
               {showImportPreview ? (
               <div className="p-6 space-y-5">
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {pendingImportRows.length > 0 ? (
+                  <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-cyan-900">Preview ready</p>
+                      <p className="text-sm text-cyan-800 mt-1">
+                        Nothing has been imported yet. Confirm to create or update mentor accounts from these rows.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={handleCancelImportPreview}
+                        disabled={confirmingImport}
+                        className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleConfirmImport}
+                        disabled={confirmingImport || extractingImport}
+                        className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {confirmingImport ? "Importing..." : "Confirm Import"}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-4">
                   {[
                     { label: "Extracted", value: importMeta.extractedCount },
                     { label: "Mentors", value: importMeta.mentorCount },
                     { label: "Admins", value: importMeta.adminCount },
                     { label: "Valid Mentor Imports", value: importMeta.validMentorCount },
+                    { label: "Create", value: importMeta.createCount || 0 },
+                    { label: "Update", value: importMeta.updateCount || 0 },
+                    { label: "Skip", value: importMeta.skipCount || 0 },
                   ].map((item) => (
                     <div key={item.label} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{item.label}</p>
@@ -824,7 +915,7 @@ export default function AdminMentorManagement() {
                 </div>
 
                 <div className="overflow-x-auto rounded-xl border border-slate-200">
-                  <table className="w-full min-w-[860px] text-sm">
+                  <table className="w-full min-w-[1080px] text-sm">
                     <thead className="bg-slate-100/80 text-slate-600">
                       <tr>
                         <th className="px-4 py-3 text-left font-semibold">Name</th>
@@ -833,6 +924,7 @@ export default function AdminMentorManagement() {
                         <th className="px-4 py-3 text-left font-semibold">Department</th>
                         <th className="px-4 py-3 text-left font-semibold">Specialization</th>
                         <th className="px-4 py-3 text-left font-semibold">Role</th>
+                        <th className="px-4 py-3 text-left font-semibold">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
@@ -851,6 +943,20 @@ export default function AdminMentorManagement() {
                             }`}>
                               {person.role}
                             </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-col gap-1">
+                              <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                person.import_action === "create"
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : person.import_action === "update"
+                                    ? "bg-sky-100 text-sky-700"
+                                    : "bg-rose-100 text-rose-700"
+                              }`}>
+                                {(person.import_action || "skip").toUpperCase()}
+                              </span>
+                              <span className="text-xs text-slate-500">{person.import_reason || "-"}</span>
+                            </div>
                           </td>
                         </tr>
                       ))}

@@ -8,6 +8,7 @@ import {
   applyAdminMentorImport,
   extractCoordinatorStudentImport,
   applyCoordinatorStudentImport,
+  resolveLoginAuthEmail,
   getUserProfile, 
   updateUserProfile,
 
@@ -103,6 +104,7 @@ router.post('/admin/mentor-management-import/extract', authenticateUser, require
 router.post('/admin/mentor-management-import/apply', authenticateUser, requireRole(['admin']), applyAdminMentorImport);
 router.post('/coordinator/student-import/extract', authenticateUser, requireRole(['mentor']), requireCoordinator, extractCoordinatorStudentImport);
 router.post('/coordinator/student-import/apply', authenticateUser, requireRole(['mentor']), requireCoordinator, applyCoordinatorStudentImport);
+router.post('/auth/resolve-email', resolveLoginAuthEmail);
 router.get('/profile', authenticateUser, getUserProfile);
 router.put('/profile', authenticateUser, updateUserProfile);
 

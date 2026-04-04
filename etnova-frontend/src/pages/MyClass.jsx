@@ -231,9 +231,17 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
   const [studentImportNotice, setStudentImportNotice] = useState("");
   const [studentImportError, setStudentImportError] = useState("");
   const [studentImportPreview, setStudentImportPreview] = useState([]);
-  const [studentImportMeta, setStudentImportMeta] = useState({ extractedCount: 0, validStudentCount: 0 });
+  const [studentImportMeta, setStudentImportMeta] = useState({
+    extractedCount: 0,
+    validStudentCount: 0,
+    createCount: 0,
+    updateCount: 0,
+    skipCount: 0,
+  });
   const [studentImportSkipped, setStudentImportSkipped] = useState([]);
   const [uploadingStudents, setUploadingStudents] = useState(false);
+  const [pendingStudentImportRows, setPendingStudentImportRows] = useState([]);
+  const [confirmingStudents, setConfirmingStudents] = useState(false);
   // Local overrides so saved deadline shows instantly without waiting for classData refresh
   const [savedDeadlines, setSavedDeadlines] = useState({});
 
@@ -288,6 +296,7 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
     setStudentImportNotice("");
     setStudentImportError("");
     setStudentImportSkipped([]);
+    setPendingStudentImportRows([]);
     setUploadingStudents(true);
 
     try {
@@ -322,40 +331,85 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
       const validStudents = extractedStudents.filter((student) => student.full_name && student.email);
 
       setStudentImportPreview(extractedStudents);
+      setPendingStudentImportRows(extractedStudents);
       setStudentImportMeta(extractResult?.meta || {
         extractedCount: extractedStudents.length,
         validStudentCount: validStudents.length,
+        createCount: extractedStudents.filter((student) => student.import_action === "create").length,
+        updateCount: extractedStudents.filter((student) => student.import_action === "update").length,
+        skipCount: extractedStudents.filter((student) => student.import_action === "skip").length,
       });
 
       if (extractedStudents.length === 0) {
         setStudentImportNotice(`No student rows could be extracted from ${file.name}.`);
         return;
       }
+      setStudentImportNotice(
+        [
+          `Preview ready for ${file.name}.`,
+          `Extracted ${extractResult?.meta?.extractedCount || extractedStudents.length} student row${(extractResult?.meta?.extractedCount || extractedStudents.length) === 1 ? "" : "s"}.`,
+          "Review the rows below and confirm import to apply changes.",
+        ].join(" ")
+      );
+    } catch (error) {
+      setStudentImportError(error.message || "Failed to process uploaded student file.");
+    } finally {
+      setUploadingStudents(false);
+      event.target.value = "";
+    }
+  };
 
+  const handleCancelStudentImportPreview = () => {
+    setStudentImportFileName("");
+    setStudentImportNotice("");
+    setStudentImportError("");
+    setStudentImportPreview([]);
+    setStudentImportMeta({
+      extractedCount: 0,
+      validStudentCount: 0,
+      createCount: 0,
+      updateCount: 0,
+      skipCount: 0,
+    });
+    setStudentImportSkipped([]);
+    setPendingStudentImportRows([]);
+  };
+
+  const handleConfirmStudentImport = async () => {
+    if (pendingStudentImportRows.length === 0) return;
+
+    setStudentImportError("");
+    setStudentImportSkipped([]);
+    setConfirmingStudents(true);
+
+    try {
       const applyResult = await apiRequest("/coordinator/student-import/apply", {
         method: "POST",
         body: {
-          students: extractedStudents,
+          students: pendingStudentImportRows,
+          fileName: studentImportFileName,
         },
       });
 
       setStudentImportSkipped(applyResult?.skipped || []);
       setStudentImportNotice(
         [
-          `Processed ${file.name}.`,
-          `Extracted ${extractResult?.meta?.extractedCount || extractedStudents.length} student row${(extractResult?.meta?.extractedCount || extractedStudents.length) === 1 ? "" : "s"}.`,
+          `Processed ${studentImportFileName || "uploaded file"}.`,
           `Created ${applyResult?.summary?.created || 0}, updated ${applyResult?.summary?.updated || 0}, skipped ${applyResult?.summary?.skipped || 0}.`,
-        ].join(" ")
+          applyResult?.summary?.invited
+            ? `Password setup email sent for ${applyResult.summary.invited} new account${applyResult.summary.invited === 1 ? "" : "s"}.`
+            : null,
+        ].filter(Boolean).join(" ")
       );
+      setPendingStudentImportRows([]);
 
       if (typeof onStudentImportComplete === "function") {
         await onStudentImportComplete();
       }
     } catch (error) {
-      setStudentImportError(error.message || "Failed to process uploaded student file.");
+      setStudentImportError(error.message || "Failed to apply student import.");
     } finally {
-      setUploadingStudents(false);
-      event.target.value = "";
+      setConfirmingStudents(false);
     }
   };
 
@@ -502,7 +556,7 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
               {studentImportError}
             </div>
           ) : null}
-          {studentImportNotice ? (
+          {studentImportNotice && studentImportPreview.length === 0 ? (
             <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
               <span className="material-symbols-outlined text-base mt-0.5">check_circle</span>
               {studentImportNotice}
@@ -518,6 +572,34 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
                   Valid: <span className="font-bold text-slate-700">{studentImportMeta.validStudentCount || 0}</span>
                 </div>
               </div>
+              {pendingStudentImportRows.length > 0 ? (
+                <div className="px-4 py-4 border-b border-cyan-100 bg-cyan-50 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-cyan-900">Preview ready</p>
+                    <p className="text-sm text-cyan-800 mt-1">
+                      Nothing has been imported yet. Confirm to add or update students for this class.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleCancelStudentImportPreview}
+                      disabled={confirmingStudents}
+                      className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmStudentImport}
+                      disabled={uploadingStudents || confirmingStudents}
+                      className="inline-flex items-center rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {confirmingStudents ? "Importing..." : "Confirm Import"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-white">
@@ -527,6 +609,7 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
                       <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-400">Class</th>
                       <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-400">Roll Number</th>
                       <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-400">Department</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-400">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
@@ -534,9 +617,23 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
                       <tr key={`${student.email || student.full_name || "student"}-${index}`}>
                         <td className="px-4 py-3 font-semibold text-slate-800">{student.full_name || "-"}</td>
                         <td className="px-4 py-3 text-slate-600">{student.email || "-"}</td>
-                        <td className="px-4 py-3 text-slate-600">{student.class_section || classTitle || "-"}</td>
+                        <td className="px-4 py-3 text-slate-600">{student.resolved_class_section || student.class_section || classTitle || "-"}</td>
                         <td className="px-4 py-3 text-slate-600">{student.roll_number || "-"}</td>
                         <td className="px-4 py-3 text-slate-600">{student.department || "-"}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-col gap-1">
+                            <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${
+                              student.import_action === "create"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : student.import_action === "update"
+                                  ? "bg-sky-100 text-sky-700"
+                                  : "bg-rose-100 text-rose-700"
+                            }`}>
+                              {(student.import_action || "skip").toUpperCase()}
+                            </span>
+                            <span className="text-xs text-slate-500">{student.import_reason || "-"}</span>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
