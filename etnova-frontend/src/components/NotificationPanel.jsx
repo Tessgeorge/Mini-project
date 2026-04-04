@@ -41,8 +41,15 @@ export default function NotificationPanel({
                 return 'cancel';
             case 'document_comment':
                 return 'chat';
+            case 'document_submitted':
+            case 'document_resubmitted':
+                return 'upload_file';
             case 'evaluation':
                 return 'star';
+            case 'idea_submitted':
+                return 'lightbulb';
+            case 'meeting_request':
+                return 'event';
             case 'team_member':
                 return 'group_add';
             case 'join_request':
@@ -57,6 +64,23 @@ export default function NotificationPanel({
                 return 'cancel';
             case 'team_member_removed':
                 return 'person_remove';
+            case 'guide_assignment':
+                return 'supervisor_account';
+            case 'guide_unassigned':
+                return 'person_off';
+            case 'guide_role_assigned':
+            case 'guide_role_removed':
+                return 'school';
+            case 'coordinator_assignment':
+            case 'coordinator_role_removed':
+                return 'admin_panel_settings';
+            case 'reviewer_access_granted':
+            case 'reviewer_access_updated':
+                return 'fact_check';
+            case 'reviewer_access_removed':
+                return 'block';
+            case 'review_deadline_updated':
+                return 'event_upcoming';
             case 'task_assigned':
                 return 'assignment_ind';
             default:
@@ -72,8 +96,15 @@ export default function NotificationPanel({
                 return '#ef4444'; // red
             case 'document_comment':
                 return '#3b82f6'; // blue
+            case 'document_submitted':
+            case 'document_resubmitted':
+                return '#0ea5e9'; // sky
             case 'evaluation':
                 return '#f59e0b'; // amber
+            case 'idea_submitted':
+                return '#8b5cf6'; // violet
+            case 'meeting_request':
+                return '#14b8a6'; // teal
             case 'team_member':
                 return '#3b82f6'; // blue
             case 'join_request':
@@ -88,6 +119,19 @@ export default function NotificationPanel({
                 return '#ef4444'; // red
             case 'team_member_removed':
                 return '#f97316'; // orange
+            case 'guide_assignment':
+            case 'guide_role_assigned':
+            case 'coordinator_assignment':
+            case 'reviewer_access_granted':
+                return '#14b8a6'; // teal
+            case 'guide_unassigned':
+            case 'guide_role_removed':
+            case 'coordinator_role_removed':
+            case 'reviewer_access_removed':
+                return '#f97316'; // orange
+            case 'reviewer_access_updated':
+            case 'review_deadline_updated':
+                return '#6366f1'; // indigo
             case 'task_assigned':
                 return '#0ea5e9'; // sky
             default:

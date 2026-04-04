@@ -9,6 +9,7 @@ import TopNavbar from "../components/admin/TopNavbar";
 import AllocationSummary from "../components/admin/AllocationSummary";
 import AdminProfileSettingsModal from "../components/admin/AdminProfileSettingsModal";
 import ProfileMenu from "../components/ProfileMenu";
+import { createNotifications, formatProjectNotificationLabel } from "../utils/notificationHelpers";
 import { subscribeWithDeferredCleanup } from "../utils/realtimeChannel";
 
 const ADMIN_NAME = "Meenakshi";
@@ -315,6 +316,16 @@ export default function AdminGuideAllocation() {
       const failed = results.find((result) => result.error);
       if (failed?.error) throw failed.error;
 
+      await createNotifications(assignments.map((item) => {
+        const project = projects.find((entry) => entry.id === item.projectId);
+        return {
+          user_id: item.mentorId,
+          type: "guide_assignment",
+          title: "New Guide Assignment",
+          message: `Administrator assigned you as guide for ${formatProjectNotificationLabel(project)}.`,
+        };
+      }));
+
       const skipped = unassignedProjects.length - assignments.length;
       setNotice(
         skipped > 0
@@ -366,7 +377,13 @@ export default function AdminGuideAllocation() {
     setNotice("");
 
     try {
+      const previousGuideId = project.allocated_guide_id || project.guide_id || null;
       const nextGuideId = mentorId === NONE_GUIDE_VALUE ? null : mentorId;
+      if (previousGuideId === nextGuideId) {
+        setSelectedGuides((prev) => ({ ...prev, [projectId]: "" }));
+        setNotice("Guide assignment is already up to date.");
+        return;
+      }
       if (nextGuideId && !canAssignMentor(project, nextGuideId)) {
         const message = "Selected mentor is already at maximum workload (2 projects).";
         setError(message);
@@ -386,6 +403,26 @@ export default function AdminGuideAllocation() {
         .eq("id", projectId);
 
       if (updateError) throw updateError;
+
+      const notificationRows = [];
+      const projectLabel = formatProjectNotificationLabel(project);
+      if (nextGuideId) {
+        notificationRows.push({
+          user_id: nextGuideId,
+          type: "guide_assignment",
+          title: previousGuideId && previousGuideId !== nextGuideId ? "Guide Assignment Updated" : "New Guide Assignment",
+          message: `Administrator assigned you as guide for ${projectLabel}.`,
+        });
+      }
+      if (previousGuideId && previousGuideId !== nextGuideId) {
+        notificationRows.push({
+          user_id: previousGuideId,
+          type: "guide_unassigned",
+          title: "Guide Assignment Removed",
+          message: `Administrator removed you from guide duty for ${projectLabel}.`,
+        });
+      }
+      await createNotifications(notificationRows);
 
       setSelectedGuides((prev) => ({ ...prev, [projectId]: "" }));
       setNotice(nextGuideId ? "Guide assigned successfully." : "Guide unassigned successfully.");

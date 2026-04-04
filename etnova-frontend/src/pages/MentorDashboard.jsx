@@ -2,6 +2,7 @@ import { lazy, Suspense, useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../config/supabaseClient";
 import ProfileMenu from "../components/ProfileMenu";
+import NotificationPanel from "../components/NotificationPanel";
 import Modal from "../components/Modal";
 import { getStatusMeta } from "../constants/statusConfig";
 import { EVALUATION_STAGE_OPTIONS, getWorkflowStageMeta } from "../constants/workflowConfig";
@@ -899,7 +900,7 @@ function Sidebar({ active, setActive, onSignOut, showMyClass, showEvaluation, is
   );
 }
 
-function Topbar({ active, mentorName, onProfileClick, onToggleSidebar, onNavigateHome }) {
+function Topbar({ active, mentorName, notificationCount = 0, onNotificationClick, onProfileClick, onToggleSidebar, onNavigateHome }) {
   const labels = {
     overview:                "Dashboard",
     teams:                   "My Teams",
@@ -931,17 +932,32 @@ function Topbar({ active, mentorName, onProfileClick, onToggleSidebar, onNavigat
         <Icon.ChevronRight className="hidden sm:inline" />
         <span className="text-gray-700 font-semibold">{labels[active]}</span>
       </div>
-      <button onClick={onProfileClick}
-        className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-gray-50 active:bg-gray-100 transition-all group" title="View / Edit Profile">
-        <div className="w-8 h-8 rounded-full bg-teal-400 text-white flex items-center justify-center text-sm font-bold group-hover:ring-2 group-hover:ring-teal-300 group-hover:ring-offset-1 transition-all">
-          {mentorName?.[0] || "M"}
-        </div>
-        <div className="text-sm text-left">
-          <p className="font-semibold text-gray-800 leading-tight group-hover:text-teal-700 transition-colors">{mentorName || "Mentor"}</p>
-          <p className="text-xs text-gray-400">Mentor</p>
-        </div>
-        <div className="text-gray-300 group-hover:text-teal-400 transition-colors ml-1"><Icon.Edit /></div>
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onNotificationClick}
+          className="relative rounded-xl p-2 text-gray-400 transition-all hover:bg-gray-50 hover:text-gray-700 active:bg-gray-100"
+          title="Notifications"
+        >
+          <span className="material-symbols-outlined text-[22px]">notifications</span>
+          {notificationCount > 0 && (
+            <span className="absolute right-1 top-1 flex size-4 items-center justify-center rounded-full bg-rose-500 text-[9px] font-black text-white">
+              {notificationCount > 9 ? "9+" : notificationCount}
+            </span>
+          )}
+        </button>
+        <button onClick={onProfileClick}
+          className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-gray-50 active:bg-gray-100 transition-all group" title="View / Edit Profile">
+          <div className="w-8 h-8 rounded-full bg-teal-400 text-white flex items-center justify-center text-sm font-bold group-hover:ring-2 group-hover:ring-teal-300 group-hover:ring-offset-1 transition-all">
+            {mentorName?.[0] || "M"}
+          </div>
+          <div className="text-sm text-left">
+            <p className="font-semibold text-gray-800 leading-tight group-hover:text-teal-700 transition-colors">{mentorName || "Mentor"}</p>
+            <p className="text-xs text-gray-400">Mentor</p>
+          </div>
+          <div className="text-gray-300 group-hover:text-teal-400 transition-colors ml-1"><Icon.Edit /></div>
+        </button>
+      </div>
     </header>
   );
 }
@@ -1650,6 +1666,9 @@ export default function MentorDashboard() {
   const [mentorProfile, setMentorProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showAllNotifications, setShowAllNotifications] = useState(false);
+  const [notifications, setNotifications] = useState([]);
   const [showProfileEditor, setShowProfileEditor] = useState(false);
   const [myClassData, setMyClassData] = useState(null);
   const [myClassLoading, setMyClassLoading] = useState(false);
@@ -1667,6 +1686,15 @@ export default function MentorDashboard() {
       // Ignore session storage access failures.
     }
   }, [active]);
+
+  const loadNotifications = useCallback(async () => {
+    try {
+      const data = await apiRequest("/notifications", { skipCache: true });
+      setNotifications(data || []);
+    } catch (error) {
+      console.error("Failed to load mentor notifications:", error);
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1828,11 +1856,13 @@ export default function MentorDashboard() {
             backendProjects,
             evalData,
             msData,
+            mentorNotifications,
           ] = await Promise.all([
             fetchReviewerAccessRowsForMentor(profile.id, { skipCache: reviewAccessVersion > 0 }),
             apiRequest("/projects", { skipCache: reviewAccessVersion > 0 }),
             fetchEvaluationsForMentor(profile.id),
             fetchSystemSettingsRows(),
+            apiRequest("/notifications", { skipCache: reviewAccessVersion > 0 }),
           ]);
 
           const reviewerAccessRows = reviewerAccessResult.rows;
@@ -1924,6 +1954,7 @@ export default function MentorDashboard() {
           setWritableReviewStages(writableStages);
           setProjects(projData || []);
           setEvaluations(evalData || []);
+          setNotifications(mentorNotifications || []);
 
           setMilestones((msData || []).map(m => ({
             title: m.setting_key || m.key || m.title || m.name,
@@ -1982,6 +2013,40 @@ export default function MentorDashboard() {
     return () => { supabase.removeChannel(channel); };
   }, [mentorProfile?.id]);
 
+  useEffect(() => {
+    if (!mentorProfile?.id) return undefined;
+
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "visible") {
+        loadNotifications();
+      }
+    };
+
+    refreshIfVisible();
+    const onVisibilityChange = () => {
+      refreshIfVisible();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const timer = setInterval(() => {
+      refreshIfVisible();
+    }, 60000);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [loadNotifications, mentorProfile?.id]);
+
+  useEffect(() => {
+    if (!mentorProfile?.id) return undefined;
+    const channel = supabase.channel(`mentor-notifications-${mentorProfile.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${mentorProfile.id}` }, async () => {
+        await loadNotifications();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [loadNotifications, mentorProfile?.id]);
+
   const coordinatorClassId = resolveCoordinatorClassId(mentorProfile, projects).classId;
   const isCoordinatorWithClass = Boolean(mentorProfile?.is_coordinator && coordinatorClassId);
   const canOpenEvaluationPanel = hasReviewAccess && allowedReviewStages.length > 0 && reviewProjects.length > 0;
@@ -2028,6 +2093,48 @@ export default function MentorDashboard() {
     };
   }, [coordinatorClassId, isMyClassActive, loadCoordinatorClassData, mentorProfile?.is_coordinator]);
 
+  const handleMarkAllNotificationsRead = async () => {
+    try {
+      await apiRequest("/notifications/read-all", { method: "PUT" });
+    } catch (error) {
+      console.error("Failed to mark mentor notifications as read:", error);
+    } finally {
+      setNotifications((previous) => previous.map((notification) => ({ ...notification, read: true })));
+    }
+  };
+
+  const handleNotificationClick = async (notification) => {
+    if (!notification?.id) return;
+    let nextTab = "";
+    try {
+      if (!notification.read) {
+        await apiRequest(`/notifications/${notification.id}/read`, { method: "PUT" });
+      }
+    } catch (error) {
+      console.error("Failed to mark mentor notification as read:", error);
+    } finally {
+      setNotifications((previous) => previous.map((item) => (
+        item.id === notification.id ? { ...item, read: true } : item
+      )));
+      setShowNotifications(false);
+      setShowAllNotifications(false);
+
+      if (["idea_submitted", "document_submitted", "document_resubmitted", "meeting_request", "guide_assignment", "guide_unassigned", "guide_role_assigned", "guide_role_removed"].includes(notification.type)) {
+        nextTab = "teams";
+      }
+      if (!nextTab && ["reviewer_access_granted", "reviewer_access_updated", "reviewer_access_removed"].includes(notification.type)) {
+        nextTab = canOpenEvaluationPanel ? "evaluation" : "overview";
+      }
+      if (!nextTab && ["coordinator_assignment", "coordinator_role_removed", "review_deadline_updated"].includes(notification.type)) {
+        nextTab = isCoordinatorWithClass ? "my-class-overview" : "overview";
+      }
+    }
+
+    if (nextTab) {
+      setActive(nextTab);
+    }
+  };
+
   const handleSubmitReview = async ({ projectId, phase, score, feedback }) => {
     try {
       const data = await insertMentorEvaluation(mentorProfile?.id, {
@@ -2073,7 +2180,36 @@ export default function MentorDashboard() {
       <Sidebar active={active} setActive={(k) => { setActive(k); setIsSidebarOpen(false); }} onSignOut={handleSignOut} showMyClass={isCoordinatorWithClass} showEvaluation={canOpenEvaluationPanel} isOpen={isSidebarOpen} />
       <div className="flex-1 min-w-0 md:ml-72 h-[100dvh] flex flex-col overflow-hidden">
         <div className="relative">
-          <Topbar active={active} mentorName={mentorProfile?.full_name} showMyClass={isCoordinatorWithClass} onProfileClick={() => setShowProfileMenu(v => !v)} onToggleSidebar={() => setIsSidebarOpen(true)} onNavigateHome={() => setActive("overview")} />
+          <Topbar
+            active={active}
+            mentorName={mentorProfile?.full_name}
+            notificationCount={notifications.filter((notification) => !notification.read).length}
+            onNotificationClick={() => {
+              setShowNotifications((value) => !value);
+              setShowProfileMenu(false);
+              setShowAllNotifications(false);
+            }}
+            showMyClass={isCoordinatorWithClass}
+            onProfileClick={() => {
+              setShowProfileMenu((value) => !value);
+              setShowNotifications(false);
+            }}
+            onToggleSidebar={() => setIsSidebarOpen(true)}
+            onNavigateHome={() => setActive("overview")}
+          />
+          {showNotifications && (
+            <div className="fixed right-2 top-16 z-50 sm:right-6 md:right-8">
+              <NotificationPanel
+                isOpen={showNotifications}
+                onClose={() => setShowNotifications(false)}
+                notifications={notifications}
+                onMarkAsRead={handleMarkAllNotificationsRead}
+                onNotificationClick={handleNotificationClick}
+                showAll={showAllNotifications}
+                onToggleViewAll={() => setShowAllNotifications((value) => !value)}
+              />
+            </div>
+          )}
           {showProfileMenu && (
             <div className="fixed top-14 right-2 sm:right-6 md:right-8 z-50">
               <ProfileMenu

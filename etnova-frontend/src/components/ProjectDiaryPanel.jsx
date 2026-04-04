@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../config/supabaseClient";
+import { createNotifications } from "../utils/notificationHelpers";
 
 const EMPTY_ARRAY = [];
 const RECENT_ENTRY_LIMIT = 20;
@@ -701,6 +702,12 @@ export default function ProjectDiaryPanel({
         status: "pending",
       });
       if (insertError) throw insertError;
+      await createNotifications([{
+        user_id: mentor.id,
+        type: "meeting_request",
+        title: "New Meeting Request",
+        message: `${currentUserName || "A student"} requested a meeting for ${project?.team_name || project?.title || "your team"}.`,
+      }]);
       setMeetingDateTime("");
       setMeetingAgenda("");
       await loadDiary();

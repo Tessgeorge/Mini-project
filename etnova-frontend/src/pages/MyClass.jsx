@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, Component } from "react";
 import { supabase } from "../config/supabaseClient";
 import { apiRequest } from "../config/apiClient";
 import CoordinatorResultsPanel from "../components/CoordinatorResultsPanel";
+import { createNotifications, formatClassNotificationLabel } from "../utils/notificationHelpers";
 
 // ─── Helpers (preserved from original) ───────────────────────────────────────
 function formatClassScore(value) {
@@ -1770,7 +1771,7 @@ function TabTeams({ classId }) {
 }
 
 // ─── TAB 4: Reviews & Access ──────────────────────────────────────────────────
-function TabReviews({ classId }) {
+function TabReviews({ classId, classTitle = "" }) {
   const [toggles, setToggles] = useState({ zeroth_review: false, first_review: false, second_review: false, final_review: false });
   const [mentors, setMentors] = useState([]);
   const [selected, setSelected] = useState([]);
@@ -1914,6 +1915,50 @@ function TabReviews({ classId }) {
         if (clearError) throw clearError;
       }
 
+      const stageLabels = {
+        zeroth_review: "Zeroth Review",
+        first_review: "First Review",
+        second_review: "Second Review",
+        final_review: "Final Review",
+      };
+      const openStageLabels = Object.entries(nextToggles)
+        .filter(([, isOpen]) => Boolean(isOpen))
+        .map(([stageKey]) => stageLabels[stageKey] || stageKey);
+      const classLabel = formatClassNotificationLabel({ class_name: classTitle });
+      const grantedMentors = nextSelected.filter((mentorId) => !selected.includes(mentorId));
+      const removedMentors = selected.filter((mentorId) => !nextSelected.includes(mentorId));
+      const sharedMentors = nextSelected.filter((mentorId) => selected.includes(mentorId));
+      const stageConfigChanged = JSON.stringify(nextToggles) !== JSON.stringify(toggles);
+
+      const batchConfigChanged = sharedMentors.some(
+        (mentorId) => String(nextMentorBatches[mentorId] ?? "all") !== String(mentorBatches[mentorId] ?? "all")
+      );
+
+      const notificationRows = [
+        ...grantedMentors.map((mentorId) => ({
+          user_id: mentorId,
+          type: "reviewer_access_granted",
+          title: "Reviewer Access Granted",
+          message: `Administrator granted you reviewer access for ${classLabel}.${openStageLabels.length > 0 ? ` Open stages: ${openStageLabels.join(", ")}.` : " Review stages are currently closed."}`,
+        })),
+        ...removedMentors.map((mentorId) => ({
+          user_id: mentorId,
+          type: "reviewer_access_removed",
+          title: "Reviewer Access Removed",
+          message: `Administrator removed your reviewer access for ${classLabel}.`,
+        })),
+        ...((stageConfigChanged || batchConfigChanged)
+          ? sharedMentors.map((mentorId) => ({
+            user_id: mentorId,
+            type: "reviewer_access_updated",
+            title: "Reviewer Access Updated",
+            message: `Administrator updated your reviewer access for ${classLabel}.${openStageLabels.length > 0 ? ` Open stages: ${openStageLabels.join(", ")}.` : " Review stages are currently closed."}`,
+          }))
+          : []),
+      ];
+
+      await createNotifications(notificationRows);
+
       await load(true);
       setSaved(true); setTimeout(() => setSaved(false), 3000);
     } catch (e) {
@@ -1921,7 +1966,7 @@ function TabReviews({ classId }) {
       setSaveError(e.message || "Failed to save reviewer access.");
     }
     setSaving(false);
-  }, [classId, load, mentorBatches, mentors, selected, toggles]);
+  }, [classId, classTitle, load, mentorBatches, mentors, selected, toggles]);
 
   const saveAccess = async () => {
     await persistAccess();
@@ -2217,7 +2262,7 @@ export default function MyClass({ classData, loading, onSaveStudentDeadline, onS
       {activeSubPage === "overview" && <TabOverview classData={classData} coordinators={coordinators} loading={loading} onSaveStudentDeadline={onSaveStudentDeadline} onNavigate={onNavigate} onStudentImportComplete={onStudentImportComplete} />}
       {activeSubPage === "teams" && classId && <TabTeams classId={classId} />}
       {activeSubPage === "submissions" && classId && <TabSubmissions classId={classId} />}
-      {activeSubPage === "reviews" && classId && <TabReviews classId={classId} />}
+      {activeSubPage === "reviews" && classId && <TabReviews classId={classId} classTitle={classTitle} />}
       {activeSubPage === "marks" && classId && <CoordinatorResultsPanel classId={classId} />}
 
       {!classId && activeSubPage !== "overview" && (

@@ -12,6 +12,7 @@ import StageStatCard from "../components/admin/StageStatCard";
 import AdminProfileSettingsModal from "../components/admin/AdminProfileSettingsModal";
 import ProfileMenu from "../components/ProfileMenu";
 import Modal from "../components/Modal";
+import { createNotifications, formatClassNotificationLabel } from "../utils/notificationHelpers";
 import { emitAdminDataUpdated } from "../utils/adminLiveSync";
 import { subscribeWithDeferredCleanup } from "../utils/realtimeChannel";
 
@@ -971,6 +972,23 @@ export default function AdminReviewManagement() {
         }
         throw new Error(updateError.message || "Failed to update deadline.");
       }
+
+      const { data: coordinatorRows, error: coordinatorError } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("is_coordinator", true)
+        .eq("class_id", selectedClassId);
+
+      if (coordinatorError) {
+        throw new Error(coordinatorError.message || "Failed to notify coordinators.");
+      }
+
+      await createNotifications((coordinatorRows || []).map((coordinator) => ({
+        user_id: coordinator.id,
+        type: "review_deadline_updated",
+        title: "Review Deadline Updated",
+        message: `Administrator updated the ${stage?.name || editingStage?.name || "review"} deadline for ${formatClassNotificationLabel({ class_name: selectedClassName })}.`,
+      })));
 
       await autoLockExpiredStages(selectedClassId);
       await fetchStages(selectedClassId);
