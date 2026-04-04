@@ -12,6 +12,7 @@ import MentorTable from "../components/admin/MentorTable";
 import EditRoleModal from "../components/admin/EditRoleModal";
 import AdminProfileSettingsModal from "../components/admin/AdminProfileSettingsModal";
 import ProfileMenu from "../components/ProfileMenu";
+import { createNotifications, formatClassNotificationLabel } from "../utils/notificationHelpers";
 import { subscribeWithDeferredCleanup } from "../utils/realtimeChannel";
 
 const ADMIN_NAME = "Meenakshi";
@@ -374,7 +375,7 @@ export default function AdminMentorManagement() {
             pendingEvaluations: Math.max(0, evaluationRows.length - completedEvaluations),
           },
         });
-      } catch (err) {
+      } catch {
         setWorkload({
           guidance: [],
           coordination: [],
@@ -637,6 +638,10 @@ export default function AdminMentorManagement() {
   const handleSaveRoles = async (mentorId, roles, selectedClassId) => {
     setError("");
     try {
+      const previousMentor = editingMentor || mentorRows.find((mentor) => mentor.id === mentorId) || null;
+      const hadGuide = previousMentor?.roles?.includes("Guide") || false;
+      const hadCoordinator = previousMentor?.roles?.includes("Coordinator") || false;
+      const previousClassId = previousMentor?.classId || "";
       const hasGuide = roles.includes("Guide");
       const isCoordinator = roles.includes("Coordinator");
 
@@ -655,6 +660,41 @@ export default function AdminMentorManagement() {
         const coordOk = await toggleCoordinatorRole(mentorId, false, false);
         if (!coordOk) return;
       }
+
+      const selectedClass = classes.find((item) => item.id === selectedClassId);
+      const previousClass = classes.find((item) => item.id === previousClassId);
+      const notificationRows = [];
+
+      if (hasGuide !== hadGuide) {
+        notificationRows.push({
+          user_id: mentorId,
+          type: hasGuide ? "guide_role_assigned" : "guide_role_removed",
+          title: hasGuide ? "Guide Role Assigned" : "Guide Role Removed",
+          message: hasGuide
+            ? "Administrator granted you guide access."
+            : "Administrator removed your guide access.",
+        });
+      }
+
+      if (isCoordinator) {
+        if (!hadCoordinator || previousClassId !== selectedClassId) {
+          notificationRows.push({
+            user_id: mentorId,
+            type: "coordinator_assignment",
+            title: "Coordinator Assignment Updated",
+            message: `Administrator assigned you as coordinator for ${formatClassNotificationLabel(selectedClass)}.`,
+          });
+        }
+      } else if (hadCoordinator) {
+        notificationRows.push({
+          user_id: mentorId,
+          type: "coordinator_role_removed",
+          title: "Coordinator Role Removed",
+          message: `Administrator removed your coordinator assignment${previousClass ? ` for ${formatClassNotificationLabel(previousClass)}` : ""}.`,
+        });
+      }
+
+      await createNotifications(notificationRows);
 
       await fetchData(true);
     } catch (err) {

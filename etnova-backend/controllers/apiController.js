@@ -1184,6 +1184,14 @@ const createNotifications = async (rows) => {
   }
 };
 
+const getProjectMentorRecipientIds = (project) => [...new Set([
+  project?.guide_id,
+  project?.mentor_id,
+  project?.coordinator_id,
+].filter(Boolean))];
+
+const getProjectNotificationName = (project) => project?.team_name || project?.title || 'the team';
+
 const normalizeTextField = (value, { required = false, maxLength = 5000 } = {}) => {
   if (value === undefined) return undefined;
   if (value === null) {
@@ -2937,7 +2945,7 @@ export const uploadDocument = async (req, res) => {
     const { document_type, file_name, file_url, file_size } = req.body;
     const { data: project, error: projectError } = await supabase
       .from('projects')
-      .select('id, status, approved_idea_id')
+      .select('id, title, team_name, status, approved_idea_id, guide_id, mentor_id, coordinator_id')
       .eq('id', req.params.id)
       .single();
 
@@ -2964,6 +2972,14 @@ export const uploadDocument = async (req, res) => {
       .single();
 
     if (error) throw error;
+    const actorName = safeProfileName(req.userProfile, 'Student');
+    const projectName = getProjectNotificationName(project);
+    await createNotifications(getProjectMentorRecipientIds(project).map((userId) => ({
+      user_id: userId,
+      type: 'document_submitted',
+      title: 'New Submission Received',
+      message: `${actorName} submitted "${file_name || document_type || 'a document'}" for ${projectName}.`,
+    })));
     res.status(201).json(data);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -3056,7 +3072,7 @@ export const updateDocument = async (req, res) => {
 
     const { data: current, error: currentError } = await supabase
       .from('documents')
-      .select('id, project_id')
+      .select('id, project_id, document_type, file_name')
       .eq('id', req.params.id)
       .single();
 
@@ -3083,6 +3099,23 @@ export const updateDocument = async (req, res) => {
       .single();
 
     if (error) throw error;
+    const { data: project } = await supabase
+      .from('projects')
+      .select('id, title, team_name, guide_id, mentor_id, coordinator_id')
+      .eq('id', current.project_id)
+      .single();
+
+    if (project) {
+      const actorName = safeProfileName(req.userProfile, 'Student');
+      const projectName = getProjectNotificationName(project);
+      const documentName = data?.file_name || updates.file_name || current.file_name || current.document_type || 'a document';
+      await createNotifications(getProjectMentorRecipientIds(project).map((userId) => ({
+        user_id: userId,
+        type: 'document_resubmitted',
+        title: 'Submission Updated',
+        message: `${actorName} uploaded a new version of "${documentName}" for ${projectName}.`,
+      })));
+    }
     res.json(data);
   } catch (error) {
     res.status(500).json({ message: error.message });
