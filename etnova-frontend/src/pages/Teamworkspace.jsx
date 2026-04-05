@@ -1746,14 +1746,24 @@ function TabActivity({ evaluations, documents, ideas = [] }) {
       color: d.status === 'approved' ? "bg-emerald-50 border-emerald-100" : d.status === "rejected" ? "bg-red-50 border-red-100" : "bg-teal-50 border-teal-100", 
       dot: d.status === 'approved' ? "bg-emerald-400" : d.status === "rejected" ? "bg-red-400" : "bg-teal-400" 
     })),
-    ...ideas.map((idea) => ({
-      emoji: idea.status === 'approved' ? "💡" : idea.status === 'rejected' ? "🚫" : "📝",
-      time: idea.updated_at || idea.created_at,
-      title: "Abstract/Idea " + (idea.status === 'approved' ? "Approved" : idea.status === 'rejected' ? "Rejected" : "Submitted") + " — " + (idea.title || "Untitled"),
-      sub: "Status: " + (idea.status || "pending"),
-      color: idea.status === 'approved' ? "bg-indigo-50 border-indigo-100" : idea.status === "rejected" ? "bg-red-50 border-red-100" : "bg-gray-50 border-gray-100",
-      dot: idea.status === 'approved' ? "bg-indigo-400" : idea.status === "rejected" ? "bg-red-400" : "bg-gray-400"
+    ...evaluations.map((ev) => ({
+      emoji: "🧾",
+      time: ev.created_at,
+      title: `Marks submitted for ${ev.phase || ev.evaluation_type || "Review"} — ${ev.score ?? 0}/100`,
+      sub: ev.feedback ? `Feedback: ${String(ev.feedback).trim()}` : "Marks recorded",
+      color: "bg-teal-50 border-teal-100",
+      dot: "bg-teal-400",
     })),
+    ...ideas
+      .filter((idea) => ['submitted', 'approved'].includes(String(idea.status || '').toLowerCase()))
+      .map((idea) => ({
+        emoji: idea.status === 'approved' ? "💡" : "📝",
+        time: idea.updated_at || idea.created_at,
+        title: "Idea " + (idea.status === 'approved' ? "Approved" : "Submitted") + " — " + (idea.title || "Untitled"),
+        sub: idea.status === 'approved' ? "Approved by guide" : "Submitted by team",
+        color: idea.status === 'approved' ? "bg-indigo-50 border-indigo-100" : "bg-gray-50 border-gray-100",
+        dot: idea.status === 'approved' ? "bg-indigo-400" : "bg-gray-400"
+      })),
   ].sort((a, b) => new Date(b.time) - new Date(a.time));
 
   return (
