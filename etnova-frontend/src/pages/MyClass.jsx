@@ -3,6 +3,7 @@ import { supabase } from "../config/supabaseClient";
 import { apiRequest } from "../config/apiClient";
 import CoordinatorResultsPanel from "../components/CoordinatorResultsPanel";
 import { createNotifications, formatClassNotificationLabel } from "../utils/notificationHelpers";
+import { fetchCoordinatorResultsBreakdown } from "../services/rubrics";
 
 // ─── Helpers (preserved from original) ───────────────────────────────────────
 function formatClassScore(value) {
@@ -53,6 +54,12 @@ function formatDeadlineDateTime(value) {
 function toDateInputValue(v) { return v ? v.slice(0, 10) : ""; }
 function toTimeInputValue(v) { return v ? (v.slice(11, 16) || "") : ""; }
 function buildDeadlineIso(d, t) { return d && t ? `${d}T${t}:00` : ""; }
+
+function hasFinalMarkUpdated(row) {
+  if (!row) return false;
+  if (row.final_marks == null || Number.isNaN(Number(row.final_marks))) return false;
+  return String(row.status || "").trim().toLowerCase() === "published";
+}
 
 function readFileAsText(file) {
   return new Promise((resolve, reject) => {
@@ -240,6 +247,9 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
     skipCount: 0,
   });
   const [studentImportSkipped, setStudentImportSkipped] = useState([]);
+  const [studentImportSummary, setStudentImportSummary] = useState({ created: 0, updated: 0, skipped: 0 });
+  const [showStudentImportPreview, setShowStudentImportPreview] = useState(true);
+  const [studentImportConfirmed, setStudentImportConfirmed] = useState(false);
   const [uploadingStudents, setUploadingStudents] = useState(false);
   const [pendingStudentImportRows, setPendingStudentImportRows] = useState([]);
   const [confirmingStudents, setConfirmingStudents] = useState(false);
@@ -298,6 +308,9 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
     setStudentImportError("");
     setStudentImportSkipped([]);
     setPendingStudentImportRows([]);
+    setStudentImportSummary({ created: 0, updated: 0, skipped: 0 });
+    setStudentImportConfirmed(false);
+    setShowStudentImportPreview(true);
     setUploadingStudents(true);
 
     try {
@@ -360,6 +373,51 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
     }
   };
 
+  const handleConfirmStudentImport = async () => {
+    if (pendingStudentImportRows.length === 0) return;
+
+    setStudentImportError("");
+    setStudentImportNotice("");
+    setStudentImportSkipped([]);
+    setConfirmingStudents(true);
+
+    try {
+      const applyResult = await apiRequest("/coordinator/student-import/apply", {
+        method: "POST",
+        body: {
+          students: pendingStudentImportRows,
+          fileName: studentImportFileName,
+        },
+      });
+
+      setStudentImportSkipped(applyResult?.skipped || []);
+      setStudentImportSummary({
+        created: applyResult?.summary?.created || 0,
+        updated: applyResult?.summary?.updated || 0,
+        skipped: applyResult?.summary?.skipped || 0,
+      });
+      setStudentImportConfirmed(true);
+      setPendingStudentImportRows([]);
+      setStudentImportNotice(
+        [
+          `Processed ${studentImportFileName || "uploaded file"}.`,
+          `Created ${applyResult?.summary?.created || 0}, updated ${applyResult?.summary?.updated || 0}, skipped ${applyResult?.summary?.skipped || 0}.`,
+          applyResult?.summary?.invited
+            ? `Password setup email sent for ${applyResult.summary.invited} new account${applyResult.summary.invited === 1 ? "" : "s"}.`
+            : null,
+        ].filter(Boolean).join(" ")
+      );
+
+      if (typeof onStudentImportComplete === "function") {
+        await onStudentImportComplete();
+      }
+    } catch (error) {
+      setStudentImportError(error.message || "Failed to apply student import.");
+    } finally {
+      setConfirmingStudents(false);
+    }
+  };
+
   const handleCancelStudentImportPreview = () => {
     setStudentImportFileName("");
     setStudentImportNotice("");
@@ -374,44 +432,9 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
     });
     setStudentImportSkipped([]);
     setPendingStudentImportRows([]);
-  };
-
-  const handleConfirmStudentImport = async () => {
-    if (pendingStudentImportRows.length === 0) return;
-
-    setStudentImportError("");
-    setStudentImportSkipped([]);
-    setConfirmingStudents(true);
-
-    try {
-      const applyResult = await apiRequest("/coordinator/student-import/apply", {
-        method: "POST",
-        body: {
-          students: pendingStudentImportRows,
-          fileName: studentImportFileName,
-        },
-      });
-
-      setStudentImportSkipped(applyResult?.skipped || []);
-      setStudentImportNotice(
-        [
-          `Processed ${studentImportFileName || "uploaded file"}.`,
-          `Created ${applyResult?.summary?.created || 0}, updated ${applyResult?.summary?.updated || 0}, skipped ${applyResult?.summary?.skipped || 0}.`,
-          applyResult?.summary?.invited
-            ? `Password setup email sent for ${applyResult.summary.invited} new account${applyResult.summary.invited === 1 ? "" : "s"}.`
-            : null,
-        ].filter(Boolean).join(" ")
-      );
-      setPendingStudentImportRows([]);
-
-      if (typeof onStudentImportComplete === "function") {
-        await onStudentImportComplete();
-      }
-    } catch (error) {
-      setStudentImportError(error.message || "Failed to apply student import.");
-    } finally {
-      setConfirmingStudents(false);
-    }
+    setStudentImportSummary({ created: 0, updated: 0, skipped: 0 });
+    setStudentImportConfirmed(false);
+    setShowStudentImportPreview(true);
   };
 
   const handleDraftChange = (id, key, val) => {
@@ -565,81 +588,116 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
           ) : null}
           {studentImportPreview.length > 0 ? (
             <div className="rounded-xl border border-slate-100 overflow-hidden">
-              <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm font-bold text-slate-700">Uploaded Students</p>
-                <div className="text-xs text-slate-500">
-                  Extracted: <span className="font-bold text-slate-700">{studentImportMeta.extractedCount || studentImportPreview.length}</span>
-                  {" · "}
-                  Valid: <span className="font-bold text-slate-700">{studentImportMeta.validStudentCount || 0}</span>
+              <div className="px-4 py-4 bg-white border-b border-slate-100 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-lg font-semibold text-slate-800">Uploaded File Preview</p>
+                  <p className="text-sm text-slate-500 mt-1">
+                    Preview of the extracted rows from {studentImportFileName || "the uploaded file"} for this class.
+                  </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setShowStudentImportPreview((prev) => !prev)}
+                  className="shrink-0 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                >
+                  {showStudentImportPreview ? "Hide" : "Show"}
+                </button>
               </div>
-              {pendingStudentImportRows.length > 0 ? (
-                <div className="px-4 py-4 border-b border-cyan-100 bg-cyan-50 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-cyan-900">Preview ready</p>
-                    <p className="text-sm text-cyan-800 mt-1">
-                      Nothing has been imported yet. Confirm to add or update students for this class.
-                    </p>
+              {showStudentImportPreview ? (
+                <div className="p-4 space-y-4">
+                  <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-cyan-900">
+                        {studentImportConfirmed ? "Import completed" : "Preview ready"}
+                      </p>
+                      <p className="text-sm text-cyan-800 mt-1">
+                        {studentImportConfirmed
+                          ? "The database has been updated. You can keep this preview open or hide it."
+                          : "Nothing has been imported yet. Confirm to create or update student accounts from these rows."}
+                      </p>
+                    </div>
+                    {!studentImportConfirmed ? (
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={handleCancelStudentImportPreview}
+                          disabled={confirmingStudents}
+                          className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleConfirmStudentImport}
+                          disabled={uploadingStudents || confirmingStudents}
+                          className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                        >
+                          {confirmingStudents ? "Importing..." : "Confirm Import"}
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={handleCancelStudentImportPreview}
-                      disabled={confirmingStudents}
-                      className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleConfirmStudentImport}
-                      disabled={uploadingStudents || confirmingStudents}
-                      className="inline-flex items-center rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      {confirmingStudents ? "Importing..." : "Confirm Import"}
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-white">
-                    <tr className="border-b border-slate-100">
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-400">Name</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-400">Email</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-400">Class</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-400">Roll Number</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-400">Department</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-400">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {studentImportPreview.map((student, index) => (
-                      <tr key={`${student.email || student.full_name || "student"}-${index}`}>
-                        <td className="px-4 py-3 font-semibold text-slate-800">{student.full_name || "-"}</td>
-                        <td className="px-4 py-3 text-slate-600">{student.email || "-"}</td>
-                        <td className="px-4 py-3 text-slate-600">{student.resolved_class_section || student.class_section || classTitle || "-"}</td>
-                        <td className="px-4 py-3 text-slate-600">{student.roll_number || "-"}</td>
-                        <td className="px-4 py-3 text-slate-600">{student.department || "-"}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-col gap-1">
-                            <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${
-                              student.import_action === "create"
-                                ? "bg-emerald-100 text-emerald-700"
-                                : student.import_action === "update"
-                                  ? "bg-sky-100 text-sky-700"
-                                  : "bg-rose-100 text-rose-700"
-                            }`}>
-                              {(student.import_action || "skip").toUpperCase()}
-                            </span>
-                            <span className="text-xs text-slate-500">{student.import_reason || "-"}</span>
-                          </div>
-                        </td>
-                      </tr>
+
+                  <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                    {[
+                      { label: "Extracted", value: studentImportMeta.extractedCount || studentImportPreview.length },
+                      { label: "Valid Student Imports", value: studentImportMeta.validStudentCount || 0 },
+                      { label: "Create", value: studentImportSummary.created || 0 },
+                      { label: "Update", value: studentImportSummary.updated || 0 },
+                      { label: "Skip", value: studentImportSummary.skipped || 0 },
+                    ].map((item) => (
+                      <div key={item.label} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{item.label}</p>
+                        <p className="mt-2 text-2xl font-semibold text-slate-800">{item.value}</p>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </div>
+
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="w-full min-w-[860px] text-sm">
+                      <thead className="bg-slate-100/80 text-slate-600">
+                        <tr>
+                          <th className="px-4 py-3 text-left font-semibold">Name</th>
+                          <th className="px-4 py-3 text-left font-semibold">Email</th>
+                          <th className="px-4 py-3 text-left font-semibold">Class</th>
+                          <th className="px-4 py-3 text-left font-semibold">Roll Number</th>
+                          <th className="px-4 py-3 text-left font-semibold">Department</th>
+                          <th className="px-4 py-3 text-left font-semibold">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {studentImportPreview.map((student, index) => (
+                          <tr key={`${student.email || student.full_name || "student"}-${index}`} className="bg-white">
+                            <td className="px-4 py-3 text-slate-800 font-medium">{student.full_name || "-"}</td>
+                            <td className="px-4 py-3 text-slate-600">{student.email || "-"}</td>
+                            <td className="px-4 py-3 text-slate-600">{student.resolved_class_section || student.class_section || classTitle || "-"}</td>
+                            <td className="px-4 py-3 text-slate-600">{student.roll_number || "-"}</td>
+                            <td className="px-4 py-3 text-slate-600">{student.department || "-"}</td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-col gap-1">
+                                <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                  student.import_action === "create"
+                                    ? "bg-emerald-100 text-emerald-700"
+                                    : student.import_action === "update"
+                                      ? "bg-sky-100 text-sky-700"
+                                      : "bg-rose-100 text-rose-700"
+                                }`}>
+                                  {(student.import_action || "skip").toUpperCase()}
+                                </span>
+                                <span className="text-xs text-slate-500">{student.import_reason || "-"}</span>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="px-4 py-4 text-sm text-slate-500">
+                  Preview hidden. Click <span className="font-semibold text-slate-700">Show</span> to view the uploaded rows again.
+                </div>
+              )}
             </div>
           ) : null}
           {studentImportSkipped.length > 0 ? (
@@ -917,6 +975,7 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
           ))}
         </div>
       </Card>
+
     </div>
   );
 }
@@ -1155,32 +1214,47 @@ function TeamDetail({ projectId, onBack }) {
   const [members, setMembers] = useState([]);
   const [docs, setDocs] = useState([]);
   const [evals, setEvals] = useState([]);
+  const [memberSaving, setMemberSaving] = useState(false);
+  const [memberError, setMemberError] = useState("");
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        const [projRes, memRes, docRes, evalRes] = await Promise.all([
-          supabase.from("projects").select("id,title,description,status,guide_id,domain,technology_stacks,created_at").eq("id", projectId).single(),
-          supabase.from("team_members").select("id,role,profiles:student_id(id,full_name,roll_number,email)").eq("project_id", projectId),
-          supabase.from("documents").select("id,document_type,file_name,file_url,file_size,status,coordinator_verified,uploaded_at,feedback").eq("project_id", projectId).order("uploaded_at", { ascending: false }),
-          supabase.from("evaluations").select("id,evaluation_type,obtained_marks,max_marks,feedback,created_at,profiles:evaluator_id(full_name)").eq("project_id", projectId).order("created_at", { ascending: false }),
-        ]);
-        let proj = projRes.data;
-        if (proj?.guide_id) {
-          const { data: guide } = await supabase.from("profiles").select("full_name").eq("id", proj.guide_id).single();
-          proj = { ...proj, guide_name: guide?.full_name || "—" };
-        }
-        setProject(proj);
-        setMembers(memRes.data || []);
-        setDocs(docRes.data || []);
-        setEvals(evalRes.data || []);
-      } catch (e) { console.error(e); }
+  const load = useCallback(async () => {
+    setLoading(true);
+    setMemberError("");
+    try {
+      const [projRes, memRes, docRes, evalRes] = await Promise.all([
+        supabase.from("projects").select("id,title,description,status,guide_id,domain,technology_stacks,created_at,class_id").eq("id", projectId).single(),
+        supabase.from("team_members").select("id,role,student_id,profiles:student_id(id,full_name,roll_number,email)").eq("project_id", projectId),
+        supabase.from("documents").select("id,document_type,file_name,file_url,file_size,status,coordinator_verified,uploaded_at,feedback").eq("project_id", projectId).order("uploaded_at", { ascending: false }),
+        supabase.from("evaluations").select("id,evaluation_type,obtained_marks,max_marks,feedback,created_at,profiles:evaluator_id(full_name)").eq("project_id", projectId).order("created_at", { ascending: false }),
+      ]);
+
+      if (projRes.error) throw projRes.error;
+      if (memRes.error) throw memRes.error;
+      if (docRes.error) throw docRes.error;
+      if (evalRes.error) throw evalRes.error;
+
+      let proj = projRes.data;
+      if (proj?.guide_id) {
+        const { data: guide } = await supabase.from("profiles").select("full_name").eq("id", proj.guide_id).single();
+        proj = { ...proj, guide_name: guide?.full_name || "—" };
+      }
+
+      setProject(proj);
+      setMembers(memRes.data || []);
+      setDocs(docRes.data || []);
+      setEvals(evalRes.data || []);
+    } catch (e) {
+      console.error(e);
+      setMemberError(e.message || "Failed to load team details.");
+    } finally {
       setLoading(false);
-    };
-    load();
+    }
   }, [projectId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   if (loading) return <Spinner />;
   if (!project) return <div className="text-center py-16 text-slate-400">Project not found.</div>;
@@ -1192,6 +1266,26 @@ function TeamDetail({ projectId, onBack }) {
   const fmtSize = b => !b ? "" : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
   const completedStages = [...new Set(docs.filter(d => d.status === "approved").map(d => d.document_type))];
   const pct = Math.round((completedStages.length / 6) * 100);
+  const handleRemoveStudent = async (member) => {
+    if (!member?.student_id || member?.role === "leader" || memberSaving) return;
+    if (!window.confirm(`Remove ${member.profiles?.full_name || "this student"} from the project team?`)) return;
+    setMemberSaving(true);
+    setMemberError("");
+    try {
+      const { error } = await supabase
+        .from("team_members")
+        .delete()
+        .eq("project_id", project.id)
+        .eq("student_id", member.student_id);
+      if (error) throw error;
+      await load();
+    } catch (e) {
+      console.error(e);
+      setMemberError(e.message || "Failed to remove student from the team.");
+    } finally {
+      setMemberSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -1333,6 +1427,15 @@ function TeamDetail({ projectId, onBack }) {
                       <p className="text-xs text-slate-400">{m.profiles?.roll_number || m.profiles?.email || "—"}</p>
                     </div>
                     <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 capitalize">{m.role || "member"}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveStudent(m)}
+                      disabled={memberSaving || m.role === "leader"}
+                      title={m.role === "leader" ? "Leader cannot be removed here" : "Remove student"}
+                      className="size-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40 transition-all"
+                    >
+                      <span className="material-symbols-outlined text-sm">person_remove</span>
+                    </button>
                   </div>
                 );
               })}
@@ -1396,7 +1499,9 @@ function TabTeams({ classId }) {
     setLoading(true);
     try {
       try {
-        const apiTeams = await apiRequest("/coordinator/teams", { skipCache: true });
+        const apiPayload = await apiRequest("/coordinator/teams", { skipCache: true });
+        const apiTeams = Array.isArray(apiPayload) ? apiPayload : (apiPayload?.teams || []);
+        setLocked(Boolean(apiPayload?.formation_locked));
         const normalized = (apiTeams || []).map((team) => ({
           id: team.id,
           title: team.title,
@@ -1545,6 +1650,34 @@ function TabTeams({ classId }) {
     }
   };
 
+  const handleLockToggle = async () => {
+    const nextLocked = !locked;
+    const confirmed = window.confirm(
+      nextLocked
+        ? "Lock team formation for this class and show these teams in the admin guide allocation page?"
+        : "Unlock team formation for this class and hide these teams from the admin guide allocation page?"
+    );
+    if (!confirmed) return;
+
+    setSaving(true);
+    try {
+      const response = await apiRequest("/coordinator/teams/formation-lock", {
+        method: "PATCH",
+        body: { locked: nextLocked },
+      });
+      setLocked(Boolean(response?.formation_locked));
+      showNotice(nextLocked ? "Team formation locked." : "Team formation unlocked.");
+      window.dispatchEvent(new CustomEvent("coordinator-team-formation-updated", {
+        detail: { classId, locked: Boolean(response?.formation_locked) },
+      }));
+      await load();
+    } catch (error) {
+      showNotice(error.message || `Failed to ${nextLocked ? "lock" : "unlock"} team formation.`, "err");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const buildPdf = (arr, label) => {
     const rows = arr.map((t, i) =>
       `<tr>
@@ -1635,7 +1768,7 @@ function TabTeams({ classId }) {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <button onClick={() => setLocked(l => !l)}
+            <button onClick={handleLockToggle} disabled={saving}
               className={`inline-flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-xl border transition-all ${locked ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-white border-[#00D2C4] text-[#00D2C4] hover:bg-teal-50"}`}>
               <span className="material-symbols-outlined text-base">{locked ? "lock" : "lock_open"}</span>
               {locked ? "Unlock Formation" : "Lock Formation"}
@@ -2192,6 +2325,16 @@ function TabReviews({ classId, classTitle = "" }) {
 // activeSubPage is driven by the sidebar — values: "overview" | "teams" | "submissions" | "reviews"
 export default function MyClass({ classData, loading, onSaveStudentDeadline, onStudentImportComplete, activeSubPage = "overview", onNavigate }) {
   const [coordinators, setCoordinators] = useState([]);
+  const [liveHeaderStats, setLiveHeaderStats] = useState({
+    totalProjects: Number(classData?.totalProjects || 0),
+    totalStudents: Number(
+      classData?.totalStudents ??
+      (Array.isArray(classData?.projects)
+        ? classData.projects.reduce((sum, project) => sum + Number(project?.teamSize || 0), 0)
+        : 0)
+    ),
+    evaluatedProjects: Number(classData?.evaluatedProjects || 0),
+  });
 
   useEffect(() => {
     if (!classData?.classId) return;
@@ -2203,16 +2346,101 @@ export default function MyClass({ classData, loading, onSaveStudentDeadline, onS
       .then(({ data }) => setCoordinators(data || []));
   }, [classData?.classId]);
 
+  useEffect(() => {
+    setLiveHeaderStats({
+      totalProjects: Number(classData?.totalProjects || 0),
+      totalStudents: Number(
+        classData?.totalStudents ??
+        (Array.isArray(classData?.projects)
+          ? classData.projects.reduce((sum, project) => sum + Number(project?.teamSize || 0), 0)
+          : 0)
+      ),
+      evaluatedProjects: Number(classData?.evaluatedProjects || 0),
+    });
+  }, [classData]);
+
   const classId = classData?.classId || null;
   const classTitle = classData?.classTitle || "My Class";
-  const totalTeams = Number(classData?.totalProjects || 0);
-  const totalStudents = Number(
-    classData?.totalStudents ??
-    (Array.isArray(classData?.projects)
-      ? classData.projects.reduce((sum, project) => sum + Number(project?.teamSize || 0), 0)
-      : 0)
-  );
-  const evaluatedTeams = Number(classData?.evaluatedProjects || 0);
+  const liveTotalTeams = Number(liveHeaderStats.totalProjects || 0);
+  const liveTotalStudents = Number(liveHeaderStats.totalStudents || 0);
+  const liveEvaluatedTeams = Number(liveHeaderStats.evaluatedProjects || 0);
+
+  const refreshHeaderStats = useCallback(async () => {
+    if (!classId) return;
+
+    try {
+      const [{ data: projects }, { data: students }] = await Promise.all([
+        supabase.from("projects").select("id").eq("class_id", classId),
+        supabase.from("profiles").select("id").eq("role", "student").eq("class_id", classId),
+      ]);
+
+      const projectIds = (projects || []).map((project) => project.id).filter(Boolean);
+      const [{ data: members }, resultRows] = await Promise.all([
+        projectIds.length
+          ? supabase.from("team_members").select("project_id,student_id").in("project_id", projectIds)
+          : Promise.resolve({ data: [] }),
+        projectIds.length ? fetchCoordinatorResultsBreakdown() : Promise.resolve([]),
+      ]);
+
+      const membersByProject = (members || []).reduce((acc, row) => {
+        if (!row?.project_id || !row?.student_id) return acc;
+        if (!acc[row.project_id]) acc[row.project_id] = [];
+        acc[row.project_id].push(row.student_id);
+        return acc;
+      }, {});
+      const finalResultByStudentId = (resultRows || []).reduce((acc, row) => {
+        if (row?.student_id) acc[row.student_id] = row;
+        return acc;
+      }, {});
+
+      const evaluatedProjectCount = projectIds.filter((projectIdValue) => {
+        const teamStudentIds = membersByProject[projectIdValue] || [];
+        return teamStudentIds.length > 0 && teamStudentIds.every((studentId) => hasFinalMarkUpdated(finalResultByStudentId[studentId]));
+      }).length;
+
+      setLiveHeaderStats({
+        totalProjects: projectIds.length,
+        totalStudents: (students || []).length,
+        evaluatedProjects: evaluatedProjectCount,
+      });
+    } catch (error) {
+      console.error("Failed to refresh class header stats:", error);
+    }
+  }, [classId]);
+
+  useEffect(() => {
+    if (!classId) return undefined;
+
+    refreshHeaderStats();
+
+    let refreshTimer = null;
+    const queueRefresh = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        refreshHeaderStats();
+      }, 500);
+    };
+
+    const channel = supabase.channel(`my-class-header-stats-${classId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "projects", filter: `class_id=eq.${classId}` }, queueRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles", filter: `class_id=eq.${classId}` }, queueRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "evaluations" }, queueRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "review_marks" }, queueRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "team_members" }, queueRefresh)
+      .subscribe();
+
+    const onCoordinatorStudentsUpdated = (event) => {
+      if (event?.detail?.classId !== classId) return;
+      queueRefresh();
+    };
+    window.addEventListener("coordinator-students-updated", onCoordinatorStudentsUpdated);
+
+    return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      window.removeEventListener("coordinator-students-updated", onCoordinatorStudentsUpdated);
+      supabase.removeChannel(channel);
+    };
+  }, [classId, refreshHeaderStats]);
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
@@ -2248,10 +2476,10 @@ export default function MyClass({ classData, loading, onSaveStudentDeadline, onS
             <div className="flex items-center gap-3 flex-wrap">
 
               <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full">
-                {evaluatedTeams} / {totalTeams} Evaluated
+                {liveEvaluatedTeams} / {liveTotalTeams} Evaluated
               </span>
               <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full">
-                {totalStudents} Students
+                {liveTotalStudents} Students
               </span>
             </div>
           </div>

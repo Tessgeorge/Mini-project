@@ -9,6 +9,10 @@ import {
   extractCoordinatorStudentImport,
   applyCoordinatorStudentImport,
   resolveLoginAuthEmail,
+  listCoordinatorStudents,
+  createCoordinatorStudent,
+  updateCoordinatorStudent,
+  deleteCoordinatorStudent,
   getUserProfile, 
   updateUserProfile,
 
@@ -38,11 +42,15 @@ import {
   createEvaluation,
   getEvaluations,
   updateEvaluation,
+  getProjectDiaryEntries,
+  createProjectDiaryEntry,
+  deleteProjectDiaryEntry,
   getIndividualMarks,
   updateIndividualMarks,
 
   // Admin functions
   getAllUsers,
+  deleteAdminUser,
   getSystemSettings,
   updateSystemSettings,
   assignMentor,
@@ -105,6 +113,10 @@ router.post('/admin/mentor-management-import/apply', authenticateUser, requireRo
 router.post('/coordinator/student-import/extract', authenticateUser, requireRole(['mentor']), requireCoordinator, extractCoordinatorStudentImport);
 router.post('/coordinator/student-import/apply', authenticateUser, requireRole(['mentor']), requireCoordinator, applyCoordinatorStudentImport);
 router.post('/auth/resolve-email', resolveLoginAuthEmail);
+router.get('/coordinator/students', authenticateUser, requireRole(['mentor']), requireCoordinator, listCoordinatorStudents);
+router.post('/coordinator/students', authenticateUser, requireRole(['mentor']), requireCoordinator, createCoordinatorStudent);
+router.put('/coordinator/students/:id', authenticateUser, requireRole(['mentor']), requireCoordinator, updateCoordinatorStudent);
+router.delete('/coordinator/students/:id', authenticateUser, requireRole(['mentor']), requireCoordinator, deleteCoordinatorStudent);
 router.get('/profile', authenticateUser, getUserProfile);
 router.put('/profile', authenticateUser, updateUserProfile);
 
@@ -167,6 +179,9 @@ router.put('/notifications/:id/read', authenticateUser, markNotificationRead);
 router.post('/projects/:id/evaluations', authenticateUser, requireRole(['mentor']), canAccessProject(), createEvaluation);
 router.get('/projects/:id/evaluations', authenticateUser, canAccessProject(), getEvaluations);
 router.put('/evaluations/:id', authenticateUser, requireRole(['mentor']), updateEvaluation);
+router.get('/projects/:id/diary-entries', authenticateUser, canAccessProject(), getProjectDiaryEntries);
+router.post('/projects/:id/diary-entries', authenticateUser, requireRole(['mentor']), canAccessProject(), createProjectDiaryEntry);
+router.delete('/projects/:id/diary-entry', authenticateUser, requireRole(['mentor']), canAccessProject(), deleteProjectDiaryEntry);
 router.get('/evaluation-rubrics', authenticateUser, requireRole(['admin', 'mentor']), listRubrics);
 router.get('/projects/:id/rubric-marks/:stage', authenticateUser, requireRole(['mentor']), canAccessProject(), getStageMarksBreakdown);
 router.put('/projects/:id/rubric-marks/:stage', authenticateUser, requireRole(['mentor']), canAccessProject(), submitStageMarks);
@@ -179,6 +194,7 @@ router.put('/projects/:id/individual-marks', authenticateUser, requireRole(['men
 
 // ====== ADMIN ROUTES ======
 router.get('/admin/users', authenticateUser, requireRole(['admin']), getAllUsers);
+router.delete('/admin/users/:id', authenticateUser, requireRole(['admin']), deleteAdminUser);
 router.get('/admin/settings', authenticateUser, requireRole(['admin']), getSystemSettings);
 router.put('/admin/settings', authenticateUser, requireRole(['admin']), updateSystemSettings);
 router.post('/admin/assign-mentor', authenticateUser, requireRole(['admin']), assignMentor);

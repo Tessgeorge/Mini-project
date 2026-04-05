@@ -52,6 +52,9 @@ const STAGE_ALIAS_MAP = {
   "idea approval": "idea",
   research: "idea",
 
+  team_formation: "team_formation",
+  "team formation": "team_formation",
+
   abstract: "abstract",
   "abstract submission": "abstract",
   proposal: "abstract",
@@ -80,9 +83,29 @@ export function normalizeWorkflowStage(value) {
   return STAGE_ALIAS_MAP[normalized] || normalized;
 }
 
+function humanizeWorkflowStageLabel(value) {
+  const source = String(value || "").trim();
+  if (!source) return "Untitled Stage";
+
+  return source
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 export function getWorkflowStageMeta(value) {
   const key = normalizeWorkflowStage(value);
-  return WORKFLOW_TIMELINE.find((stage) => stage.key === key) || WORKFLOW_TIMELINE[0];
+  const matched = WORKFLOW_TIMELINE.find((stage) => stage.key === key);
+  if (matched) return matched;
+
+  return {
+    key,
+    label: humanizeWorkflowStageLabel(value || key),
+    description: "",
+    studentTab: "submissions",
+    mentorTab: "submissions",
+  };
 }
 
 export function getWorkflowDestination(stageValue, role = "student") {

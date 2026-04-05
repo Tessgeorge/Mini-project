@@ -6,6 +6,7 @@ import {
   returnSubmission,
   getClassTeams,
   saveTeamBatches,
+  setTeamFormationLock,
   getDeadlines,
   saveDeadlines,
   getReviewerAccess,
@@ -25,6 +26,7 @@ router.patch('/submissions/:id/verify', verifySubmission);
 router.patch('/submissions/:id/return', returnSubmission);
 router.get('/teams', getClassTeams);
 router.put('/teams/batches', saveTeamBatches);
+router.patch('/teams/formation-lock', setTeamFormationLock);
 router.get('/deadlines', getDeadlines);
 router.put('/deadlines', saveDeadlines);
 router.get('/reviewer-access', getReviewerAccess);

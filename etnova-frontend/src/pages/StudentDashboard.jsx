@@ -72,6 +72,62 @@ function isProfileComplete(profile) {
   );
 }
 
+function normalizeClassDeadlineRows(reviewStageRows = []) {
+  const latestByStage = new Map();
+
+  (reviewStageRows || [])
+    .forEach((row) => {
+      const stageKey = String(row.stage_name || "").trim().toLowerCase();
+      latestByStage.set(stageKey, row);
+    });
+
+  const reviewItems = Array.from(latestByStage.values()).map((row) => ({
+    stageKey: normalizeWorkflowStage(row.stage_name),
+    stage: getWorkflowStageMeta(row.stage_name).label,
+    active: Boolean(row.student_deadline_set_by_coordinator) && !row.is_locked,
+    deadline: row.deadline,
+    date: toDateKey(row.deadline),
+  }));
+  return reviewItems
+    .filter((row) => row.active && row.date && row.deadline)
+    .sort((a, b) => new Date(a.deadline || a.date) - new Date(b.deadline || b.date));
+}
+
+async function resolveClassIdFromContext({ profile, project }) {
+  const directClassId = profile?.class_id || project?.class_id || "";
+  if (directClassId) return directClassId;
+
+  const candidateSections = [
+    profile?.class_section,
+    profile?.batch,
+    ...(Array.isArray(project?.team_members)
+      ? project.team_members.flatMap((member) => [
+        member?.profiles?.class_section,
+        member?.profiles?.batch,
+      ])
+      : []),
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  if (candidateSections.length === 0) return "";
+
+  const { data, error } = await supabase
+    .from("classes")
+    .select("id, class_section")
+    .in("class_section", [...new Set(candidateSections)]);
+
+  if (error) {
+    console.error("Failed to resolve class from section:", error);
+    return "";
+  }
+
+  const bySection = new Map((data || []).map((row) => [String(row.class_section || "").trim().toLowerCase(), row.id]));
+  return candidateSections
+    .map((section) => bySection.get(section.toLowerCase()))
+    .find(Boolean) || "";
+}
+
 // KPI Glass Card
 function KPICard({ label, value, sub, icon, color }) {
   return (
@@ -211,8 +267,9 @@ function DeadlineCalendar({ deadlines, onNavigateTab }) {
                   <div className="text-[10px] text-slate-500 font-semibold">Due {fmtShort(primaryDeadline?.deadline || primaryDeadline?.date)}</div>
                   {dayDeadlines.map((dl) => {
                     const stageKey = normalizeWorkflowStage(dl?.stageKey || dl?.stage);
-                    const actionTab = getWorkflowDestination(stageKey, "student");
-                    const actionLabel = getWorkflowActionLabel(stageKey, "student");
+                    const canNavigate = stageKey !== "team_formation";
+                    const actionTab = canNavigate ? getWorkflowDestination(stageKey, "student") : null;
+                    const actionLabel = canNavigate ? getWorkflowActionLabel(stageKey, "student") : "";
                     return (
                       <div key={`${dl.stage}-${dl.deadline || dl.date}`} className="rounded-lg border border-slate-100 p-2">
                         <div className="flex items-center gap-1.5">
@@ -225,17 +282,19 @@ function DeadlineCalendar({ deadlines, onNavigateTab }) {
                           </p>
                         )}
                         {isPast && <p className="text-[10px] text-slate-400 mt-1">Deadline passed</p>}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onNavigateTab?.(actionTab);
-                            setActive(null);
-                          }}
-                          className="mt-2 w-full py-1.5 rounded-lg text-[10px] font-black text-black transition-all hover:opacity-90"
-                          style={{ backgroundColor: "#00D2C4" }}
-                        >
-                          {actionLabel}
-                        </button>
+                        {canNavigate ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onNavigateTab?.(actionTab);
+                              setActive(null);
+                            }}
+                            className="mt-2 w-full py-1.5 rounded-lg text-[10px] font-black text-black transition-all hover:opacity-90"
+                            style={{ backgroundColor: "#00D2C4" }}
+                          >
+                            {actionLabel}
+                          </button>
+                        ) : null}
                       </div>
                     );
                   })}
@@ -340,42 +399,14 @@ export default function StudentDashboard() {
       return;
     }
 
-    const { data, error: deadlineError } = await supabase
+    const { data: reviewRows, error: deadlineError } = await supabase
       .from("review_stages")
-      .select("id, class_id, stage_name, deadline, coordinator_deadline, is_locked")
+      .select("id, class_id, stage_name, deadline, coordinator_deadline, is_locked, student_deadline_set_by_coordinator, stage_order")
       .eq("class_id", classId)
-      .eq("student_deadline_set_by_coordinator", true)
-      .not("deadline", "is", null)
-      .order("deadline", { ascending: true });
+      .order("stage_order", { ascending: true });
 
-    if (deadlineError) {
-      throw new Error(deadlineError.message || "Failed to load review deadlines.");
-    }
-
-    const latestByStage = new Map();
-    (data || [])
-      .filter((row) => Boolean(row.deadline) && !row.is_locked)
-      .forEach((row) => {
-        const stageKey = String(row.stage_name || "").trim().toLowerCase();
-        const prev = latestByStage.get(stageKey);
-        const rowTs = new Date(row.deadline || 0).getTime();
-        const prevTs = prev ? new Date(prev.deadline || 0).getTime() : -1;
-        if (!prev || rowTs > prevTs || (rowTs === prevTs && String(row.id || "") > String(prev.id || ""))) {
-          latestByStage.set(stageKey, row);
-        }
-      });
-
-    const mappedDeadlines = Array.from(latestByStage.values())
-      .map((row) => ({
-        stageKey: normalizeWorkflowStage(row.stage_name),
-        stage: getWorkflowStageMeta(row.stage_name).label,
-        deadline: row.deadline,
-        date: toDateKey(row.deadline),
-      }))
-      .filter((row) => row.date)
-      .sort((a, b) => new Date(a.deadline || a.date) - new Date(b.deadline || b.date));
-
-    setDeadlines(mappedDeadlines);
+    if (deadlineError) throw new Error(deadlineError.message || "Failed to load review deadlines.");
+    setDeadlines(normalizeClassDeadlineRows(reviewRows || []));
   }, []);
 
   // Load data
@@ -393,15 +424,21 @@ export default function StudentDashboard() {
       if (!resolvedClassId && p?.id) {
         const { data: profileRow, error: profileError } = await supabase
           .from("profiles")
-          .select("class_id")
+          .select("class_id, class_section, batch")
           .eq("id", p.id)
           .single();
         if (!profileError) {
           resolvedClassId = profileRow?.class_id || "";
+          if (!resolvedClassId) {
+            resolvedClassId = await resolveClassIdFromContext({
+              profile: profileRow || p,
+              project: proj,
+            });
+          }
         }
       }
-      if (!resolvedClassId && proj?.class_id) {
-        resolvedClassId = proj.class_id;
+      if (!resolvedClassId) {
+        resolvedClassId = await resolveClassIdFromContext({ profile: p, project: proj });
       }
       setStudentClassId(resolvedClassId);
       await loadClassDeadlines(resolvedClassId);
