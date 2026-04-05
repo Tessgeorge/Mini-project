@@ -59,6 +59,11 @@ const EMPTY_ASSISTANT_META = {
   follow_up_questions: [],
 };
 
+const ASSISTANT_MODES = {
+  IDEA_REFINEMENT: "idea_refinement",
+  IMPLEMENTATION_PLANNING: "implementation_planning",
+};
+
 function toTechString(value) {
   if (!Array.isArray(value)) return "";
   return value.join(", ");
@@ -435,6 +440,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
   const [assistantError, setAssistantError] = useState("");
   const [assistantDraft, setAssistantDraft] = useState(null);
   const [assistantMeta, setAssistantMeta] = useState(EMPTY_ASSISTANT_META);
+  const [assistantMode, setAssistantMode] = useState(ASSISTANT_MODES.IDEA_REFINEMENT);
   const [assistantWidgetState, setAssistantWidgetState] = useState(COPILOT_STATES.CLOSED);
   const [assistantExpanded, setAssistantExpanded] = useState(false);
   const [assistantSidebarHidden, setAssistantSidebarHidden] = useState(false);
@@ -477,6 +483,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     if (selectedIdeaId) return;
     setAssistantDraft(null);
     setAssistantMeta(EMPTY_ASSISTANT_META);
+    setAssistantMode(ASSISTANT_MODES.IDEA_REFINEMENT);
   }, [selectedIdeaId]);
 
   const selectedIdea = useMemo(
@@ -677,6 +684,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
       setMessages([]);
       setAssistantDraft(null);
       setAssistantMeta(EMPTY_ASSISTANT_META);
+      setAssistantMode(ASSISTANT_MODES.IDEA_REFINEMENT);
       setAssistantInput("");
       clearAssistantAttachment();
     } catch (chatError) {
@@ -790,6 +798,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
           ? response.follow_up_questions
           : EMPTY_ASSISTANT_META.follow_up_questions,
       });
+      setAssistantMode(response?.mode || ASSISTANT_MODES.IDEA_REFINEMENT);
       if (response?.chat) {
         setChats((current) => {
           const normalizedChat = {
@@ -935,10 +944,19 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
         return [{
           ...nextChat,
           title: response.title || nextChat.title || null,
-          latest_draft: normalizeAssistantDraftPayload(nextChat?.latest_draft || response?.draft_patch),
+          latest_draft: normalizeAssistantDraftPayload(
+            response?.mode === ASSISTANT_MODES.IMPLEMENTATION_PLANNING
+              ? nextChat?.latest_draft
+              : (nextChat?.latest_draft || response?.draft_patch)
+          ),
         }, ...withoutActive];
       });
-      setAssistantDraft(normalizeAssistantDraftPayload(response.draft_patch));
+      setAssistantMode(response?.mode || ASSISTANT_MODES.IDEA_REFINEMENT);
+      setAssistantDraft(
+        response?.mode === ASSISTANT_MODES.IMPLEMENTATION_PLANNING
+          ? null
+          : normalizeAssistantDraftPayload(response.draft_patch)
+      );
       setAssistantMeta({
         readiness: response?.readiness || EMPTY_ASSISTANT_META.readiness,
         follow_up_questions: Array.isArray(response?.follow_up_questions)
@@ -1023,10 +1041,19 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
         return [{
           ...nextChat,
           title: response.title || nextChat.title || null,
-          latest_draft: normalizeAssistantDraftPayload(nextChat?.latest_draft || response?.draft_patch),
+          latest_draft: normalizeAssistantDraftPayload(
+            response?.mode === ASSISTANT_MODES.IMPLEMENTATION_PLANNING
+              ? nextChat?.latest_draft
+              : (nextChat?.latest_draft || response?.draft_patch)
+          ),
         }, ...withoutActive];
       });
-      setAssistantDraft(normalizeAssistantDraftPayload(response.draft_patch));
+      setAssistantMode(response?.mode || ASSISTANT_MODES.IDEA_REFINEMENT);
+      setAssistantDraft(
+        response?.mode === ASSISTANT_MODES.IMPLEMENTATION_PLANNING
+          ? null
+          : normalizeAssistantDraftPayload(response.draft_patch)
+      );
       setAssistantMeta({
         readiness: response?.readiness || EMPTY_ASSISTANT_META.readiness,
         follow_up_questions: Array.isArray(response?.follow_up_questions)
@@ -1129,6 +1156,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     [visibleAssistantMessages]
   );
   const draftPreviewAnchorMessageId = useMemo(() => {
+    if (assistantMode === ASSISTANT_MODES.IMPLEMENTATION_PLANNING) return "";
     if (!messages.length || !hasMeaningfulAssistantDraft(assistantDraft)) return "";
 
     const hasExplicitDraftRequest = messages.some(
@@ -1144,7 +1172,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
     if (!shouldRevealDraft) return "";
 
     return latestAssistantMessage?.id || "";
-  }, [assistantDraft, assistantMeta.readiness, messages]);
+  }, [assistantDraft, assistantMeta.readiness, assistantMode, messages]);
 
   const floatingAssistantButton = typeof document !== "undefined" && assistantWidgetState === COPILOT_STATES.CLOSED
     ? createPortal(
@@ -1414,7 +1442,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                       return (
                         <div key={entry.id} className="space-y-3">
                           <div
-                            className={`flex gap-3 transition-opacity duration-200 ${isAssistant ? "justify-start" : "justify-end"}`}
+                            className={`group/message flex gap-3 transition-opacity duration-200 ${isAssistant ? "justify-start" : "justify-end"}`}
                           >
                             {isAssistant ? <CopilotAvatar role="assistant" /> : null}
                             <div className={`max-w-[84%] ${isAssistant ? "" : "order-first"}`}>
@@ -1426,17 +1454,6 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                                 }`}
                                 style={isAssistant ? undefined : { backgroundColor: "rgba(0,210,196,0.18)" }}
                               >
-                                {canEditMessage ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => startEditingAssistantMessage(entry)}
-                                    className={`absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/70 bg-white/85 text-slate-500 shadow-sm transition duration-200 hover:border-slate-200 hover:text-slate-700 ${isEditingMessage ? "opacity-0 pointer-events-none" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}`}
-                                    aria-label="Edit message"
-                                  >
-                                    <span className="material-symbols-outlined text-[15px]">edit</span>
-                                  </button>
-                                ) : null}
-
                                 {isEditingMessage ? (
                                   <div className="space-y-3">
                                     <textarea
@@ -1465,7 +1482,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                                     </div>
                                   </div>
                                 ) : (
-                                  <p className={`whitespace-pre-wrap ${canEditMessage ? "pr-8" : ""}`}>{entry.content}</p>
+                                  <p className="whitespace-pre-wrap">{entry.content}</p>
                                 )}
                                 {Array.isArray(entry.attachments) && entry.attachments.length > 0 ? (
                                   <div className="space-y-2">
@@ -1480,7 +1497,7 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
 
                                 {showContextualApply ? (
                                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                                    {assistantMeta.readiness === "ready_to_apply" ? (
+                                    {assistantMode !== ASSISTANT_MODES.IMPLEMENTATION_PLANNING && assistantMeta.readiness === "ready_to_apply" ? (
                                       <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
                                         <span className="material-symbols-outlined text-[14px]">task_alt</span>
                                         Ready to apply
@@ -1489,9 +1506,20 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                                   </div>
                                 ) : null}
                               </div>
-                              <p className={`mt-1 px-1 text-[11px] text-slate-400 ${isAssistant ? "text-left" : "text-right"}`}>
-                                {formatMessageTime(entry.created_at)}
-                              </p>
+                              <div className={`mt-1 flex items-center gap-2 px-1 text-[11px] text-slate-400 ${isAssistant ? "justify-start" : "justify-end"}`}>
+                                {canEditMessage && !isEditingMessage ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => startEditingAssistantMessage(entry)}
+                                    className="inline-flex items-center gap-1 rounded-full border border-transparent px-2 py-1 text-[11px] font-semibold text-slate-500 opacity-0 transition duration-200 group-hover/message:opacity-100 group-focus-within/message:opacity-100 hover:border-slate-200 hover:bg-white/80 hover:text-slate-700"
+                                    aria-label="Edit message"
+                                  >
+                                    <span className="material-symbols-outlined text-[14px]">edit</span>
+                                    Edit
+                                  </button>
+                                ) : null}
+                                <span>{formatMessageTime(entry.created_at)}</span>
+                              </div>
                             </div>
                             {!isAssistant ? <CopilotAvatar role="user" /> : null}
                           </div>

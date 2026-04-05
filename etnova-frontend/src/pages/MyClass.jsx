@@ -503,30 +503,35 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
 
   return (
     <div className="space-y-5">
-
-      {/* Class identity header */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-6 py-5">
-        <h2 className="text-xl font-extrabold text-slate-900 leading-tight">
-          My Class — {classTitle}
-        </h2>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5">
-          <span className="text-sm text-slate-500 flex items-center gap-1.5">
-            <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
-            {totalProjects} teams
-          </span>
-          <span className="text-slate-300 text-sm">·</span>
-          <span className="text-sm text-slate-500">
-            {totalStudents} students
-          </span>
-          {coordinators.length > 0 && (
-            <>
-              <span className="text-slate-300 text-sm">·</span>
+        <div className="flex items-center gap-4">
+          <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 text-white" style={{ backgroundColor: "#00D2C4" }}>
+            <span className="material-symbols-outlined text-2xl">groups</span>
+          </div>
+          <div>
+            <h2 className="text-xl font-extrabold text-slate-900 leading-tight">
+              My Class — {classTitle}
+            </h2>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5">
               <span className="text-sm text-slate-500 flex items-center gap-1.5">
-                <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
-                {coordinators.map(c => c.full_name).join(" · ")}
+                <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+                {totalProjects} teams
               </span>
-            </>
-          )}
+              <span className="text-slate-300 text-sm">·</span>
+              <span className="text-sm text-slate-500">
+                {totalStudents} students
+              </span>
+              {coordinators.length > 0 && (
+                <>
+                  <span className="text-slate-300 text-sm">·</span>
+                  <span className="text-sm text-slate-500 flex items-center gap-1.5">
+                    <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+                    {coordinators.map(c => c.full_name).join(" · ")}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2449,46 +2454,30 @@ export default function MyClass({ classData, loading, onSaveStudentDeadline, onS
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
-      {classId && (
-        <div className="flex flex-col gap-6">
-          {/* Page Identity Header */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ backgroundColor: "#00D2C4" }}>
-              <span className="material-symbols-outlined text-white text-[20px]">school</span>
-            </div>
-            <div>
-              <h2 className="text-[17px] font-black text-slate-900 leading-tight">My Class</h2>
-              <p className="text-xs font-semibold text-slate-500">{classTitle}</p>
-            </div>
-          </div>
-
-          {/* Class detail card */}
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-6 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {classData?.classId && activeSubPage !== "overview" && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-6 py-5">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 text-white"
-                style={{ backgroundColor: "#00D2C4" }}>
+              <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 text-white" style={{ backgroundColor: "#00D2C4" }}>
                 <span className="material-symbols-outlined text-2xl">groups</span>
               </div>
               <div>
-                <h2 className="text-xl font-black text-slate-900">{classTitle}</h2>
-                <div className="flex items-center gap-1.5 mt-1">
-                  <span className="text-xs font-bold text-slate-400 font-mono tracking-wider">{`CL-${String(classId).slice(0, 8).toUpperCase()}`}</span>
-                  {coordinators.length > 0 && <span className="text-xs text-slate-500 ml-1">Coordinator: {coordinators.map(c => c.full_name).join(" - ")}</span>}
-                </div>
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">My Class</p>
+                <h2 className="text-xl font-extrabold text-slate-900 leading-tight">{classTitle}</h2>
+                {coordinators.length > 0 && (
+                  <p className="text-sm text-slate-500 mt-1">Coordinator: {coordinators.map(c => c.full_name).join(" · ")}</p>
+                )}
               </div>
             </div>
-            <div className="flex items-center gap-3 flex-wrap">
-
-              <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full">
-                {liveEvaluatedTeams} / {liveTotalTeams} Evaluated
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">
+                {liveEvaluatedTeams}/{liveTotalTeams} Evaluated
               </span>
-              <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full">
+              <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">
                 {liveTotalStudents} Students
               </span>
             </div>
           </div>
-
         </div>
       )}
       {/* Content — sub-page is controlled by sidebar */}

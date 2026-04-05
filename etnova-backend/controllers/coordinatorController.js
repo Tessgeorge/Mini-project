@@ -520,6 +520,8 @@ export const setTeamFormationLock = async (req, res) => {
         }, { onConflict: 'class_id,stage' });
 
       if (error) throw error;
+
+      await notifyAdminsAboutTeamFormationLock(coord);
     } else {
       const { error } = await supabase
         .from('class_submission_deadlines')
@@ -535,6 +537,33 @@ export const setTeamFormationLock = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+async function notifyAdminsAboutTeamFormationLock(coord) {
+  if (!coord?.class_id) return;
+
+  const [{ data: adminRows, error: adminError }, { data: classRow, error: classError }] = await Promise.all([
+    supabase.from('profiles').select('id').eq('role', 'admin'),
+    supabase.from('classes').select('class_section').eq('id', coord.class_id).maybeSingle(),
+  ]);
+
+  if (adminError || !Array.isArray(adminRows) || adminRows.length === 0) return;
+  const classLabel = classRow?.class_section || 'your class';
+  const senderName = coord?.full_name || 'A coordinator';
+
+  const notifications = adminRows.map((admin) => ({
+    user_id: admin.id,
+    type: 'team_formation_locked',
+    title: 'Team Formation Locked',
+    message: `${senderName} locked team formation for ${classLabel}.`,
+    read: false,
+    created_at: new Date().toISOString(),
+  }));
+
+  const { error: notificationError } = await supabase.from('notifications').insert(notifications);
+  if (notificationError) {
+    console.error('Failed to create admin notification for team formation lock:', notificationError.message || notificationError);
+  }
+}
 
 // ─── 6. GET /coordinator/deadlines ──────────────────────────────────────────
 export const getDeadlines = async (req, res) => {
@@ -760,6 +789,29 @@ export const publishCoordinatorResults = async (req, res) => {
       classId: coord.class_id,
       publishType: type
     });
+
+    if (type === 'admin' && result?.updatedCount > 0) {
+      const { data: adminRows, error: adminError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('role', 'admin');
+
+      if (!adminError && Array.isArray(adminRows) && adminRows.length > 0) {
+        const notifications = adminRows.map((admin) => ({
+          user_id: admin.id,
+          type: 'results_sent_to_admin',
+          title: 'Results Awaiting Final Approval',
+          message: `${coord?.full_name || 'A coordinator'} has sent results to admin for final publishing.`,
+          read: false,
+          created_at: new Date().toISOString(),
+        }));
+
+        const { error: notificationError } = await supabase.from('notifications').insert(notifications);
+        if (notificationError) {
+          console.error('Failed to create admin notifications for results sent to admin:', notificationError.message || notificationError);
+        }
+      }
+    }
 
     res.json(result);
   } catch (error) {
