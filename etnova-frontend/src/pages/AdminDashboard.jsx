@@ -59,7 +59,7 @@ function normalizeStageStatus(row) {
 }
 
 function formatStageLabel(stageName) {
-  if (stageName === "Zeroth Review") return "0th Review";
+  if (stageName === "Zeroth Review") return "Zeroth Review";
   if (stageName === "First Review") return "1st Review";
   if (stageName === "Second Review") return "2nd Review";
   if (stageName === "Final Review") return "Final";

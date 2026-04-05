@@ -1343,10 +1343,10 @@ export const getCoordinatorFinalResults = async (classId, options = {}) => {
   }
 
   const [{ data: projects, error: projectError }, { data: classProfiles, error: classProfileError }] = await Promise.all([
-    projectQuery,
+   projectQuery,
     supabase
       .from('profiles')
-      .select('id, full_name, roll_number')
+      .select('id, full_name, email, roll_number')
       .eq('role', 'student')
       .eq('class_id', classId),
   ]);
@@ -1387,7 +1387,7 @@ export const getCoordinatorFinalResults = async (classId, options = {}) => {
   if (!resolvedProfiles) {
     const { data, error: profileError } = await supabase
       .from('profiles')
-      .select('id, full_name, roll_number')
+      .select('id, full_name, email, roll_number')
       .in('id', uniqueStudentIds);
 
     if (profileError) throw profileError;
@@ -1421,6 +1421,7 @@ export const getCoordinatorFinalResults = async (classId, options = {}) => {
     return {
       student_id: studentId,
       full_name: profile.full_name || null,
+      email: profile.email || null,
       roll_number: profile.roll_number || null,
       project_id: studentProjectMap.get(studentId) || null,
       project_title: projectTitleMap.get(studentProjectMap.get(studentId)) || null,
