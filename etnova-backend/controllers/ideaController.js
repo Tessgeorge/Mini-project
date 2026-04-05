@@ -166,6 +166,20 @@ const IDEA_ASSISTANT_CHAT_SCHEMA = {
   required: ['message', 'draft_patch', 'readiness', 'follow_up_questions'],
 };
 
+const IDEA_ASSISTANT_PLANNING_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    message: { type: 'string' },
+    readiness: { type: 'string', enum: ['exploring', 'ready_to_apply'] },
+    follow_up_questions: {
+      type: 'array',
+      items: { type: 'string' },
+    },
+  },
+  required: ['message', 'readiness', 'follow_up_questions'],
+};
+
 const GEMINI_IDEA_ASSISTANT_CHAT_SCHEMA = {
   type: 'OBJECT',
   properties: {
@@ -201,6 +215,23 @@ const GEMINI_IDEA_ASSISTANT_CHAT_SCHEMA = {
   },
   required: ['message', 'draft_patch', 'readiness', 'follow_up_questions'],
   propertyOrdering: ['message', 'draft_patch', 'readiness', 'follow_up_questions'],
+};
+
+const GEMINI_IDEA_ASSISTANT_PLANNING_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    message: { type: 'STRING' },
+    readiness: {
+      type: 'STRING',
+      enum: ['exploring', 'ready_to_apply'],
+    },
+    follow_up_questions: {
+      type: 'ARRAY',
+      items: { type: 'STRING' },
+    },
+  },
+  required: ['message', 'readiness', 'follow_up_questions'],
+  propertyOrdering: ['message', 'readiness', 'follow_up_questions'],
 };
 
 function keepTitleWithinWordLimit(value, maxWords = 6) {
@@ -1068,6 +1099,59 @@ function buildIdeaAssistantChatSystemPrompt() {
   ].join(' ');
 }
 
+function buildIdeaAssistantPlanningSystemPrompt() {
+  return [
+    'You are an AI implementation planning mentor inside ETNOVA.',
+    'The student already has an approved idea and now needs practical execution guidance.',
+    'Help break the approved idea into implementation phases, modules, milestones, and next steps through natural conversation.',
+    'Behave like a thoughtful technical mentor, not a draft-writing assistant.',
+    'Answer directly, clearly, and practically.',
+    'When the user asks for a plan, roadmap, module breakdown, architecture, or step-by-step implementation, provide a concrete answer instead of redirecting with generic brainstorming questions.',
+    'Prefer structured responses with short numbered steps or clearly named modules when that helps clarity.',
+    'Include practical sequencing such as MVP-first build order, dependencies between modules, and what to implement first, second, and third.',
+    'For module-wise answers, name the modules explicitly and explain each module in one or two concise lines.',
+    'For step-by-step answers, give an execution order that a student team can realistically follow.',
+    'Keep the response focused on implementation, not idea rewriting.',
+    'Do not rewrite the approved idea into a new draft unless the user explicitly asks to revise the idea itself.',
+    'Do not mention apply actions or draft approval language.',
+    'Do not use markdown formatting like **bold**, bullet markdown markers, or headings with #.',
+    'Avoid ending every answer with multiple generic reflective questions.',
+    'Only ask follow-up questions if they are genuinely necessary; otherwise end with one concrete optional next step you can help with.',
+    'When you offer a next step, keep it singular and practical.',
+    'Always return valid JSON with message, readiness, and follow_up_questions.',
+    'The message must sound like a natural mentor reply.',
+    'Use readiness=ready_to_apply only when the plan is concrete and actionable; otherwise use exploring.',
+  ].join(' ');
+}
+
+function detectIdeaAssistantMode({ project, message, ideaContext }) {
+  const approvedIdeaExists = Boolean(ideaContext?.approvedIdea?.id || project?.approved_idea_id);
+  const normalizedMessage = String(message || '').trim().toLowerCase();
+  if (!approvedIdeaExists || !normalizedMessage) return 'idea_refinement';
+
+  const planningSignals = [
+    'plan',
+    'implementation',
+    'implement',
+    'step by step',
+    'roadmap',
+    'execution',
+    'module',
+    'milestone',
+    'architecture',
+    'how to build',
+    'how do i build',
+    'what should i build',
+    'mvp',
+    'phase',
+    'timeline',
+  ];
+
+  return planningSignals.some((signal) => normalizedMessage.includes(signal))
+    ? 'implementation_planning'
+    : 'idea_refinement';
+}
+
 function parseAssistantResponseText(responseJson) {
   if (typeof responseJson?.output_text === 'string' && responseJson.output_text.trim()) {
     return responseJson.output_text.trim();
@@ -1119,7 +1203,7 @@ function parseJsonChatResponse(parsedText, project) {
 
   const normalizedDraft = normalizeAssistantDraftPatch(parsedResponse?.draft_patch, project);
   return {
-    message: normalizeTextField(parsedResponse.message, { required: true, maxLength: 3000 })
+    message: normalizeTextField(parsedResponse.message, { required: true, maxLength: 6000 })
       || 'I refined the idea based on your latest message.',
     draft_patch: normalizedDraft,
     readiness:
@@ -1128,6 +1212,34 @@ function parseJsonChatResponse(parsedText, project) {
         : 'exploring',
     follow_up_questions: Array.isArray(parsedResponse.follow_up_questions)
       ? parsedResponse.follow_up_questions.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 3)
+      : [],
+  };
+}
+
+function parseJsonPlanningResponse(parsedText) {
+  let parsedResponse;
+  try {
+    parsedResponse = JSON.parse(parsedText);
+  } catch {
+    throw new Error('AI assistant planning response could not be parsed.');
+  }
+
+  const sanitizedMessage = String(parsedResponse.message || '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .trim();
+
+  return {
+    message: normalizeTextField(sanitizedMessage, { required: true, maxLength: 6000 })
+      || 'Here is a practical implementation plan for the approved idea.',
+    draft_patch: null,
+    readiness:
+      String(parsedResponse.readiness || '').toLowerCase() === 'ready_to_apply'
+        ? 'ready_to_apply'
+        : 'exploring',
+    follow_up_questions: Array.isArray(parsedResponse.follow_up_questions)
+      ? parsedResponse.follow_up_questions.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 1)
       : [],
   };
 }
@@ -1532,7 +1644,7 @@ async function generateIdeaAssistantDraftWithGemini({ project, prompt, imageData
   };
 }
 
-async function generateIdeaAssistantChatWithOpenAI({ project, messages, currentDraft, ideaContext }) {
+async function generateIdeaAssistantChatWithOpenAI({ project, messages, currentDraft, ideaContext, mode = 'idea_refinement' }) {
   if (!process.env.OPENAI_API_KEY) {
     const error = new Error('OPENAI_API_KEY is not configured on the backend.');
     error.statusCode = 503;
@@ -1566,7 +1678,12 @@ async function generateIdeaAssistantChatWithOpenAI({ project, messages, currentD
       input: [
         {
           role: 'system',
-          content: [{ type: 'input_text', text: buildIdeaAssistantChatSystemPrompt() }],
+          content: [{
+            type: 'input_text',
+            text: mode === 'implementation_planning'
+              ? buildIdeaAssistantPlanningSystemPrompt()
+              : buildIdeaAssistantChatSystemPrompt(),
+          }],
         },
         {
           role: 'user',
@@ -1578,7 +1695,9 @@ async function generateIdeaAssistantChatWithOpenAI({ project, messages, currentD
           type: 'json_schema',
           name: 'idea_workspace_chat',
           strict: true,
-          schema: IDEA_ASSISTANT_CHAT_SCHEMA,
+          schema: mode === 'implementation_planning'
+            ? IDEA_ASSISTANT_PLANNING_SCHEMA
+            : IDEA_ASSISTANT_CHAT_SCHEMA,
         },
       },
     }),
@@ -1599,11 +1718,13 @@ async function generateIdeaAssistantChatWithOpenAI({ project, messages, currentD
   return {
     provider: 'openai',
     model: OPENAI_IDEA_MODEL,
-    ...parseJsonChatResponse(parsedText, project),
+    ...(mode === 'implementation_planning'
+      ? parseJsonPlanningResponse(parsedText)
+      : parseJsonChatResponse(parsedText, project)),
   };
 }
 
-async function generateIdeaAssistantChatWithOllama({ project, messages, currentDraft, ideaContext }) {
+async function generateIdeaAssistantChatWithOllama({ project, messages, currentDraft, ideaContext, mode = 'idea_refinement' }) {
   const message = {
     role: 'user',
     content: buildIdeaAssistantConversationText({ project, currentDraft, messages, ideaContext }),
@@ -1626,14 +1747,18 @@ async function generateIdeaAssistantChatWithOllama({ project, messages, currentD
       body: JSON.stringify({
         model: OLLAMA_IDEA_MODEL,
         stream: false,
-        format: IDEA_ASSISTANT_CHAT_SCHEMA,
+        format: mode === 'implementation_planning'
+          ? IDEA_ASSISTANT_PLANNING_SCHEMA
+          : IDEA_ASSISTANT_CHAT_SCHEMA,
         options: {
           temperature: 0.3,
         },
         messages: [
           {
             role: 'system',
-            content: buildIdeaAssistantChatSystemPrompt(),
+            content: mode === 'implementation_planning'
+              ? buildIdeaAssistantPlanningSystemPrompt()
+              : buildIdeaAssistantChatSystemPrompt(),
           },
           message,
         ],
@@ -1662,11 +1787,13 @@ async function generateIdeaAssistantChatWithOllama({ project, messages, currentD
   return {
     provider: 'ollama',
     model: OLLAMA_IDEA_MODEL,
-    ...parseJsonChatResponse(parsedText, project),
+    ...(mode === 'implementation_planning'
+      ? parseJsonPlanningResponse(parsedText)
+      : parseJsonChatResponse(parsedText, project)),
   };
 }
 
-async function generateIdeaAssistantChatWithGemini({ project, messages, currentDraft, ideaContext }) {
+async function generateIdeaAssistantChatWithGemini({ project, messages, currentDraft, ideaContext, mode = 'idea_refinement' }) {
   if (!GOOGLE_API_KEY) {
     const error = new Error('GOOGLE_API_KEY is not configured on the backend.');
     error.statusCode = 503;
@@ -1700,7 +1827,11 @@ async function generateIdeaAssistantChatWithGemini({ project, messages, currentD
       },
       body: JSON.stringify({
         systemInstruction: {
-          parts: [{ text: buildIdeaAssistantChatSystemPrompt() }],
+          parts: [{
+            text: mode === 'implementation_planning'
+              ? buildIdeaAssistantPlanningSystemPrompt()
+              : buildIdeaAssistantChatSystemPrompt(),
+          }],
         },
         contents: [
           {
@@ -1711,7 +1842,9 @@ async function generateIdeaAssistantChatWithGemini({ project, messages, currentD
         generationConfig: {
           temperature: 0.3,
           responseMimeType: 'application/json',
-          responseSchema: GEMINI_IDEA_ASSISTANT_CHAT_SCHEMA,
+          responseSchema: mode === 'implementation_planning'
+            ? GEMINI_IDEA_ASSISTANT_PLANNING_SCHEMA
+            : GEMINI_IDEA_ASSISTANT_CHAT_SCHEMA,
         },
       }),
     }
@@ -1739,7 +1872,9 @@ async function generateIdeaAssistantChatWithGemini({ project, messages, currentD
   return {
     provider: 'gemini',
     model: GEMINI_IDEA_MODEL,
-    ...parseJsonChatResponse(parsedText, project),
+    ...(mode === 'implementation_planning'
+      ? parseJsonPlanningResponse(parsedText)
+      : parseJsonChatResponse(parsedText, project)),
   };
 }
 
@@ -1755,16 +1890,16 @@ async function generateIdeaAssistantDraft({ project, prompt, imageDataUrl, curre
   return generateIdeaAssistantDraftWithOpenAI({ project, prompt, imageDataUrl, currentDraft, ideaContext });
 }
 
-async function generateIdeaAssistantChat({ project, messages, currentDraft, ideaContext }) {
+async function generateIdeaAssistantChat({ project, messages, currentDraft, ideaContext, mode = 'idea_refinement' }) {
   if (IDEA_ASSISTANT_PROVIDER === 'gemini') {
-    return generateIdeaAssistantChatWithGemini({ project, messages, currentDraft, ideaContext });
+    return generateIdeaAssistantChatWithGemini({ project, messages, currentDraft, ideaContext, mode });
   }
 
   if (IDEA_ASSISTANT_PROVIDER === 'ollama') {
-    return generateIdeaAssistantChatWithOllama({ project, messages, currentDraft, ideaContext });
+    return generateIdeaAssistantChatWithOllama({ project, messages, currentDraft, ideaContext, mode });
   }
 
-  return generateIdeaAssistantChatWithOpenAI({ project, messages, currentDraft, ideaContext });
+  return generateIdeaAssistantChatWithOpenAI({ project, messages, currentDraft, ideaContext, mode });
 }
 
 export const getProjectIdeaChats = async (req, res) => {
@@ -1868,12 +2003,14 @@ export const sendProjectIdeaChatMessage = async (req, res) => {
     ];
 
     const currentDraft = buildProjectIdeaChatDraft(chat, project, ideaContext, requestCurrentDraft);
+    const mode = detectIdeaAssistantMode({ project, message, ideaContext });
 
     const assistantReply = await generateIdeaAssistantChat({
       project,
       messages: nextMessages,
       currentDraft,
       ideaContext,
+      mode,
     });
 
     const savedUserMessage = await createProjectIdeaChatMessage(
@@ -1894,7 +2031,7 @@ export const sendProjectIdeaChatMessage = async (req, res) => {
       || 'New Idea Chat';
     const updatedChat = await updateProjectIdeaChatSession(chat.id, {
       title: nextTitle,
-      latest_draft: assistantReply.draft_patch,
+      latest_draft: mode === 'implementation_planning' ? (chat.latest_draft || null) : assistantReply.draft_patch,
     });
 
     res.json({
@@ -1904,6 +2041,7 @@ export const sendProjectIdeaChatMessage = async (req, res) => {
       reply: assistantReply.message,
       draft_patch: assistantReply.draft_patch,
       title: updatedChat.title || null,
+      mode,
       readiness: assistantReply.readiness,
       follow_up_questions: assistantReply.follow_up_questions,
       provider: assistantReply.provider,
@@ -1972,12 +2110,14 @@ export const editProjectIdeaChatMessage = async (req, res) => {
 
     const ideaContext = await getProjectIdeaContext(project);
     const currentDraft = buildProjectIdeaChatDraft(chat, project, ideaContext, requestCurrentDraft);
+    const mode = detectIdeaAssistantMode({ project, message, ideaContext });
 
     const assistantReply = await generateIdeaAssistantChat({
       project,
       messages: normalizedPersistedMessages,
       currentDraft,
       ideaContext,
+      mode,
     });
 
     const savedAssistantMessage = await createProjectIdeaChatMessage(
@@ -1992,7 +2132,7 @@ export const editProjectIdeaChatMessage = async (req, res) => {
       || 'New Idea Chat';
     const updatedChat = await updateProjectIdeaChatSession(chat.id, {
       title: nextTitle,
-      latest_draft: assistantReply.draft_patch,
+      latest_draft: mode === 'implementation_planning' ? (chat.latest_draft || null) : assistantReply.draft_patch,
     });
 
     res.json({
@@ -2001,6 +2141,7 @@ export const editProjectIdeaChatMessage = async (req, res) => {
       assistant_message: savedAssistantMessage,
       draft_patch: assistantReply.draft_patch,
       title: updatedChat.title || null,
+      mode,
       readiness: assistantReply.readiness,
       follow_up_questions: assistantReply.follow_up_questions,
       provider: assistantReply.provider,
