@@ -1417,8 +1417,9 @@ function TeamsTab({ projects, evaluations, loading, mentorId, mentorName, onNavi
 }
 
 // ─── EVALUATION TAB (ENHANCED) ──────────────────────────────────────────────
-function EvaluationTab({ projects, loading, allowedReviewStages = [], writableReviewStages = [] }) {
+function EvaluationTab({ projects, loading, allowedReviewStages = [], writableReviewStages = [], reviewerAccessByClass = {} }) {
   const [selectedProjectId, setSelectedProjectId] = useState(() => getStoredMentorSelectedReviewProjectId());
+  const [selectedClassId, setSelectedClassId] = useState(null);
   const [search, setSearch] = useState("");
   const [batchFilter, setBatchFilter] = useState("all");
   const selectedProject = projects.find((project) => project.id === selectedProjectId) || null;
@@ -1441,16 +1442,43 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
     }
   }, [persistedReviewProjectId]);
 
-  const className = projects.length > 0
-    ? (projects[0].class_name || projects[0].classes?.class_section || "Assigned Class")
-    : "Assigned Class";
+  const getProjectClassName = (project) => project?.class_name || project?.classes?.class_section || "Assigned Class";
+  const projectGroups = projects.reduce((acc, project) => {
+    const classId = project?.class_id != null ? String(project.class_id) : getProjectClassName(project);
+    if (!acc[classId]) {
+      acc[classId] = {
+        classId,
+        className: getProjectClassName(project),
+        projects: [],
+      };
+    }
+    acc[classId].projects.push(project);
+    return acc;
+  }, {});
+  const groupedClasses = Object.values(projectGroups);
+  const groupedClassIds = Object.keys(projectGroups);
+
+  useEffect(() => {
+    if (groupedClassIds.length === 0) {
+      setSelectedClassId(null);
+      return;
+    }
+    if (!selectedClassId || !groupedClassIds.includes(selectedClassId)) {
+      setSelectedClassId(groupedClassIds[0]);
+    }
+  }, [groupedClassIds.join(","), selectedClassId]);
+
+  const selectedClassGroup = groupedClasses.find((group) => group.classId === selectedClassId) || groupedClasses[0] || null;
+  const className = selectedClassGroup?.className || "Assigned Class";
+  const classAllowedReviewStages = reviewerAccessByClass[selectedClassGroup?.classId]?.allowedStages || [];
+  const classWritableReviewStages = reviewerAccessByClass[selectedClassGroup?.classId]?.writableStages || [];
 
   const batchOptions = ["all"];
-  const batchNums = [...new Set(projects.map(p => p.batch).filter(b => b != null))].sort();
+  const batchNums = [...new Set((selectedClassGroup?.projects || []).map(p => p.batch).filter(b => b != null))].sort();
   batchNums.forEach(b => batchOptions.push(String(b)));
-  if (projects.some(p => p.batch == null)) batchOptions.push("unassigned");
+  if ((selectedClassGroup?.projects || []).some(p => p.batch == null)) batchOptions.push("unassigned");
 
-  const filtered = projects.filter(project => {
+  const filtered = (selectedClassGroup?.projects || []).filter(project => {
     const name = getProjectDisplayName(project).toLowerCase();
     const members = (project.team_members || []).map(m => m.profiles?.full_name || "").join(" ").toLowerCase();
     const matchSearch = !search.trim() || name.includes(search.toLowerCase()) || members.includes(search.toLowerCase());
@@ -1467,8 +1495,8 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
   };
   const getBatchColor = (key) => batchColors[key] || batchColors["Batch 2"];
 
-  const openStageLabel = writableReviewStages.length > 0
-    ? REVIEW_ROUND_OPTIONS.find(o => o.value === writableReviewStages[0])?.label || writableReviewStages[0]
+  const openStageLabel = classWritableReviewStages.length > 0
+    ? REVIEW_ROUND_OPTIONS.find(o => o.value === classWritableReviewStages[0])?.label || classWritableReviewStages[0]
     : null;
 
   if (loading) return <Spinner />;
@@ -1562,7 +1590,7 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
             <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-1">Review Evaluation</p>
             <h2 className="text-2xl font-extrabold text-gray-900">Assigned Teams</h2>
             <p className="text-sm text-gray-500 mt-1 max-w-2xl">
-              Teams from the assigned class appear below, grouped by batch. Click a team to enter rubric-wise marks.
+              Teams for the selected class appear below, grouped by batch. Click a team to enter rubric-wise marks.
             </p>
           </div>
           {openStageLabel ? (
@@ -1577,6 +1605,25 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
             </div>
           )}
         </div>
+        {groupedClasses.length > 1 && (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {groupedClasses.map((group) => (
+              <button
+                key={group.classId}
+                type="button"
+                onClick={() => setSelectedClassId(group.classId)}
+                className={`px-3 py-2 rounded-full text-xs font-bold border transition ${
+                  selectedClassId === group.classId
+                    ? "bg-teal-500 text-white border-teal-500"
+                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                {group.className}
+                <span className="ml-2 text-[11px] text-slate-400">({group.projects.length})</span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="mt-5 flex flex-wrap gap-3">
           <div className="flex-1 min-w-[200px] relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><Icon.Search /></span>
@@ -1613,7 +1660,7 @@ function EvaluationTab({ projects, loading, allowedReviewStages = [], writableRe
           </span>
           {batchNums.map(b => (
             <span key={b} className="text-sm text-slate-400">
-              Batch {b}: <span className="font-bold text-slate-700">{projects.filter(p => p.batch === b).length}</span>
+              Batch {b}: <span className="font-bold text-slate-700">{(selectedClassGroup?.projects || []).filter(p => p.batch === b).length}</span>
             </span>
           ))}
         </div>
@@ -1708,6 +1755,7 @@ export default function MentorDashboard() {
   const [hasReviewAccess, setHasReviewAccess] = useState(false);
   const [allowedReviewStages, setAllowedReviewStages] = useState([]);
   const [writableReviewStages, setWritableReviewStages] = useState([]);
+  const [reviewerAccessByClass, setReviewerAccessByClass] = useState({});
   const [reviewAccessVersion, setReviewAccessVersion] = useState(0);
   const [evaluations, setEvaluations] = useState([]);
   const [milestones, setMilestones] = useState([]);
@@ -1946,11 +1994,26 @@ export default function MentorDashboard() {
             return acc;
           }, {});
 
+          const reviewerAccessByClass = Object.entries(
+            (reviewerAccessRows || []).reduce((acc, row) => {
+              const classId = row?.class_id != null ? String(row.class_id) : "unknown";
+              if (!acc[classId]) acc[classId] = [];
+              acc[classId].push(row);
+              return acc;
+            }, {})
+          ).reduce((acc, [classId, rows]) => {
+            acc[classId] = resolveReviewerStageVisibility(rows);
+            return acc;
+          }, {});
+          setReviewerAccessByClass(reviewerAccessByClass);
+
           let classIdBySection = new Map();
+          let reviewerClasses = [];
           if (reviewerClassIds.length > 0) {
-            const { data: reviewerClasses, error: reviewerClassesError } = await supabase
+            const { data: fetchedReviewerClasses, error: reviewerClassesError } = await supabase
               .from("classes").select("id, class_section").in("id", reviewerClassIds);
             if (reviewerClassesError) throw reviewerClassesError;
+            reviewerClasses = fetchedReviewerClasses || [];
             classIdBySection = new Map((reviewerClasses || []).map((row) => [normalizeSectionKey(row.class_section), row.id]));
           }
 
@@ -1983,6 +2046,20 @@ export default function MentorDashboard() {
             });
           }
 
+          const classSectionById = new Map((reviewerClasses || []).map((row) => [String(row.id), row.class_section]));
+          const resolveProjectClassName = (project) => {
+            if (project?.class_name) return project.class_name;
+            if (project?.classes?.class_section) return project.classes.class_section;
+            const members = Array.isArray(project?.team_members) ? project.team_members : [];
+            const leader = members.find((member) => member?.role === "leader");
+            const anchor = leader?.profiles || members[0]?.profiles || null;
+            if (anchor?.class_section) return anchor.class_section;
+            if (project?.batch != null) return String(project.batch);
+            if (anchor?.batch != null) return String(anchor.batch);
+            if (project?.class_id != null) return classSectionById.get(String(project.class_id)) || `Class ${project.class_id}`;
+            return "Assigned Class";
+          };
+
           if (reviewerProjectRows.length === 0 && reviewerClassIds.length > 0) {
             const { data: fallbackProjects, error: fallbackProjectsError } = await supabase
               .from("projects")
@@ -2001,9 +2078,14 @@ export default function MentorDashboard() {
               return effectiveBatch != null && allowedBatches.has(String(effectiveBatch));
             }).map((project) => ({
               ...project,
-              class_name: project.classes?.class_section || project.class_name || "Assigned Class",
+              class_name: resolveProjectClassName(project),
             }));
           }
+
+          reviewerProjectRows = reviewerProjectRows.map((project) => ({
+            ...project,
+            class_name: resolveProjectClassName(project),
+          }));
 
           const mergedProjects = [...(guideProjectRows || []), ...reviewerProjectRows].reduce((acc, project) => {
             if (!acc.some((item) => item.id === project.id)) acc.push(project);
@@ -2356,6 +2438,7 @@ export default function MentorDashboard() {
               loading={loading}
               allowedReviewStages={allowedReviewStages}
               writableReviewStages={writableReviewStages}
+              reviewerAccessByClass={reviewerAccessByClass}
             />
           )}
           {["my-class-overview", "my-class-teams", "my-class-submissions", "my-class-reviews", "my-class-marks"].includes(active) && isCoordinatorWithClass && (

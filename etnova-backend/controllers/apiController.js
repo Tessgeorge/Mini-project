@@ -3859,6 +3859,9 @@ export const assignMentor = async (req, res) => {
 
 export const getPendingProjects = async (req, res) => {
   try {
+    const studentClassId = req.userProfile?.class_id || null;
+    const studentClassSection = normalizeClassSectionInput(req.userProfile?.class_section || req.userProfile?.batch || null);
+
     const { data, error } = await supabase
       .from('projects')
       .select(`
@@ -3868,16 +3871,30 @@ export const getPendingProjects = async (req, res) => {
         domain,
         description,
         status,
+        class_id,
         created_at,
         created_by,
-        team_members(student_id),
+        team_members(student_id, role, profiles!team_members_student_id_fkey(class_id, class_section)),
         creator:profiles!projects_created_by_fkey(id, full_name)
       `)
       .not('status', 'in', '(approved,completed)')
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    res.json(data || []);
+
+    const filtered = (data || []).filter((project) => {
+      if (!studentClassId && !studentClassSection) return true;
+
+      const members = Array.isArray(project.team_members) ? project.team_members : [];
+
+      if (studentClassId && project.class_id === studentClassId) return true;
+      if (studentClassId && members.some((member) => member?.profiles?.class_id === studentClassId)) return true;
+      if (studentClassSection && members.some((member) => normalizeClassSectionInput(member?.profiles?.class_section) === studentClassSection)) return true;
+
+      return false;
+    });
+
+    res.json(filtered);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
