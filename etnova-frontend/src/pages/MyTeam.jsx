@@ -757,7 +757,6 @@ export default function MyTeam() {
   );
 
   const teamName = project.title ? `${project.title} Team` : "My Team";
-  const teamId = `TM-${project.id?.slice(0, 8)?.toUpperCase()}`;
 
   return (
     <div className="min-h-full md:min-h-screen etnova-bg">
@@ -805,7 +804,6 @@ export default function MyTeam() {
               <div>
                 <h2 className="text-xl font-black text-slate-900">{teamName}</h2>
                 <div className="flex items-center gap-3 mt-1 flex-wrap">
-                  <span className="text-xs font-bold text-slate-400 font-mono tracking-wider">{teamId}</span>
                   <span className="text-xs text-slate-500">Formed {fmtDate(project.created_at)}</span>
                 </div>
               </div>
@@ -854,8 +852,8 @@ export default function MyTeam() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
+                  <th className="text-left px-4 sm:px-6 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500">Roll No.</th>
                   <th className="text-left px-4 sm:px-6 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500">Name</th>
-                  <th className="text-left px-4 sm:px-6 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500">Register No.</th>
                   <th className="text-left px-4 sm:px-6 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500">Department</th>
                   <th className="text-left px-4 sm:px-6 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500">Role</th>
                   {myRole === "leader" && (
@@ -878,6 +876,9 @@ export default function MyTeam() {
                       return (
                         <tr key={m.id || m.student_id}
                           className={`transition-colors ${isMe ? "bg-[rgba(0,210,196,0.03)]" : "hover:bg-slate-50"}`}>
+                          <td className="px-4 sm:px-6 py-4 text-slate-700 font-mono text-xs">
+                            {m.profiles?.roll_number || "-"}
+                          </td>
                           <td className="px-4 sm:px-6 py-4">
                             <div className="flex items-center gap-3">
                               <Avatar name={m.profiles?.full_name} size={8} />
@@ -890,9 +891,6 @@ export default function MyTeam() {
                                 )}
                               </div>
                             </div>
-                          </td>
-                          <td className="px-4 sm:px-6 py-4 text-slate-700 font-mono text-xs">
-                            {m.profiles?.roll_number || "-"}
                           </td>
                           <td className="px-4 sm:px-6 py-4 text-slate-700 text-sm">
                             {m.profiles?.department || "-"}
@@ -950,7 +948,7 @@ export default function MyTeam() {
                     </div>
                     <div className="grid grid-cols-1 gap-2 pt-1">
                       <InfoRow label="Contact Email" value={leader.profiles?.email} />
-                      <InfoRow label="Register No." value={leader.profiles?.roll_number} />
+                      <InfoRow label="Roll No." value={leader.profiles?.roll_number} />
                       <InfoRow label="Department" value={leader.profiles?.department} />
                       <InfoRow label="Leadership Since" value={fmtDate(leader.joined_at)} />
                     </div>

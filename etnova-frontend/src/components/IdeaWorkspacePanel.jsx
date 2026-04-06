@@ -1789,7 +1789,6 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
             <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-black text-slate-900">Idea Details</p>
-                <p className="text-xs text-slate-500 mt-0.5">Only one approved idea can be active for a team at a time.</p>
                 {workspaceLocked ? (
                   <p className="mt-1 text-xs font-medium text-amber-700">
                     Idea submission is locked after approval. It will reopen only if the approved idea is later rejected during review.
@@ -1965,7 +1964,6 @@ export default function IdeaWorkspacePanel({ project, profile, onRefresh }) {
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-black text-slate-900">Mentor Feedback</p>
-                      <p className="text-xs text-slate-500 mt-0.5">Latest review and comments for this idea.</p>
                     </div>
                   </div>
                   {selectedAutoEvaluation ? (

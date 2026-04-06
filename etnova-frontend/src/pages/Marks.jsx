@@ -292,9 +292,6 @@ export default function Marks() {
             <div className="max-w-3xl">
               <p className="text-xs font-bold uppercase tracking-[0.28em] text-teal-700">Student Marks Center</p>
               <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-900 sm:text-4xl">Marks</h1>
-              <p className="mt-3 text-sm leading-6 text-slate-600 sm:text-base">
-                Review your published marks and academic feedback in one place. Results are shown per student, so only your own marks are visible here.
-              </p>
             </div>
             <div className="rounded-2xl border border-slate-200/80 bg-white/80 px-4 py-3 shadow-sm backdrop-blur">
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">Current Project</p>
