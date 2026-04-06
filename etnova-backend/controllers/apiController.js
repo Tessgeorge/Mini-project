@@ -4038,6 +4038,8 @@ export const assignMentor = async (req, res) => {
 
 export const getPendingProjects = async (req, res) => {
   try {
+    const studentClassId = req.userProfile?.class_id || null;
+    const studentClassSection = normalizeClassSectionInput(req.userProfile?.class_section || req.userProfile?.batch || null);
     const studentScope = await resolveStudentProjectScope(req.userProfile);
     if (!studentScope.class_id && !studentScope.class_section) {
       return res.json([]);
@@ -4052,8 +4054,12 @@ export const getPendingProjects = async (req, res) => {
         domain,
         description,
         status,
+        class_id,
         created_at,
         created_by,
+<<<<<<< HEAD
+        team_members(student_id, role, profiles!team_members_student_id_fkey(class_id, class_section)),
+=======
         class_id,
         team_members(
           id,
@@ -4061,6 +4067,7 @@ export const getPendingProjects = async (req, res) => {
           student_id,
           profiles!team_members_student_id_fkey(class_id, class_section, batch)
         ),
+>>>>>>> main
         creator:profiles!projects_created_by_fkey(id, full_name)
       `)
       .not('status', 'in', '(approved,completed)')
