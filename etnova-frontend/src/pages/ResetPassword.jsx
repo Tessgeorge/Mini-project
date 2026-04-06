@@ -23,12 +23,14 @@ export default function ResetPassword() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [passwordFocused, setPasswordFocused] = useState(false)
   const [ready, setReady] = useState(false)
   const [checking, setChecking] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const passwordChecks = buildPasswordChecks(password)
+  const shouldShowPasswordChecklist = passwordFocused || password.length > 0
 
   useEffect(() => {
     let mounted = true
@@ -159,6 +161,8 @@ export default function ResetPassword() {
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
+                    onFocus={() => setPasswordFocused(true)}
+                    onBlur={() => setPasswordFocused(false)}
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 pr-12 outline-none transition focus:border-teal-400 focus:bg-white"
                     autoComplete="new-password"
                     minLength={8}
@@ -175,20 +179,24 @@ export default function ResetPassword() {
                     </span>
                   </button>
                 </div>
-                <div className="mt-3 space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-                  {passwordChecks.map((rule) => (
-                    <div key={rule.key} className="flex items-center gap-2 text-xs">
-                      <span
-                        className={`material-symbols-outlined text-sm ${rule.met ? 'text-emerald-600' : 'text-slate-400'}`}
-                      >
-                        {rule.met ? 'check_circle' : 'radio_button_unchecked'}
-                      </span>
-                      <span className={rule.met ? 'text-emerald-700 font-medium' : 'text-slate-500'}>
-                        {rule.label}
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                {shouldShowPasswordChecklist ? (
+                  <div className="mt-3 space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                    {passwordChecks.map((rule) => (
+                      <div key={rule.key} className="flex items-center gap-2 text-xs">
+                        <span
+                          className={`material-symbols-outlined text-sm ${rule.met ? 'text-emerald-600' : 'text-slate-400'}`}
+                        >
+                          {rule.met ? 'check_circle' : 'radio_button_unchecked'}
+                        </span>
+                        <span className={rule.met ? 'text-emerald-700 font-medium' : 'text-slate-500'}>
+                          {rule.label}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-slate-500">{PASSWORD_HELPER_TEXT}</p>
+                )}
               </div>
 
               <div>

@@ -1289,6 +1289,32 @@ const isSameProjectScope = (studentScope, projectScope) => {
   return false;
 };
 
+const isJoinClosedByStatus = (status) => {
+  const normalized = String(status || '').trim().toLowerCase();
+  return normalized === 'completed';
+};
+
+const isTeamJoinable = ({ project, teamSize, formationLocked }) => {
+  if (formationLocked) return false;
+  if (Number(teamSize || 0) >= 4) return false;
+  if (isJoinClosedByStatus(project?.status)) return false;
+  return true;
+};
+
+async function isTeamFormationLockedForClass(classId) {
+  if (!classId) return false;
+
+  const { data, error } = await supabase
+    .from('class_submission_deadlines')
+    .select('deadline')
+    .eq('class_id', classId)
+    .eq('stage', 'team_formation')
+    .maybeSingle();
+
+  if (error) throw error;
+  return Boolean(data?.deadline);
+}
+
 const resolveProfileClassAssignment = async ({ classSection, semester, department }) => {
   if (classSection === undefined) {
     return {};
@@ -3231,6 +3257,7 @@ export const joinProject = async (req, res) => {
       .from('projects')
       .select(`
         id,
+        status,
         class_id,
         team_members(
           role,
@@ -3248,6 +3275,19 @@ export const joinProject = async (req, res) => {
     const projectScope = resolveProjectJoinScope(projectScopeRow, classIdBySection);
     if (!isSameProjectScope(studentScope, projectScope)) {
       return res.status(403).json({ message: 'You can only join teams from your own class section.' });
+    }
+
+    const effectiveProjectClassId = projectScope.class_id
+      || studentScope.class_id
+      || (studentScope.class_section ? classIdBySection.get(normalizeClassScopeKey(studentScope.class_section)) || null : null);
+    const formationLocked = await isTeamFormationLockedForClass(effectiveProjectClassId);
+    const existingTeamSize = Array.isArray(projectScopeRow?.team_members) ? projectScopeRow.team_members.length : 0;
+    if (!isTeamJoinable({ project: projectScopeRow, teamSize: existingTeamSize, formationLocked })) {
+      return res.status(400).json({
+        message: formationLocked
+          ? 'Team formation is locked for your class.'
+          : 'This team is no longer open for new members.',
+      });
     }
 
     const { count: currentCount, error: countError } = await supabase
@@ -4038,8 +4078,6 @@ export const assignMentor = async (req, res) => {
 
 export const getPendingProjects = async (req, res) => {
   try {
-    const studentClassId = req.userProfile?.class_id || null;
-    const studentClassSection = normalizeClassSectionInput(req.userProfile?.class_section || req.userProfile?.batch || null);
     const studentScope = await resolveStudentProjectScope(req.userProfile);
     if (!studentScope.class_id && !studentScope.class_section) {
       return res.json([]);
@@ -4057,28 +4095,28 @@ export const getPendingProjects = async (req, res) => {
         class_id,
         created_at,
         created_by,
-<<<<<<< HEAD
-        team_members(student_id, role, profiles!team_members_student_id_fkey(class_id, class_section)),
-=======
-        class_id,
         team_members(
           id,
           role,
           student_id,
           profiles!team_members_student_id_fkey(class_id, class_section, batch)
         ),
->>>>>>> main
         creator:profiles!projects_created_by_fkey(id, full_name)
       `)
-      .not('status', 'in', '(approved,completed)')
       .order('created_at', { ascending: false });
 
     if (error) throw error;
 
     const classIdBySection = await loadClassIdBySectionMap();
-    const scopedProjects = (data || []).filter((project) => (
-      isSameProjectScope(studentScope, resolveProjectJoinScope(project, classIdBySection))
-    ));
+    const effectiveStudentClassId = studentScope.class_id
+      || (studentScope.class_section ? classIdBySection.get(normalizeClassScopeKey(studentScope.class_section)) || null : null);
+    const formationLocked = await isTeamFormationLockedForClass(effectiveStudentClassId);
+    const scopedProjects = (data || []).filter((project) => {
+      const projectScope = resolveProjectJoinScope(project, classIdBySection);
+      if (!isSameProjectScope(studentScope, projectScope)) return false;
+      const teamSize = Array.isArray(project?.team_members) ? project.team_members.length : 0;
+      return isTeamJoinable({ project, teamSize, formationLocked });
+    });
 
     res.json(scopedProjects);
   } catch (error) {
@@ -4102,6 +4140,7 @@ export const createJoinRequest = async (req, res) => {
       .select(`
         id,
         title,
+        status,
         class_id,
         team_members(
           role,
@@ -4119,6 +4158,19 @@ export const createJoinRequest = async (req, res) => {
     const projectScope = resolveProjectJoinScope(projectScopeRow, classIdBySection);
     if (!isSameProjectScope(studentScope, projectScope)) {
       return res.status(403).json({ message: 'You can only join teams from your own class section.' });
+    }
+
+    const effectiveProjectClassId = projectScope.class_id
+      || studentScope.class_id
+      || (studentScope.class_section ? classIdBySection.get(normalizeClassScopeKey(studentScope.class_section)) || null : null);
+    const formationLocked = await isTeamFormationLockedForClass(effectiveProjectClassId);
+    const existingTeamSize = Array.isArray(projectScopeRow?.team_members) ? projectScopeRow.team_members.length : 0;
+    if (!isTeamJoinable({ project: projectScopeRow, teamSize: existingTeamSize, formationLocked })) {
+      return res.status(400).json({
+        message: formationLocked
+          ? 'Team formation is locked for your class.'
+          : 'This team is no longer open for new members.',
+      });
     }
 
     const { data: membership } = await supabase
