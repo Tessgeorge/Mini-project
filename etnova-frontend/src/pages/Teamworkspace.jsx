@@ -217,11 +217,20 @@ function getIdeaDescription(proj) {
 
 function normalizeWorkspaceDeadlineRows(reviewStageRows = []) {
   const latestByStage = new Map();
-  (reviewStageRows || [])
-    .forEach((row) => {
-      const stageLabel = getWorkflowStageMeta(row.stage_name).label;
-      latestByStage.set(stageLabel, row);
-    });
+  const pickPreferredDeadlineRow = (current, incoming) => {
+    if (!current) return incoming;
+    const currentUpdatedAt = new Date(current?.updated_at || current?.deadline || 0).getTime();
+    const incomingUpdatedAt = new Date(incoming?.updated_at || incoming?.deadline || 0).getTime();
+    if (incomingUpdatedAt !== currentUpdatedAt) {
+      return incomingUpdatedAt > currentUpdatedAt ? incoming : current;
+    }
+    return String(incoming?.id || "") > String(current?.id || "") ? incoming : current;
+  };
+
+  (reviewStageRows || []).forEach((row) => {
+    const stageKey = normalizeWorkflowStage(row.stage_name);
+    latestByStage.set(stageKey, pickPreferredDeadlineRow(latestByStage.get(stageKey), row));
+  });
 
   const reviewItems = Array.from(latestByStage.values()).map((row) => ({
     id: row.id,
@@ -1841,7 +1850,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack, onNa
       effectiveClassId
         ? supabase
           .from("review_stages")
-          .select("id, stage_name, deadline, student_deadline_set_by_coordinator, is_locked, stage_order")
+          .select("id, stage_name, deadline, student_deadline_set_by_coordinator, is_locked, stage_order, updated_at")
           .eq("class_id", effectiveClassId)
           .order("stage_order", { ascending: true })
         : Promise.resolve({ data: [] }),
@@ -1868,7 +1877,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack, onNa
     const refreshClassDeadlines = async () => {
       const { data: reviewRows } = await supabase
         .from("review_stages")
-        .select("id, stage_name, deadline, student_deadline_set_by_coordinator, is_locked, stage_order")
+        .select("id, stage_name, deadline, student_deadline_set_by_coordinator, is_locked, stage_order, updated_at")
         .eq("class_id", effectiveClassId)
         .order("stage_order", { ascending: true });
       setReviewDeadlines(normalizeWorkspaceDeadlineRows(reviewRows || []));
@@ -1943,7 +1952,7 @@ export default function TeamWorkspace({ proj, mentorId, mentorName, onBack, onNa
   const workflowSnapshot = getWorkflowSnapshot({
     project: { ...proj, status: projectStatus },
     documents,
-    evaluations,
+    deadlines: reviewDeadlines,
   });
   const phaseIdx = workflowSnapshot.index;
   const pct = workflowSnapshot.progressPercent;

@@ -75,11 +75,20 @@ function isProfileComplete(profile) {
 function normalizeClassDeadlineRows(reviewStageRows = []) {
   const latestByStage = new Map();
 
-  (reviewStageRows || [])
-    .forEach((row) => {
-      const stageKey = String(row.stage_name || "").trim().toLowerCase();
-      latestByStage.set(stageKey, row);
-    });
+  const pickPreferredDeadlineRow = (current, incoming) => {
+    if (!current) return incoming;
+    const currentUpdatedAt = new Date(current?.updated_at || current?.deadline || 0).getTime();
+    const incomingUpdatedAt = new Date(incoming?.updated_at || incoming?.deadline || 0).getTime();
+    if (incomingUpdatedAt !== currentUpdatedAt) {
+      return incomingUpdatedAt > currentUpdatedAt ? incoming : current;
+    }
+    return String(incoming?.id || "") > String(current?.id || "") ? incoming : current;
+  };
+
+  (reviewStageRows || []).forEach((row) => {
+    const stageKey = normalizeWorkflowStage(row.stage_name);
+    latestByStage.set(stageKey, pickPreferredDeadlineRow(latestByStage.get(stageKey), row));
+  });
 
   const reviewItems = Array.from(latestByStage.values()).map((row) => ({
     stageKey: normalizeWorkflowStage(row.stage_name),
@@ -401,7 +410,7 @@ export default function StudentDashboard() {
 
     const { data: reviewRows, error: deadlineError } = await supabase
       .from("review_stages")
-      .select("id, class_id, stage_name, deadline, coordinator_deadline, is_locked, student_deadline_set_by_coordinator, stage_order")
+      .select("id, class_id, stage_name, deadline, coordinator_deadline, is_locked, student_deadline_set_by_coordinator, stage_order, updated_at")
       .eq("class_id", classId)
       .order("stage_order", { ascending: true });
 
@@ -524,10 +533,25 @@ export default function StudentDashboard() {
 
   // Derived values
   const workflowSnapshot = useMemo(
-    () => getWorkflowSnapshot({ project, documents, evaluations }),
-    [documents, evaluations, project]
+    () => getWorkflowSnapshot({ project, documents, deadlines }),
+    [deadlines, documents, project]
   );
   const currentStage = workflowSnapshot.label;
+  const workflowStatusValue = workflowSnapshot.isCompleted
+    ? "Completed"
+    : currentStage === "Idea Approval"
+      ? "Before Idea Approval"
+      : "In Progress";
+  const workflowStatusIcon = workflowSnapshot.isCompleted
+    ? "task_alt"
+    : currentStage === "Idea Approval"
+      ? "pending"
+      : "alt_route";
+  const workflowStatusColor = workflowSnapshot.isCompleted
+    ? "#10b981"
+    : currentStage === "Idea Approval"
+      ? "#f59e0b"
+      : "#00D2C4";
 
   const nextDeadline = useMemo(() => {
     const now = new Date();
@@ -547,15 +571,22 @@ export default function StudentDashboard() {
   }, [deadlines, workflowSnapshot]);
 
   const daysLeft = nextDeadline ? daysUntil(nextDeadline.deadline || nextDeadline.date) : null;
-  const currentStageDaysLeft = currentStageDeadline
-    ? daysUntil(currentStageDeadline.deadline || currentStageDeadline.date)
-    : null;
   const currentStageActionTab = currentStageDeadline
     ? getWorkflowDestination(currentStageDeadline.stageKey, "student")
     : getWorkflowDestination(workflowSnapshot.key, "student");
   const currentStageActionLabel = currentStageDeadline
     ? getWorkflowActionLabel(currentStageDeadline.stageKey, "student")
     : getWorkflowActionLabel(workflowSnapshot.key, "student");
+  const priorityDeadline = nextDeadline || currentStageDeadline;
+  const priorityDeadlineDaysLeft = priorityDeadline
+    ? daysUntil(priorityDeadline.deadline || priorityDeadline.date)
+    : null;
+  const priorityActionTab = priorityDeadline
+    ? getWorkflowDestination(priorityDeadline.stageKey, "student")
+    : currentStageActionTab;
+  const priorityActionLabel = priorityDeadline
+    ? getWorkflowActionLabel(priorityDeadline.stageKey, "student")
+    : currentStageActionLabel;
 
   const activeMembers = project?.team_members?.length ?? 0;
   const profileComplete = useMemo(() => isProfileComplete(profile), [profile]);
@@ -670,19 +701,19 @@ export default function StudentDashboard() {
       text: "text-amber-900", color: "#f59e0b",
       msg: `Revision required on "${revision.document_type?.replace(/_/g, " ")}" - mentor has requested changes.`,
     };
-    if (!currentStageDeadline) return null;
-    if (currentStageDaysLeft !== null && currentStageDaysLeft === 0) return {
+    if (!priorityDeadline) return null;
+    if (priorityDeadlineDaysLeft !== null && priorityDeadlineDaysLeft === 0) return {
       icon: "alarm", bg: "bg-rose-50", border: "border-rose-200",
       text: "text-rose-800", color: "#f43f5e",
-      msg: `${currentStageDeadline.stage} is due TODAY. Submit immediately.`,
+      msg: `${priorityDeadline.stage} is due TODAY for your class. Submit immediately.`,
     };
-    if (currentStageDaysLeft !== null && currentStageDaysLeft <= 5) return {
+    if (priorityDeadlineDaysLeft !== null && priorityDeadlineDaysLeft <= 5) return {
       icon: "schedule", bg: "bg-orange-50", border: "border-orange-200",
       text: "text-orange-800", color: "#f97316",
-      msg: `${currentStageDeadline.stage} submission due in ${currentStageDaysLeft} day${currentStageDaysLeft !== 1 ? "s" : ""}.`,
+      msg: `${priorityDeadline.stage} submission is due in ${priorityDeadlineDaysLeft} day${priorityDeadlineDaysLeft !== 1 ? "s" : ""} for your class.`,
     };
     return null;
-  }, [currentStageDaysLeft, currentStageDeadline, documents, project]);
+  }, [documents, priorityDeadline, priorityDeadlineDaysLeft, project]);
 
   // Activity feed
   const activityFeed = useMemo(() => {
@@ -696,7 +727,7 @@ export default function StudentDashboard() {
     if (activeMembers > 1)
       items.push({ id: "team", icon: "group", text: `Team formed (${activeMembers} members)`, time: fmtRelative(project?.created_at), color: "#8b5cf6" });
     return items.slice(0, 7);
-  }, [documents, evaluations, activeMembers, project]);
+  }, [documents, activeMembers, project]);
 
   const searchResults = useMemo(() => {
     if (!normalizedSearch) return [];
@@ -939,7 +970,7 @@ export default function StudentDashboard() {
             <KPICard label="Current Step" value={currentStage} sub="Shared workflow stage" icon="layers" color="#00D2C4" />
             <KPICard label="Next Deadline" value={daysLeft !== null ? `${daysLeft}d` : "-"} sub={nextDeadline ? `Until ${nextDeadline.stage}` : "No active deadline"} icon="schedule" color="#6366f1" />
             <KPICard label="Team Capacity" value={`${activeMembers}/4`} sub={activeMembers >= 4 ? "Full team" : `${4 - activeMembers} slot${4 - activeMembers !== 1 ? "s" : ""} remaining`} icon="group" color="#10b981" />
-            <KPICard label="Workflow Status" value={workflowSnapshot.isCompleted ? "Completed" : project?.approved_idea_id ? "In Progress" : "Idea Pending"} sub={workflowSnapshot.isCompleted ? "All review stages completed" : workflowSnapshot.description} icon={workflowSnapshot.isCompleted ? "task_alt" : project?.approved_idea_id ? "alt_route" : "pending"} color={workflowSnapshot.isCompleted ? "#10b981" : project?.approved_idea_id ? "#00D2C4" : "#f59e0b"} />
+            <KPICard label="Workflow Status" value={workflowStatusValue} sub={workflowSnapshot.isCompleted ? "All review stages completed" : workflowSnapshot.description} icon={workflowStatusIcon} color={workflowStatusColor} />
           </div>
 
           {/* Section 3: Priority Alert Banner */}
@@ -967,10 +998,10 @@ export default function StudentDashboard() {
               <p className={`flex-1 text-sm font-semibold ${alert.text}`}>{alert.msg}</p>
 
               {/* CTA button */}
-              <button type="button" onClick={() => goToStudentTab(currentStageActionTab)}
+              <button type="button" onClick={() => goToStudentTab(priorityActionTab)}
                 className="flex-shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-xs font-black transition-all hover:opacity-90 hover:scale-[1.03] active:scale-95 whitespace-nowrap"
                 style={{ backgroundColor: alert.color, boxShadow: `0 3px 10px ${alert.color}40` }}>
-                {currentStageActionLabel}
+                {priorityActionLabel}
                 <span className="material-symbols-outlined text-sm">arrow_forward</span>
               </button>
             </div>
@@ -981,8 +1012,8 @@ export default function StudentDashboard() {
           <ProjectTracker
             project={project}
             documents={documents}
-            evaluations={evaluations}
             deadlines={deadlines}
+            evaluations={evaluations}
             currentStageKey={workflowSnapshot.key}
           />
 

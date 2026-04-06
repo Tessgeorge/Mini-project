@@ -372,7 +372,7 @@ export const getClassTeams = async (req, res) => {
         title: p.title,
         status: p.status,
         batch: p.batch ?? null,
-        guide_name: guideMap[p.guide_id] || '—',
+        guide_name: guideMap[p.guide_id] || '�',
         team_size: (p.team_members || []).length,
         latest_stage: latestDoc?.document_type || '—',
         submission_status: latestDoc?.status || '—',
@@ -487,6 +487,28 @@ export const setTeamFormationLock = async (req, res) => {
     const locked = Boolean(req.body?.locked);
 
     if (locked) {
+      const { data: classProjects, error: projectError } = await supabase
+        .from('projects')
+        .select('id, title, team_members(id)')
+        .eq('class_id', coord.class_id);
+
+      if (projectError) throw projectError;
+
+      const invalidTeams = (classProjects || [])
+        .map((project) => ({
+          id: project.id,
+          title: project.title || 'Untitled Team',
+          size: Array.isArray(project.team_members) ? project.team_members.length : 0,
+        }))
+        .filter((team) => team.size < 3 || team.size > 4);
+
+      if (invalidTeams.length > 0) {
+        return res.status(400).json({
+          message: 'Team formation can be locked only when every team has 3 to 4 students.',
+          invalid_teams: invalidTeams,
+        });
+      }
+
       const { error } = await supabase
         .from('class_submission_deadlines')
         .upsert({

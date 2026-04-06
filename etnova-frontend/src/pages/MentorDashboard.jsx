@@ -1871,14 +1871,14 @@ export default function MentorDashboard() {
       });
 
       const evaluatedCount = projectRows.filter((item) => item.isFullyEvaluated).length;
-      const teamsWithLessThanTwoMembers = projectRows.filter((item) => Number(item.teamSize || 0) < 2).length;
+      const teamsWithLessThanThreeMembers = projectRows.filter((item) => Number(item.teamSize || 0) < 3).length;
 
       return {
         classId, classTitle: classRow?.class_section || "Untitled Class",
         totalProjects: projectRows.length, evaluatedProjects: evaluatedCount,
         totalStudents,
         pendingEvaluations: projectRows.length - evaluatedCount,
-        teamsWithLessThanTwoMembers,
+        teamsWithLessThanThreeMembers,
         studentsWithoutTeamCount,
         stageProgress, projects: projectRows,
         reviewStages: sortReviewStages(reviewStageRows || []),

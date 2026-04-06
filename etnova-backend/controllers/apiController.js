@@ -1148,7 +1148,8 @@ const enrichProjectsWithCoordinatorFallback = async (projects) => {
 const enrichStudentProjects = async (projects) => {
   const withAllocations = await enrichProjectsWithAllocations(projects || []);
   const withIdeaSnapshots = await enrichProjectsWithIdeaSnapshots(withAllocations);
-  return enrichProjectsWithCoordinatorFallback(withIdeaSnapshots);
+  const withCoordinatorFallback = await enrichProjectsWithCoordinatorFallback(withIdeaSnapshots);
+  return withCoordinatorFallback;
 };
 
 const STUDENT_PROJECT_SELECT = `
@@ -1171,7 +1172,7 @@ const STUDENT_PROJECT_SELECT = `
       class_section
     )
   ),
-  documents(id, document_type, status, uploaded_at, file_name, file_url, version, feedback),
+  documents(id, document_type, status, coordinator_verified, coordinator_verified_at, uploaded_at, file_name, file_url, version, feedback),
   evaluations(id, evaluation_type, obtained_marks, max_marks, feedback, created_at)
 `;
 const createNotifications = async (rows) => {
@@ -1558,7 +1559,7 @@ export const getAdminDashboardData = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const [profileResult, projectsResult, mentorsResult, classesResult, reviewStagesResult] = await Promise.all([
+    const [profileResult, projectsResult, mentorsResult, classesResult, reviewStagesResult, lockResult] = await Promise.all([
       supabase
         .from('profiles')
         .select('full_name, email, department')
@@ -1579,6 +1580,10 @@ export const getAdminDashboardData = async (req, res) => {
       supabase
         .from('review_stages')
         .select('id, class_id, stage_name, coordinator_deadline, is_active, is_completed, is_locked'),
+      supabase
+        .from('class_submission_deadlines')
+        .select('class_id, deadline')
+        .eq('stage', 'team_formation'),
     ]);
 
     if (profileResult.error) {
@@ -1588,10 +1593,32 @@ export const getAdminDashboardData = async (req, res) => {
     if (mentorsResult.error) throw mentorsResult.error;
     if (classesResult.error) throw classesResult.error;
     if (reviewStagesResult.error) throw reviewStagesResult.error;
+    if (lockResult.error) throw lockResult.error;
+
+    const lockedClassIds = new Set(
+      (lockResult.data || [])
+        .filter((row) => row?.class_id && row?.deadline)
+        .map((row) => row.class_id)
+    );
+
+    const projects = (projectsResult.data || []).filter((project) => {
+      const members = Array.isArray(project?.team_members) ? project.team_members : [];
+      const teamSize = members.length;
+      if (teamSize < 3 || teamSize > 4) return false;
+
+      const classId = members
+        .map((member) => {
+          const profile = Array.isArray(member?.profiles) ? member.profiles[0] : member?.profiles;
+          return profile?.class_id || null;
+        })
+        .find(Boolean);
+
+      return Boolean(classId && lockedClassIds.has(classId));
+    });
 
     res.json({
       profile: profileResult.data || null,
-      projects: projectsResult.data || [],
+      projects,
       mentors: mentorsResult.data || [],
       classes: classesResult.data || [],
       review_stages: reviewStagesResult.data || [],
@@ -1709,9 +1736,9 @@ export const getAdminGuideAllocationData = async (req, res) => {
       max_team_capacity: getRecommendationMentorCapacity(mentor),
     }));
 
-    const projects = projectRows.map((project) => {
-      const allocation = allocationByProject.get(project.id) || null;
+    const normalizedProjects = projectRows.map((project) => {
       const members = Array.isArray(project.team_members) ? project.team_members : [];
+      const teamSize = members.length;
       const classProfile = members
         .map((member) => (Array.isArray(member?.profiles) ? member.profiles[0] : member?.profiles))
         .find(Boolean) || null;
@@ -1729,26 +1756,68 @@ export const getAdminGuideAllocationData = async (req, res) => {
         .find(Boolean) || '';
       const detectedIdea = ideaById.get(project.approved_idea_id) || ideaById.get(project.current_idea_id) || null;
       const resolvedClassId = matchedClass?.id || classProfile?.class_id || null;
+      const formationLocked = Boolean(resolvedClassId && lockedClassIds.has(resolvedClassId));
+      const eligibleForAllocation = formationLocked && teamSize >= 3 && teamSize <= 4;
 
       return {
-        id: project.id,
-        title: project.title || 'Untitled Project',
-        guide_id: project.guide_id || null,
-        domain: project.domain || '',
-        detected_domain: detectedIdea?.domain || project.domain || '',
-        detected_subdomain: detectedIdea?.subdomain || '',
-        detected_keywords: Array.isArray(detectedIdea?.keywords) ? detectedIdea.keywords : [],
-        confidence_score: typeof detectedIdea?.confidence_score === 'number' ? detectedIdea.confidence_score : 0,
-        technologies: Array.isArray(detectedIdea?.technologies) ? detectedIdea.technologies : [],
-        idea_title: detectedIdea?.title || '',
-        team_department: teamDepartment,
-        class_id: resolvedClassId,
-        class_name: matchedClass?.class_name || String(classProfile?.class_section || '').trim(),
+        rawProject: project,
+        team_size: teamSize,
+        matchedClass,
+        classProfile,
+        teamDepartment,
+        detectedIdea,
+        resolvedClassId,
+        formation_locked: formationLocked,
+        eligible_for_allocation: eligibleForAllocation,
+      };
+    });
+
+    const ineligibleProjectIds = normalizedProjects
+      .filter((project) => !project.eligible_for_allocation)
+      .map((project) => project.rawProject.id)
+      .filter(Boolean);
+
+    if (ineligibleProjectIds.length > 0) {
+      const [{ error: clearProjectGuideError }, { error: clearAllocationError }] = await Promise.all([
+        supabase
+          .from('projects')
+          .update({ guide_id: null })
+          .in('id', ineligibleProjectIds)
+          .not('guide_id', 'is', null),
+        supabase
+          .from('guide_allocations')
+          .delete()
+          .in('project_id', ineligibleProjectIds)
+          .eq('status', 'active'),
+      ]);
+
+      if (clearProjectGuideError) throw clearProjectGuideError;
+      if (clearAllocationError) throw clearAllocationError;
+    }
+
+    const projects = normalizedProjects.map((project) => {
+      const allocation = allocationByProject.get(project.rawProject.id) || null;
+
+      return {
+        id: project.rawProject.id,
+        title: project.rawProject.title || 'Untitled Project',
+        guide_id: project.eligible_for_allocation ? (project.rawProject.guide_id || null) : null,
+        domain: project.rawProject.domain || '',
+        detected_domain: project.detectedIdea?.domain || project.rawProject.domain || '',
+        detected_subdomain: project.detectedIdea?.subdomain || '',
+        detected_keywords: Array.isArray(project.detectedIdea?.keywords) ? project.detectedIdea.keywords : [],
+        confidence_score: typeof project.detectedIdea?.confidence_score === 'number' ? project.detectedIdea.confidence_score : 0,
+        technologies: Array.isArray(project.detectedIdea?.technologies) ? project.detectedIdea.technologies : [],
+        idea_title: project.detectedIdea?.title || '',
+        team_department: project.teamDepartment,
+        class_id: project.resolvedClassId,
+        class_name: project.matchedClass?.class_name || String(project.classProfile?.class_section || '').trim(),
         allocated_guide_id: allocation?.guide_id || null,
         allocated_guide_name: guideNameById.get(allocation?.guide_id) || '',
-        formation_locked: Boolean(resolvedClassId && lockedClassIds.has(resolvedClassId)),
+        team_size: project.team_size,
+        formation_locked: project.formation_locked,
       };
-    }).filter((project) => project.formation_locked);
+    }).filter((project) => project.formation_locked && project.team_size >= 3 && project.team_size <= 4);
 
     res.json({
       mentors,
@@ -2830,7 +2899,6 @@ export const getProjects = async (req, res) => {
       const combined = [...combinedAssignedProjects, ...(extraProjects || [])];
         return res.json(await enrichProjectsWithIdeaSnapshots(await enrichProjectsWithAllocations(combined)));
     } else if (req.userRole === 'admin') {
-      // Admins see all projects
       const { data, error } = await supabase
         .from('projects')
         .select(`
@@ -3081,6 +3149,16 @@ export const approveProject = async (req, res) => {
 
 export const joinProject = async (req, res) => {
   try {
+    const { count: currentCount, error: countError } = await supabase
+      .from('team_members')
+      .select('*', { count: 'exact', head: true })
+      .eq('project_id', req.params.id);
+
+    if (countError) throw countError;
+    if (Number(currentCount || 0) >= 4) {
+      return res.status(400).json({ message: 'Team already has the maximum of 4 students.' });
+    }
+
     const { data, error } = await supabase
       .from('team_members')
       .insert({
@@ -4057,6 +4135,16 @@ export const respondToJoinRequest = async (req, res) => {
     }
 
     if (action === 'approve') {
+      const { count: currentCount, error: countError } = await supabase
+        .from('team_members')
+        .select('*', { count: 'exact', head: true })
+        .eq('project_id', requestRow.project_id);
+
+      if (countError) throw countError;
+      if (Number(currentCount || 0) >= 4) {
+        return res.status(400).json({ message: 'This team already has 4 students.' });
+      }
+
       const { error: addError } = await supabase
         .from('team_members')
         .insert({

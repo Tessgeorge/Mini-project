@@ -45,8 +45,8 @@ export const DEFAULT_GUIDES = [
 ];
 
 export const DEFAULT_TEAMS = [
-  { id: 1, name: "Smart Energy Meter", class: "S6 CSE A", stage: "0th Review", submissionStatus: "Pending", guide: null },
-  { id: 2, name: "AI Attendance System", class: "S6 CSE A", stage: "0th Review", submissionStatus: "Late", guide: null },
+  { id: 1, name: "Smart Energy Meter", class: "S6 CSE A", stage: "Zeroth Review", submissionStatus: "Pending", guide: null },
+  { id: 2, name: "AI Attendance System", class: "S6 CSE A", stage: "Zeroth Review", submissionStatus: "Late", guide: null },
   { id: 3, name: "IoT Lab Automation", class: "S6 CSE B", stage: "1st Review", submissionStatus: "Submitted", guide: null },
   { id: 4, name: "Campus Navigation Bot", class: "S6 CSE B", stage: "1st Review", submissionStatus: "Pending", guide: null },
   { id: 5, name: "Academic Query Assistant", class: "S6 CSE A", stage: "Final Review", submissionStatus: "Submitted", guide: null },
@@ -67,7 +67,7 @@ export const DEFAULT_REVIEW_STAGES = [
   },
   {
     id: 2,
-    name: "0th Review",
+    name: "Zeroth Review",
     status: "Inactive",
     submissions: 18,
     deadline: "2026-04-05T17:00:00",
@@ -144,7 +144,7 @@ export function loadAllocationTeams() {
   const teams = loadJSON(TEAMS_KEY, DEFAULT_TEAMS);
   return teams.map((team) => ({
     ...team,
-    stage: team.stage || "0th Review",
+    stage: team.stage || "Zeroth Review",
     submissionStatus: team.submissionStatus || "Pending",
   }));
 }

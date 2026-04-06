@@ -17,19 +17,19 @@ const ROLE_HELP_CONTENT = {
       {
         title: "Work On My Idea",
         body: "Open Idea Workspace to draft, refine, and formally submit your project idea.",
-        route: "/student/idea-workspace",
+        route: "",
         action: "Open Idea Workspace",
       },
       {
         title: "Upload A Submission",
         body: "Go to Team Submissions to upload the required file for the active review stage.",
-        route: "/student/submissions",
+        route: "",
         action: "Open Submissions",
       },
       {
         title: "Check My Marks",
         body: "View published marks and shared feedback in one place after evaluation is complete.",
-        route: "/student/marks",
+        route: "",
         action: "Open Marks",
       },
     ],
@@ -43,16 +43,6 @@ const ROLE_HELP_CONTENT = {
           "Make sure your team is uploading the correct document type for that stage.",
         ],
         destination: "Dashboard and Team Submissions",
-      },
-      {
-        title: "Marks are not visible",
-        detail: "Marks appear only after review data is completed and officially published.",
-        checks: [
-          "Verify the stage review is actually finished.",
-          "Check whether results are still under review or unpublished.",
-          "Look in the Marks page again after the coordinator publishes results.",
-        ],
-        destination: "Marks",
       },
       {
         title: "Deadline is not showing",
@@ -76,38 +66,46 @@ const ROLE_HELP_CONTENT = {
       },
     ],
     workflow: [
-      "Draft and refine the project idea in Idea Workspace.",
-      "Coordinate with teammates in My Team and Discussion.",
-      "Upload the required files in Team Submissions for the active stage.",
-      "Track published marks and feedback in Marks after review is complete.",
+      "Complete your profile and confirm your class details before starting team work.",
+      "Create or join a team before starting project workflow.",
+      "Submit and wait for idea approval before later review-stage documents.",
+      "Upload stage documents only when the workflow moves into that step.",
     ],
     roleSections: [
       {
-        title: "Idea Work",
+        title: "Dashboard Signals",
         items: [
-          "Use Idea Workspace to save drafts, refine content, and formally submit the idea.",
-          "Only submitted ideas move into guide review; draft saves remain private to your workflow.",
-          "If the project topic changes later through a new submission, the latest approved/submitted topic should be reflected across project views.",
+          "Read the tracker to understand whether the project is waiting for approval, submission, or review completion.",
+          "Use the calendar as the class-level source for coordinator-set due dates.",
+          "Use alerts as warnings only, not as proof that a stage is already complete.",
         ],
       },
       {
-        title: "Team Work",
+        title: "Team Space",
         items: [
-          "Use My Team and Discussion to coordinate tasks, updates, and project communication.",
-          "Keep formal academic files inside Team Submissions instead of chat-style discussion areas.",
-          "Watch your team composition and coordinator updates carefully before submission deadlines.",
+          "Use My Team to track membership, leadership, and project identity.",
+          "Use Discussion for coordination, follow-ups, and clarification with teammates or guide.",
+          "Keep team communication separate from formal submission records.",
         ],
       },
       {
-        title: "Results And Deadlines",
+        title: "Record Pages",
         items: [
-          "Deadlines should come from your class coordinator and apply to your class workflow.",
-          "Marks appear only after evaluation is complete and the result is published.",
-          "If something is missing, first check stage status, then verify with your coordinator or guide.",
+          "Use Idea Workspace only to prepare, revise, and submit idea versions.",
+          "Use Team Submissions only to store stage-specific files and statuses.",
+          "Use Marks only to read released outcomes and published feedback.",
         ],
       },
     ],
     playbooks: [
+      {
+        title: "How to create or join a team",
+        steps: [
+          "Open the student dashboard after completing your profile.",
+          "Choose whether to create a new team or join an existing one.",
+          "Confirm your team appears correctly before moving into idea work.",
+        ],
+      },
       {
         title: "How to submit an idea",
         steps: [
@@ -125,17 +123,17 @@ const ROLE_HELP_CONTENT = {
         ],
       },
       {
-        title: "How to check guide feedback",
+        title: "How to resubmit after feedback",
         steps: [
-          "Open the relevant submission or idea view.",
-          "Look for guide remarks, review status, or requested revisions.",
-          "Apply the needed changes before resubmitting.",
+          "Open the submission or idea that shows revision feedback.",
+          "Read the remarks and update the content or file accordingly.",
+          "Submit the corrected version and confirm the status changed.",
         ],
       },
       {
         title: "How to view marks",
         steps: [
-          "Open the Marks page from the student module.",
+          "Open the Marks page from the student workspace.",
           "Check whether the relevant stage or final result is already published.",
           "Review both marks and written feedback together when available.",
         ],
@@ -143,20 +141,20 @@ const ROLE_HELP_CONTENT = {
     ],
     faqs: [
       {
-        question: "How do I know which review stage is currently active?",
-        answer: "Open the student dashboard and check the workflow tracker. The active stage is highlighted there, and the submissions page only allows uploads for stages that are currently open.",
+        question: "Why is my idea still not moving to the next stage?",
+        answer: "The project stays in Idea Approval until the idea is actually approved. Draft saves or later-stage submissions do not move the workflow forward.",
       },
       {
-        question: "What should I do if I cannot upload in Team Submissions?",
-        answer: "Check whether the stage is locked, whether the deadline has passed, or whether your team already uploaded the same document type. If the restriction still looks wrong, contact your coordinator.",
+        question: "What should I do if the wrong page opens from a deadline alert?",
+        answer: "Team formation alerts should open My Team, idea alerts should open Idea Workspace, and all other stage alerts should open Team Submissions. If that mapping looks wrong, report it.",
       },
       {
-        question: "Where should I edit or refine my project idea?",
-        answer: "Use Idea Workspace to draft and refine the project idea. Team coordination and task-related discussion should happen in My Team and the discussion module.",
+        question: "Why are marks still empty even after I submitted files?",
+        answer: "File submission alone does not publish marks. Marks appear only after the review is completed and the result is officially released.",
       },
       {
-        question: "Why are marks not visible yet?",
-        answer: "Marks appear only after the relevant review data is completed and published by the coordinator or admin. If a stage is still under review, the marks page may remain empty.",
+        question: "Why does team information matter before submission stages?",
+        answer: "The workflow depends on your team context, project ownership, and class mapping. Incorrect or incomplete team setup can block later actions.",
       },
       {
         question: "How do I reset my password or recover my account?",
@@ -164,9 +162,9 @@ const ROLE_HELP_CONTENT = {
       },
     ],
     guides: [
-      "Start from Dashboard to confirm the active stage, upcoming deadlines, and whether your next action is in Idea Workspace or Team Submissions.",
-      "Use Idea Workspace for the core proposal content, then use My Team and Discussion to coordinate changes before the final submission.",
-      "After uploading in Team Submissions, return to Dashboard and Marks to track approval status, review progress, and released evaluation results.",
+      "Use the Help search when you remember the problem but not the page name.",
+      "Report class-level mismatches early instead of waiting until the deadline date.",
+      "Treat login recovery as a separate problem from workflow or review-state issues.",
     ],
     contacts: [
       "For stage locking, deadlines, or submission access issues: contact your coordinator.",
@@ -247,34 +245,34 @@ const ROLE_HELP_CONTENT = {
       },
     ],
     workflow: [
-      "Guide teams in My Teams and Team Workspace.",
-      "Review idea and document progress before entering marks.",
-      "Use My Class for coordinator-side deadlines, roster updates, and results work.",
-      "Use Review Evaluation only for the stages where reviewer access is assigned to you.",
+      "Start from the mentor dashboard and identify the task type for the day.",
+      "Finish team-facing review work before moving into class-wide administration.",
+      "Complete class setup and publication tasks only after the required class data is ready.",
+      "Submit reviewer-side evaluation only during the stages formally opened for review entry.",
     ],
     roleSections: [
       {
-        title: "Guide Tasks",
+        title: "Project Supervision",
         items: [
-          "Review idea submissions, team documents, and discussion updates inside Team Workspace.",
-          "Add guide observations and diary notes so the team has a visible academic record.",
-          "Approve or reject meeting requests and keep guidance inside the project workflow.",
+          "Judge project direction, academic quality, and readiness at the team level.",
+          "Use workspace evidence to support revision advice and approval decisions.",
+          "Keep guide-side work focused on improvement before formal release steps begin.",
         ],
       },
       {
-        title: "Coordinator Tasks",
+        title: "Class Operations",
         items: [
-          "Import or update class students, set student deadlines, and monitor submissions class-wide.",
-          "Publish final results only after class-level evaluation data is complete.",
-          "Lock team formation when the class is ready to move into admin guide allocation.",
+          "Maintain class-scoped setup, roster correctness, and deadline publication.",
+          "Use class operations to keep all teams aligned with the same workflow rules.",
+          "Apply locks and publication actions only after verification is complete.",
         ],
       },
       {
-        title: "Reviewer Tasks",
+        title: "Review Governance",
         items: [
-          "Open Review Evaluation only for the stages where reviewer access is enabled.",
-          "Check stage rules and entry locks before assuming marks entry is broken.",
-          "Complete evaluation with remarks so students can later see meaningful published feedback.",
+          "Enter reviewer-side marks only within the review scope assigned to your account.",
+          "Check stage readiness before opening any reviewer evaluation work.",
+          "Write remarks that remain clear during later moderation and result release.",
         ],
       },
     ],
@@ -314,20 +312,20 @@ const ROLE_HELP_CONTENT = {
     ],
     faqs: [
       {
-        question: "Where can I review the teams assigned to me?",
-        answer: "Use My Teams from the mentor dashboard. Each team workspace brings together submissions, review context, deadlines, discussion, and project details in one place.",
+        question: "Why do some mentor tools appear on one account but not another?",
+        answer: "Mentor accounts do not all carry the same assignments. What appears depends on whether that account has guide, coordinator, or reviewer responsibility and whether the current stage enables that work.",
       },
       {
         question: "Why does a review or marks action appear locked or unavailable?",
         answer: "This usually means the stage is not active, review entry is locked, or a prerequisite class-level step has not been completed by the coordinator or admin.",
       },
       {
-        question: "When should I use the team discussion page?",
-        answer: "Use Discussion for clarification, revision guidance, and quick iteration with students. Formal files and evaluation evidence should still stay inside the submission and review workflow.",
+        question: "Why can two mentor accounts show different access on the same class?",
+        answer: "Assignments can differ by responsibility and review access. Being in the same class does not automatically mean both accounts can perform the same mentor actions.",
       },
       {
         question: "What if I am both guide and coordinator?",
-        answer: "Your dashboard combines both responsibilities. Use My Teams for guide-level project work and My Class for class deadlines, student onboarding, submissions, reviews, and marks management.",
+        answer: "That is expected for some mentor accounts. Finish the task inside the correct responsibility area instead of mixing project-level and class-level actions together.",
       },
       {
         question: "When will Review Evaluation appear for me?",
@@ -335,9 +333,9 @@ const ROLE_HELP_CONTENT = {
       },
     ],
     guides: [
-      "Start from Dashboard to see pending team work, role-specific actions, and whether you should move into My Teams, My Class, or Review Evaluation.",
-      "Open My Teams to review documents, guide project direction, and respond in Discussion without leaving the team workspace.",
-      "If you are a coordinator, use My Class for student import, deadline setup, submissions review, review workflow, and marks publication tasks.",
+      "Use Help search when you remember the symptom but not the exact page name.",
+      "Escalate missing permissions instead of trying to work around them from another mentor area.",
+      "Treat login recovery, permissions, and workflow state as three separate support paths.",
     ],
     contacts: [
       "For missing coordinator or reviewer permissions: contact the academic admin.",
@@ -425,27 +423,27 @@ const ROLE_HELP_CONTENT = {
     ],
     roleSections: [
       {
-        title: "Onboarding Control",
+        title: "Identity Control",
         items: [
-          "Use Mentor Management for import-based onboarding and role correction.",
-          "Prefer preview-confirm-import workflows instead of ad hoc manual changes when possible.",
-          "Check profile-role consistency before troubleshooting downstream access issues.",
+          "Manage onboarding, role correction, and account-state consistency from the identity side first.",
+          "Use preview-confirm-import flows instead of ad hoc manual changes whenever possible.",
+          "Check role consistency before diagnosing downstream access problems.",
         ],
       },
       {
-        title: "Workflow Control",
+        title: "Stage Control",
         items: [
-          "Use Review Management to add stages, change order, and enforce lock rules.",
-          "Treat stage edits carefully because they affect mentors, coordinators, students, and results together.",
-          "Verify the target class every time before changing deadlines or access behavior.",
+          "Control stage order, lock state, and workflow behavior at the class level.",
+          "Treat stage changes as system-wide edits that affect multiple roles together.",
+          "Verify the target class before changing any stage rule or access state.",
         ],
       },
       {
-        title: "Allocation And Results",
+        title: "Publication Control",
         items: [
-          "Guide Allocation should happen only after class formation is locked by the coordinator.",
-          "Rubrics should match the intended review flow before marks are entered or published.",
-          "Final results should be published only after evaluation completeness is confirmed.",
+          "Treat allocation, rubrics, and final result release as controlled output decisions.",
+          "Check that rubric structure matches the intended review flow before publication.",
+          "Release final outputs only after evaluation completeness is confirmed.",
         ],
       },
     ],
@@ -485,30 +483,30 @@ const ROLE_HELP_CONTENT = {
     ],
     faqs: [
       {
-        question: "How does mentor import work now?",
-        answer: "Upload the file, review the extracted preview, confirm the create or update actions, and then apply the import. New accounts receive invitation-based onboarding.",
+        question: "Why can a clean import file still produce skipped rows?",
+        answer: "Rows can still be skipped when identifiers collide with existing accounts, when role inference does not match the data shape, or when required values are incomplete after parsing.",
       },
       {
         question: "Why might an invite email not arrive immediately?",
         answer: "Shared email delivery can hit rate limits if invites or password resets are triggered repeatedly. Wait briefly before retrying and avoid repeated back-to-back test sends.",
       },
       {
-        question: "How do I control review stages safely?",
-        answer: "Use Review Management to add stages, set order, lock or unlock actions, and verify the target class before changing anything. Always check the current stage status first.",
+        question: "Why can a stage look valid in one class but wrong in another?",
+        answer: "Stage state is class-scoped. Order, lock status, deadline configuration, and access readiness can differ by class even when the stage name is the same.",
       },
       {
         question: "When should I use manual user creation instead of import?",
         answer: "Manual creation should be a fallback for exceptional cases. The recommended path is still import-based onboarding because it is more consistent and scalable.",
       },
       {
-        question: "How do Guide Allocation and Mentor Management work together?",
-        answer: "Mentor Management controls roles and coordinator assignments, while Guide Allocation distributes teams among guides. Role setup should be correct before finalizing allocation decisions.",
+        question: "Why can final outputs still look wrong even when marks exist?",
+        answer: "Published output depends on rubric alignment, review completeness, and final release state together. Stored marks alone do not guarantee the released output is ready.",
       },
     ],
     guides: [
-      "Use Mentor Management first for onboarding, role assignment, coordinator mapping, and account lifecycle control.",
-      "Use Guide Allocation after mentor roles are ready, so teams are distributed against the correct guide and coordinator structure.",
-      "Use Review Management and Rubrics together: stage control should be stable before publishing or locking marks-related evaluation workflows.",
+      "Classify the problem first: identity, stage state, allocation, or publication.",
+      "Prefer reversible checks before editing any admin-controlled workflow data.",
+      "Escalate changes carefully when one action could affect multiple classes or roles.",
     ],
     contacts: [
       "For onboarding delivery issues: retry after cooldown, then verify email template, redirect URLs, and account identity mapping.",
@@ -535,15 +533,15 @@ function ModuleChip({ label }) {
   );
 }
 
-function ActionCard({ item, onOpen }) {
+function ActionCard({ item }) {
   return (
     <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-5">
       <h3 className="text-base font-semibold text-slate-900">{item.title}</h3>
       <p className="mt-2 text-sm leading-6 text-slate-600">{item.body}</p>
       <button
         type="button"
-        onClick={() => onOpen(item.route)}
-        className="mt-4 inline-flex items-center justify-center rounded-2xl bg-teal-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-600"
+        onClick={() => {}}
+        className="mt-4 inline-flex items-center justify-center rounded-2xl bg-teal-500 px-4 py-2 text-sm font-semibold text-white transition"
       >
         {item.action}
       </button>
@@ -953,7 +951,7 @@ export default function RoleHelpSupport({ role = "student" }) {
                 {filteredActionCards.length === 0 ? (
                   <p className="text-sm text-slate-500">No action items match the current search.</p>
                 ) : filteredActionCards.map((item) => (
-                  <ActionCard key={item.title} item={item} onOpen={navigate} />
+                  <ActionCard key={item.title} item={item} />
                 ))}
               </div>
             </SectionCard>
