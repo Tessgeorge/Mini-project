@@ -88,6 +88,12 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
                     </div>
                 )}
 
+                {!loading && !error && (
+                    <p className="mb-4 text-xs font-medium text-slate-500">
+                        Only teams from your class section with fewer than 4 members are listed here.
+                    </p>
+                )}
+
                 {loading ? (
                     <div className="text-center py-12">
                         <div className="inline-block size-8 border-4 border-teal-200 border-t-teal-600 rounded-full animate-spin"></div>
@@ -97,7 +103,7 @@ export default function JoinProjectModal({ isOpen, onClose, onSuccess }) {
                     <div className="text-center py-12">
                         <span className="material-symbols-outlined text-6xl text-slate-300 mb-3">folder_off</span>
                         <p className="text-slate-600 font-medium">No teams available to join</p>
-                        <p className="text-sm text-slate-500 mt-1">All teams are either full at 4 members or you are already a member</p>
+                        <p className="text-sm text-slate-500 mt-1">Only teams from your class section are shown, and available teams must still have room for new members.</p>
                     </div>
                 ) : (
                     <div className="space-y-3">
