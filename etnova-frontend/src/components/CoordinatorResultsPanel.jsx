@@ -634,8 +634,8 @@ export default function CoordinatorResultsPanel({ projectId = null, classId = nu
           <table className="w-full min-w-[760px] text-sm">
             <thead className="bg-slate-50 text-slate-500">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Student</th>
                 <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Roll No</th>
+                <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Student</th>
                 <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Attendance / 10</th>
                 <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Report / 10</th>
               </tr>
@@ -648,8 +648,8 @@ export default function CoordinatorResultsPanel({ projectId = null, classId = nu
               ) : (
                 scopedInternalRows.map((row) => (
                   <tr key={row.student_id}>
-                    <td className="px-4 py-3 font-semibold text-slate-900">{row.full_name || row.student_id}</td>
                     <td className="px-4 py-3 text-slate-500">{row.roll_number || "-"}</td>
+                    <td className="px-4 py-3 font-semibold text-slate-900">{row.full_name || row.student_id}</td>
                     <td className="px-4 py-3">
                       <input
                         type="number"
@@ -704,8 +704,8 @@ export default function CoordinatorResultsPanel({ projectId = null, classId = nu
           <table className="w-full min-w-[1300px] text-sm">
             <thead className="bg-slate-50 text-slate-500">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Student</th>
                 {!projectId && <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Roll No</th>}
+                <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Student</th>
                 {!projectId && <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Email</th>}
                 <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Project</th>
                 {projectId && <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider">Attendance</th>}
@@ -732,11 +732,11 @@ export default function CoordinatorResultsPanel({ projectId = null, classId = nu
               ) : (
                 filteredResults.map((row) => (
                   <tr key={row.student_id} className="align-top">
+                    {!projectId && <td className="px-4 py-4 text-slate-500">{row.roll_number || "-"}</td>}
                     <td className="px-4 py-4">
                       <p className="font-semibold text-slate-900">{row.full_name || row.student_id}</p>
                       {projectId ? <p className="text-xs text-slate-400">{row.roll_number || row.student_id}</p> : null}
                     </td>
-                    {!projectId && <td className="px-4 py-4 text-slate-500">{row.roll_number || "-"}</td>}
                     {!projectId && <td className="px-4 py-4 text-slate-500">{row.email || "-"}</td>}
                     <td className="px-4 py-4 text-slate-600">{row.project_title || "-"}</td>
                     {projectId && <td className="px-4 py-4 font-semibold text-slate-700">{formatMarks(row.attendance_marks)}</td>}

@@ -526,8 +526,8 @@ export default function AdminRubrics() {
                   <table className="w-full text-sm">
                     <thead className="bg-slate-100/70 text-slate-600">
                       <tr>
+                        <th className="px-4 py-3 text-left font-semibold">Roll No</th>
                         <th className="px-4 py-3 text-left font-semibold">Student</th>
-                        <th className="px-4 py-3 text-left font-semibold">Student ID</th>
                         <th className="px-4 py-3 text-left font-semibold">Final Marks</th>
                         <th className="px-4 py-3 text-left font-semibold">Grade</th>
                         <th className="px-4 py-3 text-left font-semibold">Status</th>
@@ -536,11 +536,10 @@ export default function AdminRubrics() {
                     <tbody className="divide-y divide-slate-200/70">
                       {group.rows.map((row) => (
                         <tr key={row.student_id}>
+                          <td className="px-4 py-3 text-slate-700">{row.roll_number || "-"}</td>
                           <td className="px-4 py-3 text-slate-700">
                             <div className="font-medium text-slate-900">{row.full_name || "-"}</div>
-                            <div className="text-xs text-slate-400">{row.roll_number || ""}</div>
                           </td>
-                          <td className="px-4 py-3 text-slate-700">{row.student_id}</td>
                           <td className="px-4 py-3 font-semibold text-slate-900">{row.final_marks ?? "-"}</td>
                           <td className="px-4 py-3 font-semibold text-slate-900">{getGradeFromFinalMarks(row.final_marks)}</td>
                           <td className="px-4 py-3">
