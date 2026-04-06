@@ -671,11 +671,19 @@ export default function MyTeam() {
   useEffect(() => {
     const shouldOpenJoinRequests = localStorage.getItem("studentOpenJoinRequests") === "1";
     if (!shouldOpenJoinRequests) return;
-    localStorage.removeItem("studentOpenJoinRequests");
-    if (myRole === "leader") {
+    if (!project?.id || !profile?.id) return;
+
+    const resolvedMyRole = teamMembers.find((member) => member.student_id === profile.id)?.role || "member";
+    if (resolvedMyRole === "leader") {
+      localStorage.removeItem("studentOpenJoinRequests");
       setShowJoinRequests(true);
+      return;
     }
-  }, [myRole]);
+
+    if (teamMembers.length > 0) {
+      localStorage.removeItem("studentOpenJoinRequests");
+    }
+  }, [profile?.id, project?.id, teamMembers]);
 
   const recentActivity = useMemo(() => {
     const items = [];
