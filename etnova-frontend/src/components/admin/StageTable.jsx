@@ -38,24 +38,23 @@ export default function StageTable({
   return (
     <section className="bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1050px] text-sm">
+        <table className="w-full min-w-[960px] text-sm">
           <thead className="bg-gray-50 text-gray-600">
             <tr>
               <th className="px-6 py-3 text-left font-semibold">Stage Name</th>
               <th className="px-6 py-3 text-left font-semibold">{`${deadlineLabel} (${selectedClass || "-"})`}</th>
               <th className="px-6 py-3 text-left font-semibold">Status</th>
-              <th className="px-6 py-3 text-left font-semibold">Submissions</th>
               <th className="px-6 py-3 text-left font-semibold">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading ? (
               <tr>
-                <td colSpan={5} className="px-6 py-10 text-center text-gray-500">Loading review stages...</td>
+                <td colSpan={4} className="px-6 py-10 text-center text-gray-500">Loading review stages...</td>
               </tr>
             ) : stages.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-6 py-10 text-center text-gray-500">No review stages found.</td>
+                <td colSpan={4} className="px-6 py-10 text-center text-gray-500">No review stages found.</td>
               </tr>
             ) : stages.map((stage, index) => {
               const isBusy = actionBusyId === stage.id;
@@ -73,7 +72,6 @@ export default function StageTable({
                       {stage.status}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-gray-700">{stage.submissions}</td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
                       <button
