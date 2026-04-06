@@ -110,72 +110,161 @@ export function getWorkflowStageMeta(value) {
 
 export function getWorkflowDestination(stageValue, role = "student") {
   const stage = getWorkflowStageMeta(stageValue);
-  return role === "mentor" ? stage.mentorTab : stage.studentTab;
+  if (stage.key === "team_formation") {
+    return "team";
+  }
+  if (stage.key === "idea") {
+    return role === "mentor" ? "ideas" : "ideas";
+  }
+  return role === "mentor" ? "evaluation" : "submissions";
 }
 
 export function getWorkflowActionLabel(stageValue, role = "student") {
-  const destination = getWorkflowDestination(stageValue, role);
-  if (role === "mentor") {
-    return destination === "ideas" ? "Open Idea Reviews" : "Open Evaluation";
+  const stage = getWorkflowStageMeta(stageValue);
+  if (stage.key === "team_formation") {
+    return role === "mentor" ? "Open Team Details" : "Open Team Page";
   }
-  return destination === "ideas" ? "Open Idea Workspace" : "Open Submissions";
+  if (stage.key === "idea") {
+    return role === "mentor" ? "Open Idea Reviews" : "Open Idea Workspace";
+  }
+  return role === "mentor" ? "Open Evaluation" : "Open Submissions";
 }
 
 function normalizeDocumentType(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-function extractEvaluationStages(evaluations = []) {
-  return new Set(
-    evaluations
-      .map((entry) => normalizeWorkflowStage(entry?.phase || entry?.evaluation_type))
-      .filter(Boolean)
-  );
+function getLatestDocumentByType(documents = [], type) {
+  const normalizedType = normalizeDocumentType(type);
+  return (documents || [])
+    .filter((entry) => normalizeDocumentType(entry?.document_type) === normalizedType)
+    .sort((a, b) => {
+      const versionDelta = Number(b?.version || 0) - Number(a?.version || 0);
+      if (versionDelta !== 0) return versionDelta;
+      return new Date(b?.uploaded_at || 0).getTime() - new Date(a?.uploaded_at || 0).getTime();
+    })[0] || null;
 }
 
-function extractDocumentTypes(documents = []) {
-  return new Set(documents.map((entry) => normalizeDocumentType(entry?.document_type)).filter(Boolean));
+function isGuideApproved(document) {
+  return String(document?.status || "").trim().toLowerCase() === "approved";
 }
 
-export function getWorkflowSnapshot({ project, documents = [], evaluations = [] }) {
-  const documentTypes = extractDocumentTypes(documents);
-  const evaluationStages = extractEvaluationStages(evaluations);
+function isCoordinatorApproved(document) {
+  return Boolean(document?.coordinator_verified);
+}
+
+function hasDeadlinePassed(stageKey, deadlines = []) {
+  const matchingDeadline = (deadlines || []).find((deadline) => (
+    normalizeWorkflowStage(deadline?.stageKey || deadline?.stage) === normalizeWorkflowStage(stageKey)
+  ));
+
+  if (!matchingDeadline?.deadline && !matchingDeadline?.date) return false;
+  return new Date(matchingDeadline.deadline || matchingDeadline.date).getTime() < Date.now();
+}
+
+export function getWorkflowProgress({ project, documents = [], deadlines = [] }) {
   const normalizedProjectStatus = String(project?.status || "").trim().toLowerCase();
   const hasApprovedIdea = Boolean(project?.approved_idea_id) || normalizedProjectStatus === "completed";
+  const abstractDocument = getLatestDocumentByType(documents, "abstract");
+  const zerothReviewPresentation = getLatestDocumentByType(documents, "zeroth_review_ppt");
+  const firstReviewPresentation = getLatestDocumentByType(documents, "first_review_ppt");
+  const finalReviewPresentation = getLatestDocumentByType(documents, "final_review_ppt");
+  const projectFinalReport = getLatestDocumentByType(documents, "project_final_report");
 
+  const milestones = [
+    {
+      key: "idea",
+      label: "Idea Approval",
+      completed: hasApprovedIdea,
+      date: project?.approved_idea?.updated_at || project?.approved_idea?.submitted_at || null,
+    },
+    {
+      key: "abstract",
+      label: "Abstract Submission",
+      completed: isGuideApproved(abstractDocument),
+      date: isGuideApproved(abstractDocument) ? abstractDocument?.uploaded_at : null,
+    },
+    {
+      key: "zeroth_review",
+      label: "Zeroth Review",
+      completed: isGuideApproved(zerothReviewPresentation) && hasDeadlinePassed("zeroth_review", deadlines),
+      date: (isGuideApproved(zerothReviewPresentation) && hasDeadlinePassed("zeroth_review", deadlines))
+        ? zerothReviewPresentation?.uploaded_at
+        : null,
+    },
+    {
+      key: "first_review",
+      label: "First Review",
+      completed: isGuideApproved(firstReviewPresentation) && hasDeadlinePassed("first_review", deadlines),
+      date: (isGuideApproved(firstReviewPresentation) && hasDeadlinePassed("first_review", deadlines))
+        ? firstReviewPresentation?.uploaded_at
+        : null,
+    },
+    {
+      key: "second_review",
+      label: "Second Review",
+      completed: hasDeadlinePassed("second_review", deadlines),
+      date: hasDeadlinePassed("second_review", deadlines)
+        ? ((deadlines || []).find((deadline) => normalizeWorkflowStage(deadline?.stageKey || deadline?.stage) === "second_review")?.deadline || null)
+        : null,
+    },
+    {
+      key: "final_review",
+      label: "Final Review",
+      completed: isGuideApproved(finalReviewPresentation) && hasDeadlinePassed("final_review", deadlines),
+      date: (isGuideApproved(finalReviewPresentation) && hasDeadlinePassed("final_review", deadlines))
+        ? finalReviewPresentation?.uploaded_at
+        : null,
+    },
+  ];
+
+  const finalReportApproved = isGuideApproved(projectFinalReport) && isCoordinatorApproved(projectFinalReport);
+  const currentMilestoneIndex = milestones.findIndex((milestone) => !milestone.completed);
+  const completedCount = milestones.filter((milestone) => milestone.completed).length;
+  const nextMilestone = currentMilestoneIndex === -1 ? null : milestones[currentMilestoneIndex];
+  const allStageMilestonesCompleted = currentMilestoneIndex === -1;
+  const isCompleted = (allStageMilestonesCompleted && finalReportApproved) || normalizedProjectStatus === "completed";
+  const progressPercent = isCompleted
+    ? 100
+    : Math.round((completedCount / milestones.length) * 99);
+
+  return {
+    milestones,
+    completedCount,
+    currentMilestoneIndex,
+    nextMilestone,
+    finalReportApproved,
+    isCompleted,
+    progressPercent,
+  };
+}
+
+export function getWorkflowSnapshot({ project, documents = [], deadlines = [] }) {
   let stageKey = "idea";
-  let isCompleted = false;
+  const progress = getWorkflowProgress({ project, documents, deadlines });
+  const milestoneCompletion = new Map(progress.milestones.map((milestone) => [milestone.key, milestone.completed]));
 
-  if (normalizedProjectStatus === "completed") {
-    stageKey = "final_review";
-    isCompleted = true;
-  } else if (!hasApprovedIdea) {
+  if (!milestoneCompletion.get("idea")) {
     stageKey = "idea";
-  } else if (!documentTypes.has("abstract")) {
+  } else if (!milestoneCompletion.get("abstract")) {
     stageKey = "abstract";
-  } else if (!evaluationStages.has("zeroth_review")) {
+  } else if (!milestoneCompletion.get("zeroth_review")) {
     stageKey = "zeroth_review";
-  } else if (!evaluationStages.has("first_review")) {
+  } else if (!milestoneCompletion.get("first_review")) {
     stageKey = "first_review";
-  } else if (!evaluationStages.has("second_review")) {
+  } else if (!milestoneCompletion.get("second_review")) {
     stageKey = "second_review";
-  } else if (!evaluationStages.has("final_review")) {
-    stageKey = "final_review";
   } else {
     stageKey = "final_review";
-    isCompleted = true;
   }
 
   const meta = getWorkflowStageMeta(stageKey);
   const index = WORKFLOW_TIMELINE.findIndex((stage) => stage.key === meta.key);
-  const progressPercent = isCompleted
-    ? 100
-    : Math.round(((Math.max(index, 0) + 1) / WORKFLOW_TIMELINE.length) * 100);
 
   return {
     ...meta,
     index: Math.max(index, 0),
-    isCompleted,
-    progressPercent,
+    isCompleted: progress.isCompleted,
+    progressPercent: progress.progressPercent,
   };
 }

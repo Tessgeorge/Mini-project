@@ -27,7 +27,7 @@ export default function ProgressFilters({
       >
         <option value="All Stages">All Stages</option>
         <option value="Abstract">Abstract</option>
-        <option value="0th Review">0th Review</option>
+        <option value="Zeroth Review">Zeroth Review</option>
         <option value="1st Review">1st Review</option>
         <option value="2nd Review">2nd Review</option>
         <option value="Final Review">Final Review</option>

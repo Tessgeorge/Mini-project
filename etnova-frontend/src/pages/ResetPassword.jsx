@@ -4,6 +4,18 @@ import supabase from '../config/supabaseClient'
 import { apiRequest } from '../config/apiClient'
 
 const ACCENT_COLOR = '#00D2C4'
+const PASSWORD_RULE = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/
+const PASSWORD_HELPER_TEXT = 'Use at least 8 characters with uppercase, lowercase, and a number.'
+
+function buildPasswordChecks(password) {
+  const value = String(password || '')
+  return [
+    { key: 'length', label: 'At least 8 characters', met: value.length >= 8 },
+    { key: 'uppercase', label: 'One uppercase letter', met: /[A-Z]/.test(value) },
+    { key: 'lowercase', label: 'One lowercase letter', met: /[a-z]/.test(value) },
+    { key: 'number', label: 'One number', met: /\d/.test(value) },
+  ]
+}
 
 export default function ResetPassword() {
   const navigate = useNavigate()
@@ -16,6 +28,7 @@ export default function ResetPassword() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const passwordChecks = buildPasswordChecks(password)
 
   useEffect(() => {
     let mounted = true
@@ -63,8 +76,8 @@ export default function ResetPassword() {
     setError('')
     setNotice('')
 
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters long.')
+    if (!PASSWORD_RULE.test(password)) {
+      setError(PASSWORD_HELPER_TEXT)
       return
     }
 
@@ -148,6 +161,7 @@ export default function ResetPassword() {
                     onChange={(event) => setPassword(event.target.value)}
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 pr-12 outline-none transition focus:border-teal-400 focus:bg-white"
                     autoComplete="new-password"
+                    minLength={8}
                     required
                   />
                   <button
@@ -160,6 +174,20 @@ export default function ResetPassword() {
                       {showPassword ? 'visibility_off' : 'visibility'}
                     </span>
                   </button>
+                </div>
+                <div className="mt-3 space-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                  {passwordChecks.map((rule) => (
+                    <div key={rule.key} className="flex items-center gap-2 text-xs">
+                      <span
+                        className={`material-symbols-outlined text-sm ${rule.met ? 'text-emerald-600' : 'text-slate-400'}`}
+                      >
+                        {rule.met ? 'check_circle' : 'radio_button_unchecked'}
+                      </span>
+                      <span className={rule.met ? 'text-emerald-700 font-medium' : 'text-slate-500'}>
+                        {rule.label}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
 

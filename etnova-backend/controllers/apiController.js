@@ -1148,7 +1148,8 @@ const enrichProjectsWithCoordinatorFallback = async (projects) => {
 const enrichStudentProjects = async (projects) => {
   const withAllocations = await enrichProjectsWithAllocations(projects || []);
   const withIdeaSnapshots = await enrichProjectsWithIdeaSnapshots(withAllocations);
-  return enrichProjectsWithCoordinatorFallback(withIdeaSnapshots);
+  const withCoordinatorFallback = await enrichProjectsWithCoordinatorFallback(withIdeaSnapshots);
+  return withCoordinatorFallback;
 };
 
 const STUDENT_PROJECT_SELECT = `
@@ -1171,7 +1172,7 @@ const STUDENT_PROJECT_SELECT = `
       class_section
     )
   ),
-  documents(id, document_type, status, uploaded_at, file_name, file_url, version, feedback),
+  documents(id, document_type, status, coordinator_verified, coordinator_verified_at, uploaded_at, file_name, file_url, version, feedback),
   evaluations(id, evaluation_type, obtained_marks, max_marks, feedback, created_at)
 `;
 const createNotifications = async (rows) => {
@@ -1214,6 +1215,78 @@ const normalizeClassSectionInput = (value) => {
   const normalized = normalizeTextField(value, { maxLength: 120 });
   if (!normalized) return null;
   return String(normalized).replace(/\s+/g, ' ').trim().toUpperCase();
+};
+
+const normalizeClassScopeKey = (value) => normalizeLooseKey(normalizeClassSectionInput(value));
+
+const loadClassIdBySectionMap = async () => {
+  const { data: classes, error } = await supabase
+    .from('classes')
+    .select('id, class_section')
+    .order('class_section', { ascending: true });
+
+  if (error) throw error;
+
+  return new Map(
+    (classes || [])
+      .filter((row) => row?.id && row?.class_section)
+      .map((row) => [normalizeClassScopeKey(row.class_section), row.id])
+  );
+};
+
+const resolveStudentProjectScope = async (profile) => {
+  if (!profile) {
+    return { class_id: null, class_section: null };
+  }
+
+  const rawSection = profile.class_section || profile.batch || null;
+  const normalizedSection = normalizeClassSectionInput(rawSection);
+
+  if (profile.class_id && normalizedSection) {
+    return {
+      class_id: profile.class_id,
+      class_section: normalizedSection,
+    };
+  }
+
+  const resolvedAssignment = await resolveProfileClassAssignment({
+    classSection: rawSection,
+    semester: profile.semester,
+    department: profile.department,
+  });
+
+  return {
+    class_id: profile.class_id || resolvedAssignment.class_id || null,
+    class_section: normalizedSection || normalizeClassSectionInput(resolvedAssignment.class_section),
+  };
+};
+
+const resolveProjectJoinScope = (project, classIdBySection = new Map()) => {
+  const members = Array.isArray(project?.team_members) ? project.team_members : [];
+  const leader = members.find((member) => member?.role === 'leader');
+  const anchorProfile = leader?.profiles || members[0]?.profiles || null;
+  const anchorSection = anchorProfile?.class_section || anchorProfile?.batch || null;
+  const normalizedSection = normalizeClassSectionInput(anchorSection);
+  const fallbackClassId = normalizedSection ? classIdBySection.get(normalizeClassScopeKey(normalizedSection)) || null : null;
+
+  return {
+    class_id: project?.class_id || anchorProfile?.class_id || fallbackClassId || null,
+    class_section: normalizedSection,
+  };
+};
+
+const isSameProjectScope = (studentScope, projectScope) => {
+  if (!studentScope || !projectScope) return false;
+
+  if (studentScope.class_id && projectScope.class_id) {
+    return studentScope.class_id === projectScope.class_id;
+  }
+
+  if (studentScope.class_section && projectScope.class_section) {
+    return normalizeClassSectionInput(studentScope.class_section) === normalizeClassSectionInput(projectScope.class_section);
+  }
+
+  return false;
 };
 
 const resolveProfileClassAssignment = async ({ classSection, semester, department }) => {
@@ -1558,7 +1631,7 @@ export const getAdminDashboardData = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const [profileResult, projectsResult, mentorsResult, classesResult, reviewStagesResult] = await Promise.all([
+    const [profileResult, projectsResult, mentorsResult, classesResult, reviewStagesResult, lockResult] = await Promise.all([
       supabase
         .from('profiles')
         .select('full_name, email, department')
@@ -1579,6 +1652,10 @@ export const getAdminDashboardData = async (req, res) => {
       supabase
         .from('review_stages')
         .select('id, class_id, stage_name, coordinator_deadline, is_active, is_completed, is_locked'),
+      supabase
+        .from('class_submission_deadlines')
+        .select('class_id, deadline')
+        .eq('stage', 'team_formation'),
     ]);
 
     if (profileResult.error) {
@@ -1588,10 +1665,32 @@ export const getAdminDashboardData = async (req, res) => {
     if (mentorsResult.error) throw mentorsResult.error;
     if (classesResult.error) throw classesResult.error;
     if (reviewStagesResult.error) throw reviewStagesResult.error;
+    if (lockResult.error) throw lockResult.error;
+
+    const lockedClassIds = new Set(
+      (lockResult.data || [])
+        .filter((row) => row?.class_id && row?.deadline)
+        .map((row) => row.class_id)
+    );
+
+    const projects = (projectsResult.data || []).filter((project) => {
+      const members = Array.isArray(project?.team_members) ? project.team_members : [];
+      const teamSize = members.length;
+      if (teamSize < 3 || teamSize > 4) return false;
+
+      const classId = members
+        .map((member) => {
+          const profile = Array.isArray(member?.profiles) ? member.profiles[0] : member?.profiles;
+          return profile?.class_id || null;
+        })
+        .find(Boolean);
+
+      return Boolean(classId && lockedClassIds.has(classId));
+    });
 
     res.json({
       profile: profileResult.data || null,
-      projects: projectsResult.data || [],
+      projects,
       mentors: mentorsResult.data || [],
       classes: classesResult.data || [],
       review_stages: reviewStagesResult.data || [],
@@ -1709,9 +1808,9 @@ export const getAdminGuideAllocationData = async (req, res) => {
       max_team_capacity: getRecommendationMentorCapacity(mentor),
     }));
 
-    const projects = projectRows.map((project) => {
-      const allocation = allocationByProject.get(project.id) || null;
+    const normalizedProjects = projectRows.map((project) => {
       const members = Array.isArray(project.team_members) ? project.team_members : [];
+      const teamSize = members.length;
       const classProfile = members
         .map((member) => (Array.isArray(member?.profiles) ? member.profiles[0] : member?.profiles))
         .find(Boolean) || null;
@@ -1729,26 +1828,68 @@ export const getAdminGuideAllocationData = async (req, res) => {
         .find(Boolean) || '';
       const detectedIdea = ideaById.get(project.approved_idea_id) || ideaById.get(project.current_idea_id) || null;
       const resolvedClassId = matchedClass?.id || classProfile?.class_id || null;
+      const formationLocked = Boolean(resolvedClassId && lockedClassIds.has(resolvedClassId));
+      const eligibleForAllocation = formationLocked && teamSize >= 3 && teamSize <= 4;
 
       return {
-        id: project.id,
-        title: project.title || 'Untitled Project',
-        guide_id: project.guide_id || null,
-        domain: project.domain || '',
-        detected_domain: detectedIdea?.domain || project.domain || '',
-        detected_subdomain: detectedIdea?.subdomain || '',
-        detected_keywords: Array.isArray(detectedIdea?.keywords) ? detectedIdea.keywords : [],
-        confidence_score: typeof detectedIdea?.confidence_score === 'number' ? detectedIdea.confidence_score : 0,
-        technologies: Array.isArray(detectedIdea?.technologies) ? detectedIdea.technologies : [],
-        idea_title: detectedIdea?.title || '',
-        team_department: teamDepartment,
-        class_id: resolvedClassId,
-        class_name: matchedClass?.class_name || String(classProfile?.class_section || '').trim(),
+        rawProject: project,
+        team_size: teamSize,
+        matchedClass,
+        classProfile,
+        teamDepartment,
+        detectedIdea,
+        resolvedClassId,
+        formation_locked: formationLocked,
+        eligible_for_allocation: eligibleForAllocation,
+      };
+    });
+
+    const ineligibleProjectIds = normalizedProjects
+      .filter((project) => !project.eligible_for_allocation)
+      .map((project) => project.rawProject.id)
+      .filter(Boolean);
+
+    if (ineligibleProjectIds.length > 0) {
+      const [{ error: clearProjectGuideError }, { error: clearAllocationError }] = await Promise.all([
+        supabase
+          .from('projects')
+          .update({ guide_id: null })
+          .in('id', ineligibleProjectIds)
+          .not('guide_id', 'is', null),
+        supabase
+          .from('guide_allocations')
+          .delete()
+          .in('project_id', ineligibleProjectIds)
+          .eq('status', 'active'),
+      ]);
+
+      if (clearProjectGuideError) throw clearProjectGuideError;
+      if (clearAllocationError) throw clearAllocationError;
+    }
+
+    const projects = normalizedProjects.map((project) => {
+      const allocation = allocationByProject.get(project.rawProject.id) || null;
+
+      return {
+        id: project.rawProject.id,
+        title: project.rawProject.title || 'Untitled Project',
+        guide_id: project.eligible_for_allocation ? (project.rawProject.guide_id || null) : null,
+        domain: project.rawProject.domain || '',
+        detected_domain: project.detectedIdea?.domain || project.rawProject.domain || '',
+        detected_subdomain: project.detectedIdea?.subdomain || '',
+        detected_keywords: Array.isArray(project.detectedIdea?.keywords) ? project.detectedIdea.keywords : [],
+        confidence_score: typeof project.detectedIdea?.confidence_score === 'number' ? project.detectedIdea.confidence_score : 0,
+        technologies: Array.isArray(project.detectedIdea?.technologies) ? project.detectedIdea.technologies : [],
+        idea_title: project.detectedIdea?.title || '',
+        team_department: project.teamDepartment,
+        class_id: project.resolvedClassId,
+        class_name: project.matchedClass?.class_name || String(project.classProfile?.class_section || '').trim(),
         allocated_guide_id: allocation?.guide_id || null,
         allocated_guide_name: guideNameById.get(allocation?.guide_id) || '',
-        formation_locked: Boolean(resolvedClassId && lockedClassIds.has(resolvedClassId)),
+        team_size: project.team_size,
+        formation_locked: project.formation_locked,
       };
-    }).filter((project) => project.formation_locked);
+    }).filter((project) => project.formation_locked && project.team_size >= 3 && project.team_size <= 4);
 
     res.json({
       mentors,
@@ -2830,7 +2971,6 @@ export const getProjects = async (req, res) => {
       const combined = [...combinedAssignedProjects, ...(extraProjects || [])];
         return res.json(await enrichProjectsWithIdeaSnapshots(await enrichProjectsWithAllocations(combined)));
     } else if (req.userRole === 'admin') {
-      // Admins see all projects
       const { data, error } = await supabase
         .from('projects')
         .select(`
@@ -3081,6 +3221,45 @@ export const approveProject = async (req, res) => {
 
 export const joinProject = async (req, res) => {
   try {
+    const studentScope = await resolveStudentProjectScope(req.userProfile);
+    if (!studentScope.class_id && !studentScope.class_section) {
+      return res.status(400).json({ message: 'Please complete your class section before joining a team.' });
+    }
+
+    const classIdBySection = await loadClassIdBySectionMap();
+    const { data: projectScopeRow, error: projectScopeError } = await supabase
+      .from('projects')
+      .select(`
+        id,
+        class_id,
+        team_members(
+          role,
+          profiles!team_members_student_id_fkey(class_id, class_section, batch)
+        )
+      `)
+      .eq('id', req.params.id)
+      .maybeSingle();
+
+    if (projectScopeError) throw projectScopeError;
+    if (!projectScopeRow?.id) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    const projectScope = resolveProjectJoinScope(projectScopeRow, classIdBySection);
+    if (!isSameProjectScope(studentScope, projectScope)) {
+      return res.status(403).json({ message: 'You can only join teams from your own class section.' });
+    }
+
+    const { count: currentCount, error: countError } = await supabase
+      .from('team_members')
+      .select('*', { count: 'exact', head: true })
+      .eq('project_id', req.params.id);
+
+    if (countError) throw countError;
+    if (Number(currentCount || 0) >= 4) {
+      return res.status(400).json({ message: 'Team already has the maximum of 4 students.' });
+    }
+
     const { data, error } = await supabase
       .from('team_members')
       .insert({
@@ -3861,6 +4040,10 @@ export const getPendingProjects = async (req, res) => {
   try {
     const studentClassId = req.userProfile?.class_id || null;
     const studentClassSection = normalizeClassSectionInput(req.userProfile?.class_section || req.userProfile?.batch || null);
+    const studentScope = await resolveStudentProjectScope(req.userProfile);
+    if (!studentScope.class_id && !studentScope.class_section) {
+      return res.json([]);
+    }
 
     const { data, error } = await supabase
       .from('projects')
@@ -3874,7 +4057,17 @@ export const getPendingProjects = async (req, res) => {
         class_id,
         created_at,
         created_by,
+<<<<<<< HEAD
         team_members(student_id, role, profiles!team_members_student_id_fkey(class_id, class_section)),
+=======
+        class_id,
+        team_members(
+          id,
+          role,
+          student_id,
+          profiles!team_members_student_id_fkey(class_id, class_section, batch)
+        ),
+>>>>>>> main
         creator:profiles!projects_created_by_fkey(id, full_name)
       `)
       .not('status', 'in', '(approved,completed)')
@@ -3882,19 +4075,12 @@ export const getPendingProjects = async (req, res) => {
 
     if (error) throw error;
 
-    const filtered = (data || []).filter((project) => {
-      if (!studentClassId && !studentClassSection) return true;
+    const classIdBySection = await loadClassIdBySectionMap();
+    const scopedProjects = (data || []).filter((project) => (
+      isSameProjectScope(studentScope, resolveProjectJoinScope(project, classIdBySection))
+    ));
 
-      const members = Array.isArray(project.team_members) ? project.team_members : [];
-
-      if (studentClassId && project.class_id === studentClassId) return true;
-      if (studentClassId && members.some((member) => member?.profiles?.class_id === studentClassId)) return true;
-      if (studentClassSection && members.some((member) => normalizeClassSectionInput(member?.profiles?.class_section) === studentClassSection)) return true;
-
-      return false;
-    });
-
-    res.json(filtered);
+    res.json(scopedProjects);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -3904,6 +4090,36 @@ export const createJoinRequest = async (req, res) => {
   try {
     const { message } = req.body || {};
     const projectId = req.params.id;
+    const studentScope = await resolveStudentProjectScope(req.userProfile);
+
+    if (!studentScope.class_id && !studentScope.class_section) {
+      return res.status(400).json({ message: 'Please complete your class section before sending join requests.' });
+    }
+
+    const classIdBySection = await loadClassIdBySectionMap();
+    const { data: projectScopeRow, error: projectScopeError } = await supabase
+      .from('projects')
+      .select(`
+        id,
+        title,
+        class_id,
+        team_members(
+          role,
+          profiles!team_members_student_id_fkey(class_id, class_section, batch)
+        )
+      `)
+      .eq('id', projectId)
+      .maybeSingle();
+
+    if (projectScopeError) throw projectScopeError;
+    if (!projectScopeRow?.id) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    const projectScope = resolveProjectJoinScope(projectScopeRow, classIdBySection);
+    if (!isSameProjectScope(studentScope, projectScope)) {
+      return res.status(403).json({ message: 'You can only join teams from your own class section.' });
+    }
 
     const { data: membership } = await supabase
       .from('team_members')
@@ -3969,12 +4185,6 @@ export const createJoinRequest = async (req, res) => {
       data = inserted;
     }
 
-    const { data: projectRow } = await supabase
-      .from('projects')
-      .select('id, title')
-      .eq('id', projectId)
-      .single();
-
     const { data: leaders } = await supabase
       .from('team_members')
       .select('student_id')
@@ -3982,7 +4192,7 @@ export const createJoinRequest = async (req, res) => {
       .eq('role', 'leader');
 
     const requesterName = safeProfileName(req.userProfile, 'Student');
-    const projectTitle = projectRow?.title || 'your project';
+    const projectTitle = projectScopeRow?.title || 'your project';
     const leaderNotifications = (leaders || []).map((leader) => ({
       user_id: leader.student_id,
       type: 'join_request',
@@ -4074,6 +4284,16 @@ export const respondToJoinRequest = async (req, res) => {
     }
 
     if (action === 'approve') {
+      const { count: currentCount, error: countError } = await supabase
+        .from('team_members')
+        .select('*', { count: 'exact', head: true })
+        .eq('project_id', requestRow.project_id);
+
+      if (countError) throw countError;
+      if (Number(currentCount || 0) >= 4) {
+        return res.status(400).json({ message: 'This team already has 4 students.' });
+      }
+
       const { error: addError } = await supabase
         .from('team_members')
         .insert({

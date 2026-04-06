@@ -86,6 +86,7 @@ export default function Submissions() {
 
     const [project, setProject] = useState(null);
     const [documents, setDocuments] = useState([]);
+    const [ideaReviewEntries, setIdeaReviewEntries] = useState([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [uploading, setUploading] = useState(false);
@@ -130,13 +131,28 @@ export default function Submissions() {
             if (!proj?.id) { setLoading(false); return; }
             setProject(proj);
             let docs = proj.documents || [];
+            let ideas = [];
             try {
-                const latestDocs = await apiRequest(`/projects/${proj.id}/documents`, { skipCache: true });
+                const [latestDocs, latestIdeas] = await Promise.all([
+                    apiRequest(`/projects/${proj.id}/documents`, { skipCache: true }),
+                    apiRequest(`/projects/${proj.id}/ideas`, { skipCache: true }),
+                ]);
                 if (Array.isArray(latestDocs)) docs = latestDocs;
+                if (Array.isArray(latestIdeas)) ideas = latestIdeas;
             } catch {
-                // Fallback to bootstrap payload when direct documents endpoint fails.
+                // Fallback to bootstrap payload when direct endpoints fail.
             }
             setDocuments(docs.sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at)));
+            const realIdeaReviews = (ideas || [])
+                .map((idea) => ({
+                    ideaId: idea.id,
+                    ideaTitle: idea.title || "Idea Submission",
+                    versionNo: idea.version_no || 1,
+                    review: idea.latest_review || null,
+                }))
+                .filter((entry) => entry.review && (String(entry.review.comment || "").trim() || String(entry.review.action || "").trim()))
+                .sort((a, b) => new Date(b.review.created_at) - new Date(a.review.created_at));
+            setIdeaReviewEntries(realIdeaReviews);
         } catch (e) {
             setError(e.message || 'Failed to load submissions');
         } finally {
@@ -175,9 +191,6 @@ export default function Submissions() {
         .filter(Boolean)
         .sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at));
     const ideaApproved = Boolean(project?.approved_idea_id);
-    const approvalFeedbackEntries = (project?.evaluations || [])
-        .filter((entry) => entry.evaluation_type === 'approval_feedback')
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
     const handleDelete = async (doc) => {
         if (!window.confirm(`Delete "${doc.file_name}"? This cannot be undone.`)) return;
@@ -544,29 +557,33 @@ export default function Submissions() {
                                 )}
                             </SectionHeader>
                             <div className="p-4">
-                                {latestByType.length === 0 && approvalFeedbackEntries.length === 0 ? (
+                                {latestByType.length === 0 && ideaReviewEntries.length === 0 ? (
                                     <p className="text-xs text-slate-400 text-center py-4">Submit documents to receive mentor feedback.</p>
                                 ) : (
                                     <div className="space-y-2.5 max-h-72 overflow-y-auto pr-0.5">
-                                        {approvalFeedbackEntries.map(entry => {
-                                            const ideaStatus = String(project?.status || 'submitted').toLowerCase();
-                                            const feedbackText = String(entry.feedback || '').trim();
+                                        {ideaReviewEntries.map(entry => {
+                                            const ideaStatus = String(entry.review?.action || project?.status || 'submitted').toLowerCase();
+                                            const feedbackText = String(entry.review?.comment || '').trim();
                                             return (
-                                                <div key={`approval-${entry.id}`}
+                                                <div key={`idea-review-${entry.review.id}`}
                                                     className="rounded-xl border border-white/80 bg-white/50 p-3.5 space-y-2">
                                                     <div className="flex items-center justify-between gap-2">
-                                                        <p className="text-xs font-black text-slate-800">Idea Submission</p>
+                                                        <p className="text-xs font-black text-slate-800">
+                                                            {entry.versionNo > 1 ? `Idea Submission (v${entry.versionNo})` : 'Idea Submission'}
+                                                        </p>
                                                         <StatusBadge status={ideaStatus} />
                                                     </div>
                                                     <p className="text-xs text-slate-500 leading-relaxed">
                                                         {feedbackText || (ideaStatus === 'approved'
-                                                            ? 'Idea accepted by guide.'
+                                                            ? 'Idea accepted by mentor.'
                                                             : ideaStatus === 'rejected'
-                                                                ? 'Idea rejected by guide.'
-                                                                : 'Guide feedback available.')}
+                                                                ? 'Idea rejected by mentor.'
+                                                                : ideaStatus === 'revision_required'
+                                                                    ? 'Mentor requested revision on the submitted idea.'
+                                                                    : 'Mentor review recorded.')}
                                                     </p>
                                                     <p className="text-[10px] text-slate-300">
-                                                        {entry.created_at ? new Date(entry.created_at).toLocaleString() : '-'}
+                                                        {entry.review?.created_at ? new Date(entry.review.created_at).toLocaleString() : '-'}
                                                     </p>
                                                 </div>
                                             );

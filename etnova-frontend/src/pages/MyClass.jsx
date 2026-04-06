@@ -291,7 +291,11 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
       ? classData.projects.reduce((sum, project) => sum + Number(project?.teamSize || 0), 0)
       : 0,
     pendingEvaluations = 0,
-    teamsWithLessThanTwoMembers = 0,
+    teamsWithLessThanThreeMembers = Number(
+      classData?.teamsWithLessThanThreeMembers
+      ?? classData?.teamsWithLessThanTwoMembers
+      ?? 0
+    ),
     studentsWithoutTeamCount = 0,
     projects = [],
     reviewStages = [],
@@ -535,7 +539,7 @@ function TabOverview({ classData, coordinators = [], loading, onSaveStudentDeadl
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
         {[
           { label: "Total Teams", value: totalProjects, icon: "groups", color: "#00D2C4" },
-          { label: "Teams Below 2", value: teamsWithLessThanTwoMembers, icon: "group_remove", color: "#f59e0b" },
+          { label: "Teams Below 3", value: teamsWithLessThanThreeMembers, icon: "group_remove", color: "#f59e0b" },
           { label: "Total Students", value: totalStudents, icon: "school", color: "#10b981" },
           { label: "Students Not In Teams", value: studentsWithoutTeamCount, icon: "person_off", color: "#6366f1" },
         ].map(k => (
@@ -1512,7 +1516,7 @@ function TabTeams({ classId }) {
           title: team.title,
           status: team.status,
           batch: team.batch == null ? null : Number(team.batch),
-          guide_name: team.guide_name || "—",
+          guide_name: team.guide_name || "�",
           members: [],
           team_size: Number(team.team_size || 0),
           current_stage: String(team.latest_stage || "—").replace(/_/g, " "),
@@ -1560,6 +1564,7 @@ function TabTeams({ classId }) {
         .eq("class_id", classId).eq("is_active", true)
         .order("stage_order", { ascending: false }).limit(1);
       const currentStage = stages?.[0]?.stage_name || null;
+      setLocked(formationLocked);
 
       const docMap = {};
       (docs || []).forEach(d => { if (!docMap[d.project_id]) docMap[d.project_id] = d; });
@@ -1568,7 +1573,7 @@ function TabTeams({ classId }) {
         const ld = docMap[p.id];
         return {
           id: p.id, title: p.title, status: p.status, batch: p.batch ?? null,
-          guide_name: guideMap[p.guide_id] || "—",
+          guide_name: guideMap[p.guide_id] || "�",
           members: [],
           team_size: (p.team_members || []).length,
           current_stage: currentStage || (ld?.document_type?.replace(/_/g, " ") || "—"),
@@ -2493,3 +2498,4 @@ export default function MyClass({ classData, loading, onSaveStudentDeadline, onS
     </div>
   );
 }
+

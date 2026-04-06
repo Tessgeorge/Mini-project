@@ -85,6 +85,13 @@ function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
+function formatSpecialization(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || "").trim()).filter(Boolean).join(", ");
+  }
+  return String(value || "").trim();
+}
+
 export default function AdminMentorManagement() {
   useAdminAuth();
   const navigate = useNavigate();
@@ -209,6 +216,7 @@ export default function AdminMentorManagement() {
       id: mentor.id,
       name: mentor.full_name || "Unnamed Mentor",
       email: mentor.email || "-",
+      specialization: formatSpecialization(mentor.specialization),
       designation: mentor.designation || "",
       classId: mentor.class_id || null,
       className: classNameById.get(mentor.class_id) || "",
@@ -1039,7 +1047,9 @@ export default function AdminMentorManagement() {
               <div className="text-left">
                 <h2 className="text-base font-semibold text-slate-800">Mentor Workload Panel</h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  {selectedMentor ? `Selected: ${selectedMentor.name}` : "Select a mentor to view workload"}
+                  {selectedMentor
+                    ? `Selected: ${selectedMentor.name}${selectedMentor.specialization ? ` - ${selectedMentor.specialization}` : ""}`
+                    : "Select a mentor to view workload"}
                 </p>
               </div>
               <span className="text-sm font-semibold text-teal-700">{workloadOpen ? "Hide" : "Show"}</span>

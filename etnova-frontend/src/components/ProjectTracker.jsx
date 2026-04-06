@@ -1,71 +1,22 @@
-export default function ProjectTracker({ project, documents }) {
-    const activeIdea = project?.approved_idea || project?.current_idea || project?.active_idea || null;
-    const normalizedIdeaStatus = String(activeIdea?.status || "").toLowerCase();
-    const ideaSubmitted = Boolean(
-        project?.approved_idea_id
-        || project?.approved_idea?.submitted_at
-        || project?.current_idea?.submitted_at
-        || ["submitted", "revision_required", "approved", "rejected"].includes(normalizedIdeaStatus)
-    );
-    const ideaSubmittedAt =
-        project?.approved_idea?.submitted_at
-        || project?.current_idea?.submitted_at
-        || activeIdea?.submitted_at
-        || project?.approved_idea?.updated_at
-        || project?.current_idea?.updated_at
-        || null;
+import { getWorkflowProgress } from "../constants/workflowConfig";
 
-    // Calculate project milestones and their status
-    const milestones = [
-        {
-            id: 1,
-            label: 'Idea Submission',
-            shortLabel: 'Idea',
-            icon: 'lightbulb',
-            completed: ideaSubmitted,
-            date: ideaSubmittedAt,
-        },
-        {
-            id: 2,
-            label: 'Abstract Submission',
-            shortLabel: 'Abstract',
-            icon: 'description',
-            completed: documents?.some(d => d.document_type === 'abstract'),
-            date: documents?.find(d => d.document_type === 'abstract')?.uploaded_at,
-        },
-        {
-            id: 3,
-            label: 'Zeroth Review',
-            shortLabel: '0th Review',
-            icon: 'preview',
-            completed: documents?.some(d => d.document_type === 'abstract' && d.status === 'approved'),
-            date: documents?.find(d => d.document_type === 'abstract' && d.status === 'approved')?.uploaded_at,
-        },
-        {
-            id: 4,
-            label: 'First Review',
-            shortLabel: '1st Review',
-            icon: 'rate_review',
-            completed: documents?.some(d => d.document_type === 'progress_update'),
-            date: documents?.find(d => d.document_type === 'progress_update')?.uploaded_at,
-        },
-        {
-            id: 5,
-            label: 'Second Review',
-            shortLabel: '2nd Review',
-            icon: 'grading',
-            completed: documents?.some(d => d.document_type === 'report'),
-            date: documents?.find(d => d.document_type === 'report')?.uploaded_at,
-        },
-        {
-            id: 6,
-            label: 'Final Review',
-            shortLabel: 'Final',
-            icon: 'task_alt',
-            completed: documents?.some(d => d.document_type === 'presentation'),
-            date: documents?.find(d => d.document_type === 'presentation')?.uploaded_at,
-        },
-    ];
+const MILESTONE_UI = {
+    idea: { id: 1, shortLabel: "Idea", icon: "lightbulb" },
+    abstract: { id: 2, shortLabel: "Abstract", icon: "description" },
+    zeroth_review: { id: 3, shortLabel: "Zeroth Review", icon: "slideshow" },
+    first_review: { id: 4, shortLabel: "1st Review", icon: "slideshow" },
+    second_review: { id: 5, shortLabel: "2nd Review", icon: "grading" },
+    final_review: { id: 6, shortLabel: "Final Review", icon: "task_alt" },
+};
+
+export default function ProjectTracker({ project, documents, deadlines = [] }) {
+    const workflowProgress = getWorkflowProgress({ project, documents, deadlines });
+    const milestones = workflowProgress.milestones.map((milestone, index) => ({
+        ...milestone,
+        id: MILESTONE_UI[milestone.key]?.id || (index + 1),
+        shortLabel: MILESTONE_UI[milestone.key]?.shortLabel || milestone.label,
+        icon: MILESTONE_UI[milestone.key]?.icon || "task",
+    }));
 
     // Find current milestone (first incomplete one)
     const currentMilestoneIndex = milestones.findIndex(m => !m.completed);
@@ -167,14 +118,14 @@ export default function ProjectTracker({ project, documents }) {
                         </div>
                     </div>
                     <span className="text-sm font-black text-slate-900">
-                        {Math.round((milestones.filter(m => m.completed).length / milestones.length) * 100)}%
+                        {workflowProgress.progressPercent}%
                     </span>
                 </div>
                 <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                     <div
                         className="h-full transition-all duration-500 rounded-full"
                         style={{
-                            width: `${(currentIndex / milestones.length) * 100}%`,
+                            width: `${workflowProgress.progressPercent}%`,
                             backgroundColor: '#00D2C4',
                         }}
                     />

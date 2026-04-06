@@ -102,44 +102,56 @@ function buildDiaryPdfBlob({ projectTitle, projectMetaLines = [], entries }) {
   const pageHeight = 842;
   const marginLeft = 54;
   const marginRight = 54;
-  const topY = 746;
+  const topY = 758;
   const bottomY = 74;
   const accentRgb = "0.00 0.77 0.71";
+  const textRgb = "0.08 0.12 0.22";
+  const mutedRgb = "0.40 0.47 0.58";
+  const softBorderRgb = "0.86 0.90 0.95";
+  const cardInset = 20;
 
-  const headerLines = [
-    { text: "PROJECT DIARY", size: 9.5, gap: 16, bold: true, tracking: true },
-    { text: String(projectTitle || "Untitled Project"), size: 20, gap: 26, bold: true },
+  const firstPageHeaderLines = [
+    { text: "PROJECT DIARY", size: 9.5, gap: 22, bold: true, tracking: true },
+    { text: String(projectTitle || "Untitled Project"), size: 19, gap: 24, bold: true },
     ...projectMetaLines
       .filter(Boolean)
-      .map((line) => ({ text: String(line), size: 9.75, gap: 15, bold: false, muted: true })),
-    { text: "Official record of submissions, reviews, meetings, and guide observations", size: 10.5, gap: 18, bold: false },
-    { text: `Generated on ${formatDateTime(new Date().toISOString())}`, size: 9.5, gap: 24, bold: false, muted: true },
+      .slice(0, 4)
+      .map((line) => ({ text: String(line), size: 9.75, gap: 14, bold: false, muted: true })),
+    { text: "Official record of submissions, reviews, meetings, and guide observations", size: 10.25, gap: 16, bold: false },
+    { text: `Generated on ${formatDateTime(new Date().toISOString())}`, size: 9.25, gap: 22, bold: false, muted: true },
   ];
+
+  const continuationHeaderLines = [
+    { text: String(projectTitle || "Untitled Project"), size: 13.5, gap: 18, bold: true },
+    { text: "Project Diary Continuation", size: 8.75, gap: 14, bold: false, muted: true, tracking: true },
+  ];
+
+  const headerHeight = (lines) => lines.reduce((sum, line) => sum + line.gap, 0) + 30;
 
   const entryBlocks = (entries || []).map((entry) => {
     const entryType = pdfSafeLabel(entry?.type, "Entry");
     const entryStatus = entry?.status ? pdfSafeLabel(entry.status, "") : "";
+    const bodyLines = wrapPdfText(entry.body || "", 76).map((line) => ({ text: line, size: 10.25, gap: 13 }));
     const blockLines = [
-      { text: entryType, size: 8.5, gap: 12, bold: true, tracking: true, muted: true },
-      { text: String(entry.title || "").trim(), size: 13, gap: 16, bold: true },
-      { text: entryStatus ? `${formatDateTime(entry.time)}  |  ${entryStatus}` : formatDateTime(entry.time), size: 9.5, gap: 14, muted: true },
-      ...wrapPdfText(entry.body || "", 82).map((line) => ({ text: line, size: 10.5, gap: 13.5 })),
-      { text: "", size: 8, gap: 12 },
+      { text: entryType, size: 8.25, gap: 11, bold: true, tracking: true, muted: true },
+      { text: String(entry.title || "").trim(), size: 12.5, gap: 15, bold: true },
+      { text: entryStatus ? `${formatDateTime(entry.time)}  |  ${entryStatus}` : formatDateTime(entry.time), size: 9.25, gap: 13, muted: true },
+      ...bodyLines,
     ];
-    const height = blockLines.reduce((sum, line) => sum + (line.gap || 14), 0) + 18;
+    const height = blockLines.reduce((sum, line) => sum + (line.gap || 14), 0) + 38;
     return { lines: blockLines, height };
   });
 
   const pages = [];
   let currentBlocks = [];
-  let usedHeight = headerLines.reduce((sum, line) => sum + line.gap, 0) + 10;
   const usableHeight = topY - bottomY;
+  let usedHeight = headerHeight(firstPageHeaderLines);
 
   entryBlocks.forEach((block) => {
     if (usedHeight + block.height > usableHeight && currentBlocks.length > 0) {
       pages.push(currentBlocks);
       currentBlocks = [];
-      usedHeight = headerLines.reduce((sum, line) => sum + line.gap, 0) + 10;
+      usedHeight = headerHeight(continuationHeaderLines);
     }
     currentBlocks.push(block);
     usedHeight += block.height;
@@ -171,50 +183,49 @@ function buildDiaryPdfBlob({ projectTitle, projectMetaLines = [], entries }) {
     const commands = [];
     const leftX = marginLeft;
     const rightX = pageWidth - marginRight;
+    const contentWidth = rightX - leftX;
+    const headerLines = pageIndex === 0 ? firstPageHeaderLines : continuationHeaderLines;
     let y = topY;
 
-    commands.push("0.8 w");
-    commands.push(`${accentRgb} RG`);
-    commands.push(`${leftX} ${pageHeight - 50} m ${rightX} ${pageHeight - 50} l S`);
     commands.push("0.45 w");
-    commands.push("0.82 0.86 0.91 RG");
+    commands.push(`${softBorderRgb} RG`);
     commands.push(`${leftX} ${bottomY - 8} m ${rightX} ${bottomY - 8} l S`);
 
+    const headerBoxHeight = headerHeight(headerLines) - (pageIndex === 0 ? 8 : 10);
+    const headerBoxBottom = y - headerBoxHeight + (pageIndex === 0 ? 6 : 0);
+
+    y -= pageIndex === 0 ? 14 : 10;
     headerLines.forEach((line) => {
       const text = escapePdfText(line.text || "");
-      if (line.muted) commands.push("0.40 0.47 0.58 rg");
-      else commands.push("0.08 0.12 0.22 rg");
+      if (line.muted) commands.push(`${mutedRgb} rg`);
+      else if (line.tracking) commands.push(`${accentRgb} rg`);
+      else commands.push(`${textRgb} rg`);
       commands.push(`BT /${line.bold ? "F2" : "F1"} ${line.size} Tf ${leftX} ${y} Td (${text}) Tj ET`);
       y -= line.gap;
     });
 
-    commands.push(`${accentRgb} rg`);
-    commands.push(`${leftX} ${y + 10} ${rightX - leftX} 1.2 re f`);
-    y -= 18;
+    y -= pageIndex === 0 ? 26 : 20;
 
     pageBlocks.forEach((block) => {
-      commands.push("0.93 0.96 0.99 rg");
-      commands.push(`${leftX} ${y - block.height + 12} ${rightX - leftX} ${block.height - 6} re f`);
-      commands.push("0.86 0.90 0.95 RG");
-      commands.push("0.5 w");
-      commands.push(`${leftX} ${y - block.height + 12} ${rightX - leftX} ${block.height - 6} re S`);
-      commands.push(`${accentRgb} rg`);
-      commands.push(`${leftX} ${y - 4} 72 2 re f`);
+      const cardTop = y;
+      const cardBottom = cardTop - block.height + 8;
+      const contentX = leftX + cardInset;
+      let lineY = cardTop - 20;
 
       block.lines.forEach((line) => {
         const text = escapePdfText(line.text || "");
-        if (line.muted) commands.push("0.40 0.47 0.58 rg");
+        if (line.muted) commands.push(`${mutedRgb} rg`);
         else if (line.tracking) commands.push(`${accentRgb} rg`);
-        else commands.push("0.08 0.12 0.22 rg");
-        commands.push(`BT /${line.bold ? "F2" : "F1"} ${line.size || 11} Tf ${leftX} ${y} Td (${text}) Tj ET`);
-        y -= line.gap || 14;
+        else commands.push(`${textRgb} rg`);
+        commands.push(`BT /${line.bold ? "F2" : "F1"} ${line.size || 11} Tf ${contentX} ${lineY} Td (${text}) Tj ET`);
+        lineY -= line.gap || 14;
       });
-      y -= 10;
+      y = cardBottom - 18;
     });
 
     const footerLeft = escapePdfText(String(projectTitle || "Project Diary"));
     const footerRight = escapePdfText(`Page ${pageIndex + 1} of ${totalPages}`);
-    commands.push("0.40 0.47 0.58 rg");
+    commands.push(`${mutedRgb} rg`);
     commands.push(`BT /F1 8.5 Tf ${leftX} ${bottomY - 24} Td (${footerLeft}) Tj ET`);
     commands.push(`BT /F1 8.5 Tf ${rightX - 54} ${bottomY - 24} Td (${footerRight}) Tj ET`);
 
