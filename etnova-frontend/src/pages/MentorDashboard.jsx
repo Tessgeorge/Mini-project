@@ -4,6 +4,7 @@ import { supabase } from "../config/supabaseClient";
 import ProfileMenu from "../components/ProfileMenu";
 import NotificationPanel from "../components/NotificationPanel";
 import Modal from "../components/Modal";
+import RoleProgressWormChart from "../components/RoleProgressWormChart";
 import { getStatusMeta } from "../constants/statusConfig";
 import { EVALUATION_STAGE_OPTIONS, getWorkflowStageMeta } from "../constants/workflowConfig";
 import { ADMIN_DATA_SYNC_KEY, emitAdminDataUpdated } from "../utils/adminLiveSync";
@@ -536,47 +537,6 @@ function sortReviewStages(rows) {
   });
 }
 
-function WeeklyChart({ evaluations }) {
-  const days = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const key = d.toISOString().split("T")[0];
-    const label = d.toLocaleDateString("en-IN", { weekday: "short" });
-    const count = evaluations.filter((e) => e.created_at?.startsWith(key)).length;
-    days.push({ label, key, count });
-  }
-  const max = Math.max(...days.map((d) => d.count), 1);
-  return (
-    <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
-      <div className="flex justify-between items-start mb-6">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Weekly Evaluation Activity</p>
-          <p className="text-2xl font-extrabold text-gray-900 mt-1">{evaluations.length} <span className="text-sm font-medium text-gray-400">total evaluations</span></p>
-        </div>
-        <span className="text-xs bg-teal-50 text-teal-600 font-semibold px-3 py-1.5 rounded-full border border-teal-200">Last 7 days</span>
-      </div>
-      <div className="flex items-end justify-between gap-2 h-28">
-        {days.map((d) => {
-          const pct = max === 0 ? 0 : (d.count / max) * 100;
-          return (
-            <div key={d.key} className="flex flex-col items-center gap-1.5 flex-1">
-              <span className="text-xs font-bold text-gray-600">{d.count > 0 ? d.count : ""}</span>
-              <div className="w-full rounded-t-lg bg-gray-100 relative overflow-hidden" style={{ height: "80px" }}>
-                <div
-                  className="absolute bottom-0 w-full rounded-t-lg bg-gradient-to-t from-teal-500 to-teal-300 transition-all duration-700"
-                  style={{ height: `${Math.max(pct, d.count > 0 ? 10 : 0)}%` }}
-                />
-              </div>
-              <span className="text-xs text-gray-400 font-medium">{d.label}</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function ProgressRing({ pct, size = 56, stroke = 5 }) {
   const r = (size - stroke * 2) / 2;
   const circ = 2 * Math.PI * r;
@@ -1031,6 +991,25 @@ function OverviewTab({
   if (loading) return <Spinner />;
 
   const pendingTeams = projects.filter((proj) => !evaluations.some((ev) => ev.project_id === proj.id));
+  const guideCompletedTasks = projects.filter((proj) => evaluations.some((ev) => ev.project_id === proj.id)).length;
+  const reviewerCompletedTasks = reviewProjects.filter((proj) => evaluations.some((ev) => ev.project_id === proj.id)).length;
+  const roleProgressData = {
+    guide: {
+      assigned: projects.length > 0,
+      tasksCompleted: guideCompletedTasks,
+      totalTasks: projects.length,
+    },
+    reviewer: {
+      assigned: hasReviewAccess,
+      tasksCompleted: reviewerCompletedTasks,
+      totalTasks: reviewProjects.length,
+    },
+    coordinator: {
+      assigned: isCoordinatorWithClass,
+      tasksCompleted: Number(myClassData?.evaluatedProjects || 0),
+      totalTasks: Number(myClassData?.totalProjects || 0),
+    },
+  };
   const handleSubmitReview = async (data) => { await onSubmitReview(data); setReviewProject(null); };
   const reviewerStageLabels = allowedReviewStages.map(formatReviewStageLabel);
   const reviewerSummary = showEvaluationPanel
@@ -1167,7 +1146,9 @@ function OverviewTab({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        <div className="xl:col-span-2"><WeeklyChart projects={projects} evaluations={evaluations} /></div>
+        <div className="xl:col-span-2">
+          <RoleProgressWormChart roleData={roleProgressData} />
+        </div>
         <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
           <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4">Recent Activity</p>
           {recentActivity.length === 0 ? <p className="text-sm text-gray-400">No activity yet.</p> : (
@@ -1804,18 +1785,20 @@ export default function MentorDashboard() {
 
   const loadCoordinatorClassData = useCallback(async (classId) => {
     return withInflight(coordinatorClassDataInflight, classId, async () => {
-      const [{ data: classRow }, { data: classProjects }, { data: reviewStageRows, error: reviewStageError }, { data: classStudentProfiles }] = await Promise.all([
+      const [{ data: classRow }, { data: classProjects }, { data: reviewStageRows, error: reviewStageError }, { data: classStudentProfiles }, teamsPayload] = await Promise.all([
         supabase.from("classes").select("id, class_section").eq("id", classId).single(),
         supabase.from("projects").select("id, title, guide_id, status, approved_idea_id").eq("class_id", classId),
         supabase.from("review_stages")
           .select("id, stage_name, deadline, coordinator_deadline, stage_order, is_active, is_completed, is_locked, student_deadline_set_by_coordinator")
           .eq("class_id", classId).order("stage_order", { ascending: true }),
         supabase.from("profiles").select("id").eq("role", "student").eq("class_id", classId),
+        apiRequest("/coordinator/teams", { skipCache: true }).catch(() => null),
       ]);
 
       const projectsInClass = classProjects || [];
       const projectIds = projectsInClass.map(p => p.id);
       const guideIds = Array.from(new Set(projectsInClass.map(p => p.guide_id).filter(Boolean)));
+      const formationLocked = Boolean(teamsPayload?.formation_locked);
 
       const [membersRes, evalRes, guidesRes, docsRes] = await Promise.all([
         projectIds.length ? supabase.from("team_members").select("id, project_id, student_id").in("project_id", projectIds) : Promise.resolve({ data: [] }),
@@ -1869,7 +1852,7 @@ export default function MentorDashboard() {
       const finalResultRows = projectIds.length ? await fetchCoordinatorResultsBreakdown() : [];
 
       const stageProgress = {
-        idea: 0, abstract: 0, zeroth_review: 0,
+        idea: 0, abstract: 0, team_formation: formationLocked ? projectsInClass.length : 0, zeroth_review: 0,
         first_review: 0, second_review: 0, final_review: 0,
       };
 
@@ -1899,7 +1882,7 @@ export default function MentorDashboard() {
           return acc;
         }, {});
 
-        REVIEW_STAGE_VALUE_ORDER.forEach((reviewStage) => {
+        REVIEW_STAGE_VALUE_ORDER.filter((reviewStage) => reviewStage !== "final_review").forEach((reviewStage) => {
           const markedStudents = marksByStage[reviewStage];
           if (studentIds.length > 0 && markedStudents && markedStudents.size === studentIds.length) {
             stageProgress[reviewStage] += 1;
@@ -1907,6 +1890,15 @@ export default function MentorDashboard() {
         });
 
         const isFullyEvaluated = studentIds.length > 0 && studentIds.every((studentId) => hasFinalMarkUpdated(finalResultByStudentId[studentId]));
+        const finalReviewMarked = studentIds.length > 0 && studentIds.every((studentId) => {
+          if (hasFinalMarkUpdated(finalResultByStudentId[studentId])) return true;
+          const markedStudents = marksByStage.final_review;
+          return Boolean(markedStudents?.has(studentId));
+        });
+
+        if (finalReviewMarked) {
+          stageProgress.final_review += 1;
+        }
 
         return {
           ...project,
@@ -1928,6 +1920,7 @@ export default function MentorDashboard() {
         pendingEvaluations: projectRows.length - evaluatedCount,
         teamsWithLessThanThreeMembers,
         studentsWithoutTeamCount,
+        formationLocked,
         stageProgress, projects: projectRows,
         reviewStages: sortReviewStages(reviewStageRows || []),
         deadlineLoadError: reviewStageError
