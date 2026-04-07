@@ -342,7 +342,6 @@ export default function Submissions() {
                                 </div>
                                 <div>
                                     <h2 className="font-black text-slate-900 text-sm leading-none">Upload New Submission</h2>
-                                    <p className="text-[11px] text-slate-400 mt-0.5">Select document type and upload your file</p>
                                 </div>
                             </div>
 

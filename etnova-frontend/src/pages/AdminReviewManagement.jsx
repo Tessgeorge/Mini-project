@@ -357,7 +357,6 @@ export default function AdminReviewManagement() {
         deadline: null,
         status: toDisplayStatus(STATUS.INACTIVE),
         statusValue: STATUS.INACTIVE,
-        submissions: 0,
       }));
       setStages(fallbackStages);
       return;
@@ -387,7 +386,6 @@ export default function AdminReviewManagement() {
         status: toDisplayStatus(statusValue),
         statusValue,
         isLocked: Boolean(row.is_locked),
-        submissions: coordinatorEvaluationCounts[row.id] || 0,
       };
     });
 
